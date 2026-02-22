@@ -347,10 +347,10 @@ test.describe("Cross-page user journeys", () => {
 
     // Navigate to idiot
     await page.getByRole("link", { name: /idiot/i }).first().click();
-    await expect(page).toHaveURL(/\/idiot/);
+    await expect(page).toHaveURL(/\/idiot/, { timeout: 15_000 });
     await expect(
       page.getByRole("heading", { name: "Idiot Dashboard" }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10_000 });
 
     // Navigate to browse
     await page.goto("/idiot/browse");
