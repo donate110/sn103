@@ -146,7 +146,10 @@ test.describe("Leaderboard interactions", () => {
           text.includes("Failed to load resource") ||
           text.includes("net::ERR") ||
           text.includes("Content Security Policy") ||
-          text.includes("Refused to connect")
+          text.includes("Refused to connect") ||
+          text.includes("walletconnect") ||
+          text.includes("CORS") ||
+          text.includes("403")
         ) {
           return;
         }

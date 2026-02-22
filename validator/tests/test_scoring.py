@@ -244,31 +244,184 @@ class TestMinerScorer:
 
 
 class TestRecordAttestation:
-    """Tests for MinerMetrics.record_attestation (web attestation scoring)."""
+    """Tests for MinerMetrics.record_attestation (separate attestation tracking)."""
 
-    def test_valid_attestation_increments_correct_and_proof(self) -> None:
+    def test_valid_attestation_increments_attestation_counters(self) -> None:
         m = MinerMetrics(uid=0, hotkey="hk0")
         m.record_attestation(latency=2.5, proof_valid=True)
-        assert m.queries_total == 1
-        assert m.queries_correct == 1
-        assert m.proofs_submitted == 1
-        assert m.latencies == [2.5]
+        assert m.attestations_total == 1
+        assert m.attestations_valid == 1
+        assert m.attestation_latencies == [2.5]
+        # Sports counters untouched
+        assert m.queries_total == 0
+        assert m.queries_correct == 0
+        assert m.latencies == []
 
-    def test_invalid_attestation_does_not_increment_correct(self) -> None:
+    def test_invalid_attestation_does_not_increment_valid(self) -> None:
         m = MinerMetrics(uid=0, hotkey="hk0")
         m.record_attestation(latency=5.0, proof_valid=False)
-        assert m.queries_total == 1
-        assert m.queries_correct == 0
-        assert m.proofs_submitted == 0
-        assert m.latencies == [5.0]
+        assert m.attestations_total == 1
+        assert m.attestations_valid == 0
+        assert m.attestation_latencies == [5.0]
 
-    def test_attestation_and_sports_accumulate(self) -> None:
-        """Attestation and sports queries both count toward the same metrics."""
+    def test_attestation_and_sports_are_independent(self) -> None:
+        """Attestation and sports use separate counters."""
         m = MinerMetrics(uid=0, hotkey="hk0")
         m.record_query(correct=True, latency=1.0, proof_submitted=False)
-        m.record_attestation(latency=3.0, proof_valid=True)
-        assert m.queries_total == 2
-        assert m.queries_correct == 2
-        assert m.proofs_submitted == 1  # Only attestation submitted a proof
-        assert m.accuracy_score() == pytest.approx(1.0)
-        assert m.coverage_score() == pytest.approx(0.5)  # 1 proof / 2 queries
+        m.record_attestation(latency=30.0, proof_valid=True)
+        # Sports
+        assert m.queries_total == 1
+        assert m.queries_correct == 1
+        assert m.latencies == [1.0]
+        # Attestation
+        assert m.attestations_total == 1
+        assert m.attestations_valid == 1
+        assert m.attestation_latencies == [30.0]
+
+    def test_attestation_validity_score(self) -> None:
+        m = MinerMetrics(uid=0, hotkey="hk0")
+        m.record_attestation(latency=10.0, proof_valid=True)
+        m.record_attestation(latency=20.0, proof_valid=True)
+        m.record_attestation(latency=30.0, proof_valid=False)
+        assert m.attestation_validity_score() == pytest.approx(2 / 3)
+
+    def test_attestation_validity_score_empty(self) -> None:
+        m = MinerMetrics(uid=0, hotkey="hk0")
+        assert m.attestation_validity_score() == 0.0
+
+
+class TestSplitScoring:
+    """Tests for the split sports/attestation scoring system."""
+
+    def test_pure_sports_scoring_no_attestation(self) -> None:
+        """Without attestation data, scoring is pure sports (no blend)."""
+        scorer = MinerScorer()
+        m = scorer.get_or_create(0, "h0")
+        m.record_query(correct=True, latency=0.1, proof_submitted=True)
+        m.record_health_check(responded=True)
+        weights = scorer.compute_weights(is_active_epoch=True)
+        assert weights[0] == pytest.approx(1.0)
+
+    def test_attestation_blend_applied(self) -> None:
+        """When attestation data exists, final score blends both."""
+        scorer = MinerScorer()
+        # Miner 0: great at sports, no attestation
+        m0 = scorer.get_or_create(0, "h0")
+        for _ in range(10):
+            m0.record_query(correct=True, latency=0.1, proof_submitted=True)
+        m0.record_health_check(responded=True)
+
+        # Miner 1: great at attestation, no sports
+        m1 = scorer.get_or_create(1, "h1")
+        for _ in range(5):
+            m1.record_attestation(latency=30.0, proof_valid=True)
+        m1.record_health_check(responded=True)
+
+        weights = scorer.compute_weights(is_active_epoch=True)
+        assert len(weights) == 2
+        assert sum(weights.values()) == pytest.approx(1.0)
+        # Miner 0 should still score higher (sports is 80% of blend)
+        assert weights[0] > weights[1]
+        # But miner 1 should get meaningful weight from attestation
+        assert weights[1] > 0.0
+
+    def test_custom_attestation_blend(self) -> None:
+        """Constructor allows custom attestation blend weight."""
+        scorer = MinerScorer(attestation_blend=0.50)
+        assert scorer.W_ATTESTATION_BLEND == 0.50
+
+    def test_attestation_speed_normalized_independently(self) -> None:
+        """Attestation latencies normalized separately from sports."""
+        scorer = MinerScorer()
+        # Miner 0: fast attestation (30s), slow sports (1s)
+        m0 = scorer.get_or_create(0, "h0")
+        m0.record_query(correct=True, latency=1.0, proof_submitted=True)
+        m0.record_attestation(latency=30.0, proof_valid=True)
+        m0.record_health_check(responded=True)
+
+        # Miner 1: slow attestation (90s), fast sports (0.1s)
+        m1 = scorer.get_or_create(1, "h1")
+        m1.record_query(correct=True, latency=0.1, proof_submitted=True)
+        m1.record_attestation(latency=90.0, proof_valid=True)
+        m1.record_health_check(responded=True)
+
+        miners = list(scorer._miners.values())
+        sports_speed = scorer._normalize_speed(miners, use_attestation=False)
+        attest_speed = scorer._normalize_speed(miners, use_attestation=True)
+
+        # Sports: miner 1 faster → higher score
+        assert sports_speed[1] > sports_speed[0]
+        # Attestation: miner 0 faster → higher score
+        assert attest_speed[0] > attest_speed[1]
+
+    def test_reset_epoch_clears_attestation_metrics(self) -> None:
+        scorer = MinerScorer()
+        m = scorer.get_or_create(0, "h0")
+        m.record_attestation(latency=30.0, proof_valid=True)
+        m.record_query(correct=True, latency=0.1, proof_submitted=True)
+        m.record_health_check(responded=True)
+
+        scorer.reset_epoch()
+        assert m.attestations_total == 0
+        assert m.attestations_valid == 0
+        assert m.attestation_latencies == []
+        assert m.queries_total == 0
+        assert m.consecutive_epochs == 1  # Participated
+
+    def test_attestation_only_miner_participates(self) -> None:
+        """Miner doing only attestation work counts as participating."""
+        scorer = MinerScorer()
+        m = scorer.get_or_create(0, "h0")
+        m.record_attestation(latency=30.0, proof_valid=True)
+        # No sports queries, no health checks
+
+        scorer.reset_epoch()
+        assert m.consecutive_epochs == 1  # Counted as participated
+
+    def test_inactive_miner_resets_history(self) -> None:
+        scorer = MinerScorer()
+        m = scorer.get_or_create(0, "h0")
+        m.consecutive_epochs = 5
+        # No activity at all
+
+        scorer.reset_epoch()
+        assert m.consecutive_epochs == 0
+
+    def test_attestation_validity_dominates_attestation_score(self) -> None:
+        """60% validity weight means perfect proofs score much higher."""
+        scorer = MinerScorer()
+        # Miner 0: all valid proofs
+        m0 = scorer.get_or_create(0, "h0")
+        for _ in range(5):
+            m0.record_attestation(latency=50.0, proof_valid=True)
+        m0.record_health_check(responded=True)
+
+        # Miner 1: all invalid proofs, same speed
+        m1 = scorer.get_or_create(1, "h1")
+        for _ in range(5):
+            m1.record_attestation(latency=50.0, proof_valid=False)
+        m1.record_health_check(responded=True)
+
+        miners = list(scorer._miners.values())
+        scores = scorer._compute_attestation_scores(miners)
+        # Same speed → only validity differs
+        assert scores[0] > scores[1]
+        # Miner 0: 0.6*1.0 + 0.4*1.0 = 1.0, miner 1: 0.6*0.0 + 0.4*1.0 = 0.4
+        assert scores[0] == pytest.approx(1.0)
+        assert scores[1] == pytest.approx(0.4)
+
+    def test_blend_weights_sum_correctly(self) -> None:
+        """Both sports and attestation active → blend produces valid weights."""
+        scorer = MinerScorer()
+        for uid in range(5):
+            m = scorer.get_or_create(uid, f"h{uid}")
+            m.record_query(correct=uid % 2 == 0, latency=0.1 * (uid + 1), proof_submitted=True)
+            m.record_attestation(latency=30.0 + uid * 10, proof_valid=uid < 3)
+            m.record_health_check(responded=True)
+
+        weights = scorer.compute_weights(is_active_epoch=True)
+        assert len(weights) == 5
+        assert sum(weights.values()) == pytest.approx(1.0)
+        for w in weights.values():
+            assert 0.0 <= w <= 1.0
+            assert math.isfinite(w)

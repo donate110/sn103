@@ -428,6 +428,7 @@ async def async_main() -> None:
         burn_ledger=burn_ledger,
         attest_burn_amount=config.attest_burn_amount,
         attest_burn_address=config.attest_burn_address,
+        scorer=scorer,
     )
 
     log.info(

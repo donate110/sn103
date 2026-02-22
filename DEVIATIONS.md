@@ -252,3 +252,12 @@ Append-only log. Each entry documents where implementation diverges from `docs/w
 **Mitigations in place:** Rate limiting, one purchase per Idiot per signal (`hasPurchased` mapping), odds bounded at 1000x max.
 **Future mitigations:** Per-signal odds range set by Genius (add minOdds/maxOdds to Signal struct), stake-based Sybil resistance, identity verification for leaderboard prominence.
 **Impact:** Track record inflation via self-dealing is possible but limited (attacker pays fees and collateral). Settlement economics are unaffected — damages are per Genius-Idiot pair. No code change needed at this stage.
+
+## DEV-013: Split Attestation vs Sports Scoring [UPDATES DEV-001]
+
+**Date:** 2026-02-22
+**Whitepaper Section:** Validators and Miners > Scoring
+**Previous behavior:** `record_attestation()` fed into the same `queries_total/queries_correct/latencies/proofs_submitted` counters as sports challenges. This conflated two fundamentally different workloads — sports executability checks (~5s, optional TLSNotary) vs web attestation (~30-90s, mandatory TLSNotary, $0.02 burn cost).
+**What we did:** Split `MinerMetrics` into separate sports and attestation tracking. Attestation has its own counters (`attestations_total`, `attestations_valid`, `attestation_latencies`) and its own scoring axes (60% proof validity, 40% speed). Final score blends sports (80%) and attestation (20%) via `W_ATTESTATION_BLEND`. Latencies are normalized independently per challenge type.
+**Why:** Attestation miners burn ~$0.02 per challenge. They need proportional emission share to break even. Conflating 30-90s attestation latencies with <10s sports latencies unfairly penalized attestation speed scores. Separate scoring lets each workload be evaluated on its own terms.
+**Impact:** Miners doing attestation work get fairly scored. The 20% blend weight ensures attestation contributes meaningfully to emission share without dominating sports scoring. Configurable via `attestation_blend` constructor parameter.

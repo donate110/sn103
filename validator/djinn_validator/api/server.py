@@ -108,6 +108,7 @@ from djinn_validator.core.outcomes import (
     parse_pick,
 )
 from djinn_validator.core.purchase import PurchaseOrchestrator, PurchaseStatus
+from djinn_validator.core.scoring import MinerScorer
 from djinn_validator.core.shares import ShareStore, SignalShareRecord
 from djinn_validator.utils.crypto import BN254_PRIME, Share
 
@@ -177,6 +178,7 @@ def create_app(
     burn_ledger: BurnLedger | None = None,
     attest_burn_amount: float = 0.0001,
     attest_burn_address: str = "5GrsjiBeCErhUGj339vu5GubTgyJMyZLGQqUFBJAtKrCziU9",
+    scorer: MinerScorer | None = None,
 ) -> FastAPI:
     """Create the FastAPI application with injected dependencies."""
     bt_network = os.environ.get("BT_NETWORK", "")
@@ -713,7 +715,10 @@ def create_app(
                 ip = axon.get("ip", "")
                 port = axon.get("port", 0)
                 if ip and port:
-                    miner_axons.append({"uid": uid, "ip": ip, "port": port})
+                    miner_axons.append({
+                        "uid": uid, "ip": ip, "port": port,
+                        "hotkey": axon.get("hotkey", ""),
+                    })
 
         if not miner_axons:
             # Refund the burn credit since no miner can process the request
@@ -802,6 +807,9 @@ def create_app(
             elapsed = _t.perf_counter() - start
             ATTESTATION_DURATION.observe(elapsed)
             ATTESTATION_VERIFIED.labels(valid="false").inc()
+            if scorer is not None:
+                m = scorer.get_or_create(selected["uid"], selected.get("hotkey", ""))
+                m.record_attestation(latency=elapsed, proof_valid=False)
             _refund()
             return AttestResponse(
                 request_id=req.request_id,
@@ -865,6 +873,15 @@ def create_app(
         elapsed = _t.perf_counter() - start
         ATTESTATION_DURATION.observe(elapsed)
         ATTESTATION_VERIFIED.labels(valid=str(verify_result.verified).lower()).inc()
+
+        # Record attestation performance in scorer for weight setting
+        if scorer is not None:
+            miner_metrics = scorer.get_or_create(
+                selected["uid"], selected.get("hotkey", "")
+            )
+            miner_metrics.record_attestation(
+                latency=elapsed, proof_valid=verify_result.verified
+            )
 
         log.info(
             "attest_complete",
