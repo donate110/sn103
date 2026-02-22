@@ -30,7 +30,7 @@ const prodConfig = getDefaultConfig({
   transports: {
     [activeChain.id]: http(RPC_URL),
   },
-  multiInjectedProviderDiscovery: false,
+  multiInjectedProviderDiscovery: true,
   wallets: [
     {
       groupName: "Create a Wallet (Free)",
