@@ -207,7 +207,9 @@ test("deposit USDC as collateral", async () => {
   expect(depositAfter - depositBefore).toBe(depositAmount);
 
   const available = await coll.getAvailable(wallet.address);
-  expect(available).toBe(depositAfter);
+  // available = deposit - locked; locked may be non-zero from prior signal activity
+  expect(available).toBeGreaterThanOrEqual(depositAmount);
+  expect(available).toBeLessThanOrEqual(depositAfter);
 });
 
 test("withdraw collateral", async () => {

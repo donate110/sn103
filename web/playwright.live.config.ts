@@ -14,7 +14,7 @@ export default defineConfig({
   workers: 2,
   reporter: [["list"], ["html", { open: "never" }]],
   timeout: 30_000,
-  globalTimeout: 300_000,
+  globalTimeout: 600_000,
   use: {
     baseURL: process.env.LIVE_URL ?? "https://djinn.gg",
     trace: "on-first-retry",
@@ -23,8 +23,21 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "chromium",
+      name: "ui",
       use: { ...devices["Desktop Chrome"] },
+      testIgnore: /onchain-smoke|signal-lifecycle/,
+    },
+    {
+      name: "onchain",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /onchain-smoke\.spec\.ts/,
+      dependencies: ["ui"],
+    },
+    {
+      name: "lifecycle",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /signal-lifecycle\.spec\.ts/,
+      dependencies: ["onchain"],
     },
   ],
 });

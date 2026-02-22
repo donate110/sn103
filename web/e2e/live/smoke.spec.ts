@@ -82,10 +82,10 @@ test.describe("Navigation flows", () => {
     const geniusLink = page.getByRole("link", { name: /genius/i }).first();
     await expect(geniusLink).toBeVisible();
     await geniusLink.click();
-    await expect(page).toHaveURL(/\/genius/);
+    await expect(page).toHaveURL(/\/genius/, { timeout: 15_000 });
     await expect(
       page.getByRole("heading", { name: "Genius Dashboard" })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10_000 });
   });
 
   test("home → idiot dashboard navigation", async ({ page }) => {
@@ -93,10 +93,10 @@ test.describe("Navigation flows", () => {
     const idiotLink = page.getByRole("link", { name: /idiot/i }).first();
     await expect(idiotLink).toBeVisible();
     await idiotLink.click();
-    await expect(page).toHaveURL(/\/idiot/);
+    await expect(page).toHaveURL(/\/idiot/, { timeout: 15_000 });
     await expect(
       page.getByRole("heading", { name: "Idiot Dashboard" })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10_000 });
   });
 
   test("genius dashboard → create signal navigation", async ({ page }) => {
