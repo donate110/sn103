@@ -161,12 +161,9 @@ export function handleSignalPurchased(event: SignalPurchased): void {
 }
 
 export function handleRefunded(event: Refunded): void {
-  let idiotId = event.params.idiot.toHexString();
-  let idiot = Idiot.load(idiotId);
-  if (idiot != null) {
-    idiot.escrowBalance = idiot.escrowBalance.plus(event.params.amount);
-    idiot.save();
-  }
+  let idiot = getOrCreateIdiot(event.params.idiot, event.block.timestamp);
+  idiot.escrowBalance = idiot.escrowBalance.plus(event.params.amount);
+  idiot.save();
 }
 
 export function handleOutcomeUpdated(event: OutcomeUpdated): void {
@@ -214,6 +211,7 @@ export function handleFeesClaimed(event: FeesClaimed): void {
   let geniusId = event.params.genius.toHexString();
   let genius = Genius.load(geniusId);
   if (genius != null) {
+    genius.totalFeesEarned = genius.totalFeesEarned.plus(event.params.amount);
     genius.save();
   }
 }

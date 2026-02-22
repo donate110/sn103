@@ -46,6 +46,9 @@ function getOrCreateGenius(address: Bytes, timestamp: BigInt): Genius {
     genius.collateralLocked = BigInt.zero();
     genius.totalSlashed = BigInt.zero();
     genius.totalTrackRecordProofs = BigInt.zero();
+    genius.totalFavorable = BigInt.zero();
+    genius.totalUnfavorable = BigInt.zero();
+    genius.totalVoid = BigInt.zero();
     genius.createdAt = timestamp;
   }
   return genius;
