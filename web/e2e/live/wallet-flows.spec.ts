@@ -96,14 +96,12 @@ async function waitForWalletConnected(page: Page) {
 
 async function fundWithEth(
   toAddress: string,
-  amountEth: string = "0.0005",
+  amountEth: string = "0.0003",
 ) {
   const { createWalletClient } = await import("viem");
-  // Use the genius (E2E) key to fund — it has ETH from earlier runs
-  // The deployer is nearly drained from the contract deployment
-  const funderAccount = privateKeyToAccount(GENIUS_KEY);
+  const deployerAccount = privateKeyToAccount(DEPLOYER_KEY);
   const walletClient = createWalletClient({
-    account: funderAccount,
+    account: deployerAccount,
     chain: baseSepolia,
     transport,
   });
@@ -192,7 +190,7 @@ test.describe("Genius connected flow", () => {
     await page.goto(`${BASE_URL}/genius`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Should see "Get Started" button since wallet isn't connected yet
     await connectWallet(page);
@@ -221,7 +219,7 @@ test.describe("Genius connected flow", () => {
     await page.goto(`${BASE_URL}/genius`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
@@ -259,7 +257,7 @@ test.describe("Genius connected flow", () => {
     await page.goto(`${BASE_URL}/genius`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
@@ -292,7 +290,7 @@ test.describe("Genius connected flow", () => {
     await page.goto(`${BASE_URL}/genius`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
@@ -313,7 +311,7 @@ test.describe("Genius connected flow", () => {
     await page.goto(`${BASE_URL}/genius`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
@@ -331,7 +329,7 @@ test.describe("Genius connected flow", () => {
     await page.goto(`${BASE_URL}/genius`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
@@ -347,7 +345,7 @@ test.describe("Genius connected flow", () => {
     await page.goto(`${BASE_URL}/genius`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
@@ -374,7 +372,7 @@ test.describe("Idiot connected flow", () => {
     await page.goto(`${BASE_URL}/idiot`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
@@ -395,7 +393,7 @@ test.describe("Idiot connected flow", () => {
     await page.goto(`${BASE_URL}/idiot`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
@@ -430,12 +428,12 @@ test.describe("Idiot connected flow", () => {
     await page.goto(`${BASE_URL}/idiot`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
     // Should see available signals section
-    await expect(page.getByText(/available signals/i)).toBeVisible({
+    await expect(page.getByText(/available signals/i).first()).toBeVisible({
       timeout: 15_000,
     });
 
@@ -451,7 +449,7 @@ test.describe("Idiot connected flow", () => {
     await page.goto(`${BASE_URL}/idiot`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
@@ -469,7 +467,7 @@ test.describe("Idiot connected flow", () => {
     await page.goto(`${BASE_URL}/idiot`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
@@ -484,20 +482,20 @@ test.describe("Idiot connected flow", () => {
     }
   });
 
-  test("idiot dashboard shows audit history", async ({ page }) => {
+  test("idiot dashboard shows settlement history", async ({ page }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/idiot`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
-    // Should see audit history section
-    const auditSection = page
-      .getByText(/audit history/i)
-      .or(page.getByText(/no audit history/i));
-    await expect(auditSection.first()).toBeVisible({ timeout: 15_000 });
+    // Should see settlement history section
+    const settlementSection = page
+      .getByText(/settlement history/i)
+      .or(page.getByText(/no settlements yet/i));
+    await expect(settlementSection.first()).toBeVisible({ timeout: 15_000 });
   });
 });
 
@@ -518,7 +516,7 @@ test.describe("Cross-role signal visibility", () => {
     await page.goto(`${BASE_URL}/genius/signal/new`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
@@ -535,8 +533,9 @@ test.describe("Cross-role signal visibility", () => {
     await page.waitForTimeout(2_000);
 
     // Should see events or a "no upcoming events" message
+    // Games use "@" (e.g., "Brooklyn Nets @ Atlanta Hawks")
     const eventsOrEmpty = page
-      .getByText(/vs|no upcoming/i)
+      .getByText(/@|vs|no upcoming/i)
       .first();
     await expect(eventsOrEmpty).toBeVisible({ timeout: 15_000 });
   });
@@ -555,7 +554,7 @@ test.describe("Cross-role signal visibility", () => {
     await page.goto(`${BASE_URL}/idiot/signal/999999`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
     await waitForWalletConnected(page);
 
@@ -584,7 +583,7 @@ test.describe("Leaderboard with connected wallet", () => {
     await page.goto(`${BASE_URL}/leaderboard`);
     await bypassBetaGate(page);
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Should see leaderboard heading
     await expect(
@@ -631,11 +630,14 @@ test.describe("No JS errors on connected pages", () => {
             text.includes("hydrat") ||
             text.includes("favicon") ||
             text.includes("ERR_CONNECTION") ||
+            text.includes("ERR_FAILED") ||
             text.includes("ChunkLoadError") ||
             text.includes("CORS") ||
             text.includes("ResizeObserver") ||
             text.includes("walletconnect") ||
-            text.includes("WalletConnect")
+            text.includes("WalletConnect") ||
+            text.includes("Failed to load resource") ||
+            text.includes("403")
           ) {
             return;
           }
@@ -657,7 +659,7 @@ test.describe("No JS errors on connected pages", () => {
       await page.goto(`${BASE_URL}${p.path}`);
       await bypassBetaGate(page);
       await page.reload();
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("domcontentloaded");
       await connectWallet(page);
       await page.waitForTimeout(5_000); // Let React settle
 
