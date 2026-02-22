@@ -26,6 +26,7 @@ type PurchaseStep =
   | "checking_lines"
   | "purchasing_validator"
   | "purchasing_chain"
+  | "collecting_shares"
   | "decrypting"
   | "complete"
   | "error";
@@ -284,7 +285,7 @@ export default function PurchaseSignal() {
       }
       setMarketOdds(bestOdds);
 
-      // Step 2: Request purchase from all validators (MPC check + share collection)
+      // Step 2: Verify availability with validators (MPC check — before payment)
       setStep("purchasing_validator");
 
       const validators = getValidatorClients();
@@ -294,18 +295,34 @@ export default function PurchaseSignal() {
         available_indices: checkResult.available_indices,
       };
 
-      // Contact all validators in parallel to collect Shamir shares
-      const purchaseResults = await Promise.allSettled(
+      // First call: validators run MPC to check if real index ∈ available set.
+      // In production, they return "payment_required" (available=true) or
+      // "unavailable" (available=false). In dev mode, shares may be released
+      // immediately.
+      const availabilityResults = await Promise.allSettled(
         validators.map((v) => v.purchaseSignal(signalId.toString(), purchaseReq)),
       );
 
-      // Collect successful shares with their x-coordinates
-      const collectedShares: ShamirShare[] = [];
-      let firstAvailable = purchaseResults.find(
-        (r) => r.status === "fulfilled" && r.value.available && r.value.encrypted_key_share,
+      // Check if any validator confirmed the signal is available
+      const anyAvailable = availabilityResults.some(
+        (r) => r.status === "fulfilled" && r.value.available,
       );
 
-      for (const result of purchaseResults) {
+      if (!anyAvailable) {
+        const failedMsg = availabilityResults
+          .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+          .map((r) => r.reason?.message || "unknown")
+          .join("; ");
+        setStepError(
+          failedMsg || "Signal not available at this sportsbook. Try selecting a different sportsbook.",
+        );
+        setStep("idle");
+        return;
+      }
+
+      // Collect any shares already released (dev mode without chain_client)
+      const collectedShares: ShamirShare[] = [];
+      for (const result of availabilityResults) {
         if (
           result.status === "fulfilled" &&
           result.value.available &&
@@ -319,21 +336,7 @@ export default function PurchaseSignal() {
         }
       }
 
-      const purchaseResult = firstAvailable?.status === "fulfilled" ? firstAvailable.value : null;
-
-      if (!purchaseResult || !purchaseResult.available) {
-        const failedMsg = purchaseResults
-          .filter((r): r is PromiseRejectedResult => r.status === "rejected")
-          .map((r) => r.reason?.message || "unknown")
-          .join("; ");
-        setStepError(
-          failedMsg || "Signal not available at this sportsbook. Try selecting a different sportsbook.",
-        );
-        setStep("idle");
-        return;
-      }
-
-      // Step 3: Execute on-chain purchase
+      // Step 3: Execute on-chain purchase (now that MPC confirmed availability)
       setStep("purchasing_chain");
 
       const notionalNum = parseFloat(notional);
@@ -354,7 +357,34 @@ export default function PurchaseSignal() {
 
       await purchase(signalId, notionalBig, oddsBig);
 
-      // Step 4: Decrypt the signal
+      // Step 4: Collect key shares from validators (payment now exists on-chain)
+      // Skip if we already got enough shares (dev mode)
+      if (collectedShares.length < 7) {
+        setStep("collecting_shares");
+
+        const shareResults = await Promise.allSettled(
+          validators.map((v) => v.purchaseSignal(signalId.toString(), purchaseReq)),
+        );
+
+        for (const result of shareResults) {
+          if (
+            result.status === "fulfilled" &&
+            result.value.available &&
+            result.value.encrypted_key_share &&
+            result.value.share_x != null
+          ) {
+            const x = result.value.share_x;
+            if (!collectedShares.some((s) => s.x === x)) {
+              collectedShares.push({
+                x,
+                y: BigInt("0x" + result.value.encrypted_key_share),
+              });
+            }
+          }
+        }
+      }
+
+      // Step 5: Decrypt the signal
       setStep("decrypting");
 
       if (collectedShares.length > 0) {
@@ -510,12 +540,14 @@ export default function PurchaseSignal() {
     step === "checking_lines" ||
     step === "purchasing_validator" ||
     step === "purchasing_chain" ||
+    step === "collecting_shares" ||
     step === "decrypting";
 
   const stepLabel: Record<string, string> = {
     checking_lines: "Checking line availability...",
-    purchasing_validator: "Verifying signal with validators...",
+    purchasing_validator: "Verifying signal availability with validators...",
     purchasing_chain: "Processing on-chain purchase... (10\u201330s)",
+    collecting_shares: "Collecting key shares from validators...",
     decrypting: "Decrypting your signal...",
   };
 

@@ -115,7 +115,7 @@ test.describe("Navigation flows", () => {
     await page.goto("/leaderboard");
     await expect(
       page.getByRole("heading", { name: /leaderboard/i })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10_000 });
   });
 });
 

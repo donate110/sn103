@@ -31,8 +31,8 @@ test.describe("No console errors on page load", () => {
       const errors: string[] = [];
       page.on("pageerror", (err) => errors.push(err.message));
 
-      await page.goto(url);
-      await page.waitForLoadState("networkidle");
+      await page.goto(url, { timeout: 30_000 });
+      await page.waitForLoadState("networkidle", { timeout: 30_000 });
 
       // Filter out known benign errors (e.g., missing wallet)
       const realErrors = errors.filter(
@@ -228,13 +228,10 @@ test.describe("Navigation edge cases", () => {
   test("direct URL to create signal page works", async ({ page }) => {
     await page.goto("/genius/signal/new");
     // Should render the create signal page or connect wallet prompt
-    const body = await page.locator("body").textContent();
-    expect(body!.length).toBeGreaterThan(50);
-    expect(
-      body!.includes("Create Signal") ||
-        body!.includes("connect") ||
-        body!.includes("Connect"),
-    ).toBeTruthy();
+    // Use auto-waiting locator instead of snapshot textContent (client-side hydration timing)
+    await expect(
+      page.getByText(/Create Signal|Connect your wallet/i).first(),
+    ).toBeVisible({ timeout: 10_000 });
   });
 
   test("direct URL to track record page works", async ({ page }) => {
@@ -349,8 +346,9 @@ test.describe("Performance", () => {
 test.describe("Accessibility basics", () => {
   test("pages have proper heading hierarchy", async ({ page }) => {
     await page.goto("/");
+    // Wait for client-side hydration before counting headings
+    await expect(page.locator("h1").first()).toBeVisible({ timeout: 10_000 });
     const h1Count = await page.locator("h1").count();
-    // Should have at least one h1 on the page
     expect(h1Count).toBeGreaterThanOrEqual(1);
   });
 

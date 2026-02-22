@@ -143,12 +143,16 @@ def _parse_field_hex(value: str, name: str) -> int:
 def _signal_id_to_uint256(signal_id: str) -> int:
     """Convert a string signal ID to a uint256 for on-chain lookups.
 
-    Uses keccak256 to deterministically map arbitrary-length string IDs
-    to the uint256 space expected by Solidity contracts.
+    Signal IDs are numeric uint256 values assigned by the SignalCommitment
+    contract. The web client passes them as decimal strings.
     """
-    from web3 import Web3
-
-    return int.from_bytes(Web3.solidity_keccak(["string"], [signal_id]), "big")
+    try:
+        v = int(signal_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"Invalid signal ID: {signal_id!r}")
+    if v < 0 or v >= 2**256:
+        raise HTTPException(status_code=400, detail="Signal ID out of uint256 range")
+    return v
 
 
 if TYPE_CHECKING:

@@ -161,10 +161,13 @@ class TestPurchase:
 class TestPaymentVerification:
     """Tests for on-chain payment verification before share release."""
 
+    # Use numeric signal IDs (matching on-chain uint256 format)
+    SIGNAL_ID = "100001"
+
     def _store_signal(self, share_store: ShareStore) -> None:
         from djinn_validator.utils.crypto import generate_signal_index_shares
         shares = generate_signal_index_shares(5)
-        share_store.store("sig-pay-1", "0xGenius", shares[0], b"encrypted-key")
+        share_store.store(self.SIGNAL_ID, "0xGenius", shares[0], b"encrypted-key")
 
     def test_purchase_requires_payment_when_chain_configured(self, share_store: ShareStore) -> None:
         """When chain_client is configured, purchase must be paid on-chain."""
@@ -180,7 +183,7 @@ class TestPaymentVerification:
         app = create_app(share_store, purchase_orch, outcome_attestor, chain_client=mock_chain)
         client = TestClient(app)
 
-        resp = client.post("/v1/signal/sig-pay-1/purchase", json={
+        resp = client.post(f"/v1/signal/{self.SIGNAL_ID}/purchase", json={
             "buyer_address": "0x" + "b0" * 20,
             "sportsbook": "DraftKings",
             "available_indices": [1, 3, 5, 7, 9],
@@ -206,7 +209,7 @@ class TestPaymentVerification:
         app = create_app(share_store, purchase_orch, outcome_attestor, chain_client=mock_chain)
         client = TestClient(app)
 
-        resp = client.post("/v1/signal/sig-pay-1/purchase", json={
+        resp = client.post(f"/v1/signal/{self.SIGNAL_ID}/purchase", json={
             "buyer_address": "0x" + "b0" * 20,
             "sportsbook": "DraftKings",
             "available_indices": [1, 3, 5, 7, 9],
@@ -252,7 +255,7 @@ class TestPaymentVerification:
         app = create_app(share_store, purchase_orch, outcome_attestor, chain_client=mock_chain)
         client = TestClient(app)
 
-        resp = client.post("/v1/signal/sig-pay-1/purchase", json={
+        resp = client.post(f"/v1/signal/{self.SIGNAL_ID}/purchase", json={
             "buyer_address": "0x" + "b0" * 20,
             "sportsbook": "DraftKings",
             "available_indices": [1, 3, 5, 7, 9],
@@ -261,6 +264,25 @@ class TestPaymentVerification:
         assert resp.status_code in (200, 504)
         if resp.status_code == 200:
             assert resp.json()["status"] == "unavailable"
+
+    def test_signal_id_to_uint256_rejects_non_numeric(self, share_store: ShareStore) -> None:
+        """Signal IDs must be numeric uint256 for on-chain lookups."""
+        from djinn_validator.api.server import _signal_id_to_uint256
+        from fastapi import HTTPException
+
+        # Valid numeric IDs
+        assert _signal_id_to_uint256("0") == 0
+        assert _signal_id_to_uint256("42") == 42
+        assert _signal_id_to_uint256("100001") == 100001
+
+        # Invalid: non-numeric strings
+        with pytest.raises(HTTPException) as exc_info:
+            _signal_id_to_uint256("sig-pay-1")
+        assert exc_info.value.status_code == 400
+
+        with pytest.raises(HTTPException) as exc_info:
+            _signal_id_to_uint256("abc")
+        assert exc_info.value.status_code == 400
 
 
 class TestPaymentReplayPrevention:
