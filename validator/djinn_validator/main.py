@@ -110,7 +110,7 @@ async def epoch_loop(
                         responded=responded,
                     )
 
-            if activity is not None:
+            if activity is not None and miner_uids:
                 responded = sum(
                     1 for uid in miner_uids
                     if scorer.get_or_create(uid, "").health_checks_responded > 0

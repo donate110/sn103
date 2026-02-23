@@ -539,17 +539,32 @@ const CATEGORY_COLORS: Record<string, string> = {
   share_stored: "bg-slate-100 text-slate-600",
 };
 
+const CATEGORY_LABELS: Record<string, string> = {
+  challenge_round: "Challenges",
+  health_check: "Health",
+  outcome_resolution: "Outcomes",
+  weight_set: "Weights",
+  attestation_challenge: "Attestation",
+  purchase: "Purchases",
+  share_stored: "Shares",
+};
+
 function NetworkActivityTab({ events, loading, diag }: { events: NetworkEvent[]; loading: boolean; diag: { discovered: number; responded: number; error?: string } | null }) {
+  const [filter, setFilter] = useState<string | null>(null);
+
   if (loading && events.length === 0) {
     return <div className="text-center text-slate-400 py-12">Loading network activity...</div>;
   }
+
+  const filtered = filter ? events.filter((e) => e.category === filter) : events;
+  const categories = [...new Set(events.map((e) => e.category))];
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
         <h3 className="text-sm font-medium text-slate-700">
           Validator &amp; Miner Activity
-          <span className="ml-2 text-xs text-slate-400">({events.length} events)</span>
+          <span className="ml-2 text-xs text-slate-400">({filtered.length}{filter ? ` of ${events.length}` : ""} events)</span>
         </h3>
         {diag && (
           <p className="text-[11px] text-slate-400 mt-1">
@@ -557,19 +572,46 @@ function NetworkActivityTab({ events, loading, diag }: { events: NetworkEvent[];
             {diag.error && <span className="text-red-400 ml-2">{diag.error}</span>}
           </p>
         )}
+        {categories.length > 1 && (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            <button
+              onClick={() => setFilter(null)}
+              className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors ${
+                !filter ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-500 hover:bg-slate-300"
+              }`}
+            >
+              All
+            </button>
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setFilter(filter === cat ? null : cat)}
+                className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors ${
+                  filter === cat
+                    ? "bg-slate-900 text-white"
+                    : CATEGORY_COLORS[cat] || "bg-slate-100 text-slate-600"
+                }`}
+              >
+                {CATEGORY_LABELS[cat] || cat.replace(/_/g, " ")}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      {events.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="px-4 py-8 text-center text-slate-400 text-sm">
-          {diag?.discovered === 0
-            ? "No validators discovered in the metagraph. Validators must register their axon to be visible."
-            : diag?.responded === 0
-              ? "Validators discovered but none responded. They may be behind a firewall or still starting up."
-              : "No activity recorded yet. Validators record events every ~12 seconds once the epoch loop starts."
+          {events.length === 0
+            ? diag?.discovered === 0
+              ? "No validators discovered in the metagraph. Validators must register their axon to be visible."
+              : diag?.responded === 0
+                ? "Validators discovered but none responded. They may be behind a firewall or still starting up."
+                : "No activity recorded yet. Validators record events every ~12 seconds once the epoch loop starts."
+            : "No events match this filter."
           }
         </div>
       ) : (
         <div className="divide-y divide-slate-100 max-h-[700px] overflow-y-auto">
-          {events.map((event, i) => (
+          {filtered.map((event, i) => (
             <div key={i} className="px-4 py-3 hover:bg-slate-50">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
