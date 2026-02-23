@@ -561,6 +561,11 @@ export default function CreateSignal() {
       <PrivateWorkspace open onClose={() => router.push("/genius")}>
       <div className="max-w-3xl mx-auto">
         <WizardStepper currentStep="browse" />
+        {stepError && (
+          <div className="rounded-lg bg-red-50 border border-red-200 p-4 mb-4" role="alert">
+            <p className="text-sm text-red-600 whitespace-pre-line">{stepError}</p>
+          </div>
+        )}
         <div className="flex items-start justify-between gap-4 mb-2">
           <h1 className="text-3xl font-bold text-slate-900">Create Signal</h1>
           {totalVolume && (
@@ -737,6 +742,11 @@ export default function CreateSignal() {
           &larr; Back to Games
         </button>
 
+        {stepError && (
+          <div className="rounded-lg bg-red-50 border border-red-200 p-4 mb-4" role="alert">
+            <p className="text-sm text-red-600 whitespace-pre-line">{stepError}</p>
+          </div>
+        )}
         <h1 className="text-3xl font-bold text-slate-900 mb-2">Review Lines</h1>
         <p className="text-slate-500 mb-4">
           Tap any line to edit it. 9 decoy lines are auto-generated from real odds data.
