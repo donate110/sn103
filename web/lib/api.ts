@@ -200,7 +200,7 @@ async function get<T>(url: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
 const SIGNAL_ID_RE = /^[a-zA-Z0-9_\-]{1,256}$/;
 
 export class ValidatorClient {
-  constructor(private baseUrl: string) {}
+  constructor(public readonly baseUrl: string) {}
 
   async storeShare(req: StoreShareRequest): Promise<StoreShareResponse> {
     return post<StoreShareResponse>(`${this.baseUrl}/v1/signal`, req);

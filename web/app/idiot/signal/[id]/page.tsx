@@ -60,6 +60,7 @@ export default function PurchaseSignal() {
   const [notional, setNotional] = useState("");
   const [step, setStep] = useState<PurchaseStep>("idle");
   const [stepError, setStepError] = useState<string | null>(null);
+  const [signalAvailable, setSignalAvailable] = useState<boolean | null>(null); // null = checking
   const [decryptedPick, setDecryptedPick] = useState<{
     realIndex: number;
     pick: string;
@@ -71,6 +72,34 @@ export default function PurchaseSignal() {
   const purchaseBtnRef = useRef<HTMLButtonElement>(null);
   const [purchaseBtnVisible, setPurchaseBtnVisible] = useState(false);
   const checkResultRef = useRef<CheckResponse | null>(null);
+
+  // Check if any validator holds shares for this signal (lightweight GET check)
+  useEffect(() => {
+    if (!signalId || signalLoading) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const validators = await discoverValidatorClients();
+        const probes = await Promise.allSettled(
+          validators.map(async (v) => {
+            const res = await fetch(`${v.baseUrl}/v1/signal/${signalId}/status`, {
+              signal: AbortSignal.timeout(5000),
+            });
+            if (!res.ok) throw new Error(`${res.status}`);
+            return res.json();
+          }),
+        );
+        if (cancelled) return;
+        const anyHasShares = probes.some(
+          (r) => r.status === "fulfilled" && (r.value as { has_shares?: boolean })?.has_shares,
+        );
+        setSignalAvailable(anyHasShares);
+      } catch {
+        if (!cancelled) setSignalAvailable(true); // assume available on error
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [signalId, signalLoading]);
 
   // Hide sticky mobile bar when the form submit button scrolls into view
   useEffect(() => {
@@ -581,6 +610,22 @@ export default function PurchaseSignal() {
               Purchase Signal
             </h2>
 
+            {signalAvailable === null && isActive && (
+              <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 mb-4">
+                <p className="text-xs text-slate-500 animate-pulse">Checking signal availability...</p>
+              </div>
+            )}
+
+            {signalAvailable === false && isActive && (
+              <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 mb-4" role="alert">
+                <p className="text-sm font-medium text-amber-800 mb-1">Signal Unavailable</p>
+                <p className="text-xs text-amber-700">
+                  This signal&apos;s encryption keys are not held by any active validator.
+                  It may have been created during a network reset and cannot be purchased.
+                </p>
+              </div>
+            )}
+
             {!isActive ? (
               <p className="text-sm text-slate-500">
                 This signal is no longer available for purchase.
@@ -696,13 +741,15 @@ export default function PurchaseSignal() {
                   ref={purchaseBtnRef}
                   type="submit"
                   disabled={
-                    isProcessing || purchaseLoading
+                    isProcessing || purchaseLoading || signalAvailable === false
                   }
                   className="btn-primary w-full py-3"
                 >
                   {isProcessing
                     ? "Processing..."
-                    : "Purchase Signal"}
+                    : signalAvailable === false
+                      ? "Unavailable"
+                      : "Purchase Signal"}
                 </button>
               </form>
             )}

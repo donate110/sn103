@@ -4,6 +4,7 @@ import { getIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
 
 const ALLOWED_PATHS = new Set(["health", "v1/signal"]);
 const PURCHASE_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/purchase$/;
+const STATUS_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/status$/;
 
 async function getValidatorUrl(): Promise<string> {
   // 1. Explicit env var takes priority (allows manual override)
@@ -23,7 +24,7 @@ async function getValidatorUrl(): Promise<string> {
 }
 
 function isAllowed(path: string): boolean {
-  return ALLOWED_PATHS.has(path) || PURCHASE_RE.test(path);
+  return ALLOWED_PATHS.has(path) || PURCHASE_RE.test(path) || STATUS_RE.test(path);
 }
 
 function isValidOrigin(request: NextRequest): boolean {

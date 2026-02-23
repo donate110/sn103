@@ -1063,6 +1063,17 @@ def create_app(
         return ReadinessResponse(ready=ready, checks=checks)
 
     # ------------------------------------------------------------------
+    # Signal status (lightweight share availability check)
+    # ------------------------------------------------------------------
+
+    @app.get("/v1/signal/{signal_id}/status")
+    async def signal_status(signal_id: str) -> dict:
+        """Check if this validator holds shares for a signal (no auth required)."""
+        _validate_signal_id_path(signal_id)
+        records = share_store.get_all(signal_id)
+        return {"signal_id": signal_id, "has_shares": len(records) > 0}
+
+    # ------------------------------------------------------------------
     # Activity log
     # ------------------------------------------------------------------
 

@@ -5,9 +5,10 @@ import { getIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
 const ALLOWED_PATHS = new Set(["health", "v1/signal", "v1/activity"]);
 const PURCHASE_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/purchase$/;
 const REGISTER_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/register$/;
+const STATUS_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/status$/;
 
 function isAllowed(path: string): boolean {
-  return ALLOWED_PATHS.has(path) || PURCHASE_RE.test(path) || REGISTER_RE.test(path);
+  return ALLOWED_PATHS.has(path) || PURCHASE_RE.test(path) || REGISTER_RE.test(path) || STATUS_RE.test(path);
 }
 
 async function resolveValidatorUrl(uid: number): Promise<string | null> {
