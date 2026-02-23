@@ -9,7 +9,6 @@ import { ADDRESSES } from "@/lib/contracts";
 import SecretModal from "@/components/SecretModal";
 import PrivateWorkspace from "@/components/PrivateWorkspace";
 import {
-  generateAesKey,
   encrypt,
   splitSecret,
   keyToBigInt,
@@ -110,20 +109,26 @@ export default function CreateSignal() {
   const [expiresIn, setExpiresIn] = useState("24");
   const [selectedSportsbooks, setSelectedSportsbooks] = useState<string[]>([]);
 
-  // Master seed derivation — prompt on page load so it's cached before submit
+  // Master seed derivation — prompt on page load so it's cached before submit.
+  // seedReady tracks whether the seed is cached (drives button label).
   const [seedDeriving, setSeedDeriving] = useState(false);
+  const [seedReady, setSeedReady] = useState(() => isMasterSeedCached());
   const seedAttemptedRef = useRef(false);
 
   useEffect(() => {
-    if (!walletClient || seedAttemptedRef.current || isMasterSeedCached()) return;
+    if (!walletClient || seedAttemptedRef.current || isMasterSeedCached()) {
+      if (isMasterSeedCached()) setSeedReady(true);
+      return;
+    }
     seedAttemptedRef.current = true;
     setSeedDeriving(true);
     deriveMasterSeedTyped(async (params) => {
       const sig = await walletClient.signTypedData(params);
       return sig;
     })
+      .then(() => setSeedReady(true))
       .catch(() => {
-        // User dismissed — the submit flow will retry if needed
+        // User dismissed — the submit flow will handle it on first click
       })
       .finally(() => setSeedDeriving(false));
   }, [walletClient]);
@@ -271,6 +276,29 @@ export default function CreateSignal() {
     }
 
     try {
+      // ── Gate 1: Ensure encryption key is ready ──
+      // Coinbase Smart Wallet can only handle one popup per user action.
+      // If signTypedData hasn't been done yet, do it NOW and stop —
+      // don't chain into writeContract. User clicks "Create Signal"
+      // again and gets a single writeContract popup.
+      if (!isMasterSeedCached()) {
+        if (!walletClient) throw new Error("Wallet not connected");
+        setSeedDeriving(true);
+        try {
+          await deriveMasterSeedTyped(async (params) => {
+            const sig = await walletClient.signTypedData(params);
+            return sig;
+          });
+          setSeedReady(true);
+        } finally {
+          setSeedDeriving(false);
+        }
+        // Seed is now cached. Return to configure step so the NEXT
+        // click goes straight to commit with a single popup.
+        setStepError(null);
+        return;
+      }
+
       // Show immediate feedback
       setStep("preflight");
 
@@ -370,28 +398,17 @@ export default function CreateSignal() {
             .join(""),
       );
 
-      // Derive AES key from wallet via EIP-712 signTypedData.
-      // Unlike personal_sign, EIP-712 works on ERC-4337 smart wallets
-      // (Coinbase Smart Wallet, etc.). Same wallet always produces the
-      // same key, enabling cross-device recovery.
-      //
-      // The master seed is pre-derived on page load (see seedDeriving
-      // state above), so this call normally returns instantly from
-      // cache — no wallet popup here.
+      // Derive AES key from the cached master seed.
+      // Gate 1 above guarantees the seed is cached by this point —
+      // if it wasn't, we returned early after the signTypedData popup.
       if (!walletClient) throw new Error("Wallet not connected");
-      let aesKey: Uint8Array;
-      try {
-        const masterSeed = await deriveMasterSeedTyped(
-          async (params) => {
-            const sig = await walletClient.signTypedData(params);
-            return sig;
-          },
-        );
-        aesKey = await deriveSignalKey(masterSeed, signalId);
-      } catch (keyErr) {
-        console.warn("EIP-712 key derivation failed, using random key (cross-device recovery unavailable):", keyErr);
-        aesKey = generateAesKey();
-      }
+      const masterSeed = await deriveMasterSeedTyped(
+        async (params) => {
+          const sig = await walletClient.signTypedData(params);
+          return sig;
+        },
+      );
+      const aesKey = await deriveSignalKey(masterSeed, signalId);
 
       const pickPayload = JSON.stringify({
         realIndex: realIndex + 1,
@@ -1496,7 +1513,7 @@ export default function CreateSignal() {
         <div className="sticky bottom-0 -mx-5 px-5 py-3 sm:-mx-8 sm:px-8 bg-white/95 backdrop-blur-sm border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-6 -mb-6">
           <button
             type="submit"
-            disabled={isProcessing || commitLoading || (() => {
+            disabled={isProcessing || commitLoading || seedDeriving || (() => {
               const pct = parseFloat(maxPriceBps);
               const sla = parseFloat(slaMultiplier);
               const hrs = parseFloat(expiresIn);
@@ -1508,8 +1525,13 @@ export default function CreateSignal() {
             })()}
             className="btn-primary w-full py-3 text-base"
           >
-            {isProcessing ? "Processing..." : "Create Signal"}
+            {isProcessing ? "Processing..." : seedDeriving ? "Setting up encryption..." : !seedReady ? "Set Up Encryption" : "Create Signal"}
           </button>
+          {!seedReady && !isProcessing && !seedDeriving && (
+            <p className="text-xs text-slate-400 text-center mt-2">
+              Your wallet will ask you to sign a free message to set up encryption. Then click again to create.
+            </p>
+          )}
         </div>
       </form>
     </div>
