@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { discoverValidatorUrl } from "@/lib/bt-metagraph";
 import { getIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
 
-const ALLOWED_PATHS = new Set(["health", "v1/signal"]);
+const ALLOWED_PATHS = new Set(["health", "v1/signal", "v1/attest"]);
 const PURCHASE_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/purchase$/;
 const STATUS_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/status$/;
+const ATTEST_CREDITS_RE = /^v1\/attest\/credits\/[a-fA-F0-9x]+$/;
 
 async function getValidatorUrl(): Promise<string> {
   // 1. Explicit env var takes priority (allows manual override)
@@ -24,7 +25,7 @@ async function getValidatorUrl(): Promise<string> {
 }
 
 function isAllowed(path: string): boolean {
-  return ALLOWED_PATHS.has(path) || PURCHASE_RE.test(path) || STATUS_RE.test(path);
+  return ALLOWED_PATHS.has(path) || PURCHASE_RE.test(path) || STATUS_RE.test(path) || ATTEST_CREDITS_RE.test(path);
 }
 
 function isValidOrigin(request: NextRequest): boolean {

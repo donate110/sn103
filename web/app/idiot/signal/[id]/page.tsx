@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAccount, useWalletClient } from "wagmi";
-import { useSignal, usePurchaseSignal, useSignalNotionalFilled } from "@/lib/hooks";
+import { useSignal, usePurchaseSignal, useSignalNotionalFilled, useEscrowBalance } from "@/lib/hooks";
 import { discoverValidatorClients, getMinerClient } from "@/lib/api";
 import { decrypt, fromHex, bigIntToKey, reconstructSecret } from "@/lib/crypto";
 import type { ShamirShare } from "@/lib/crypto";
@@ -44,9 +44,10 @@ export default function PurchaseSignal() {
   }
   const { signal, loading: signalLoading, error: signalError } =
     useSignal(signalId);
-  const { purchase, loading: purchaseLoading, error: purchaseError } =
+  const { purchase, loading: purchaseLoading, error: purchaseError, txHash } =
     usePurchaseSignal();
   const { filled: notionalFilled } = useSignalNotionalFilled(signalId?.toString());
+  const { balance: escrowBalance } = useEscrowBalance(address);
 
   // Fetch genius stats for sidebar
   const geniusAddress = signal?.genius;
@@ -298,6 +299,18 @@ export default function PurchaseSignal() {
       // Contract uses 6-decimal precision (ODDS_PRECISION = 1e6)
       const oddsBig = BigInt(Math.floor(bestOdds * 1_000_000));
 
+      // Fee = notional * maxPriceBps / 10_000
+      const feeBig = (notionalBig * BigInt(signal.maxPriceBps)) / 10_000n;
+      if (escrowBalance !== undefined && escrowBalance < feeBig) {
+        const needed = Number(feeBig) / 1e6;
+        const have = Number(escrowBalance) / 1e6;
+        setStepError(
+          `Insufficient escrow balance: you have $${have.toFixed(2)} but need $${needed.toFixed(2)}. Deposit USDC on the Idiot Dashboard first.`,
+        );
+        setStep("idle");
+        return;
+      }
+
       await purchase(signalId, notionalBig, oddsBig);
 
       // Step 4: Collect key shares from validators (payment now exists on-chain)
@@ -511,7 +524,9 @@ export default function PurchaseSignal() {
   const stepLabel: Record<string, string> = {
     checking_lines: "Checking line availability...",
     purchasing_validator: "Verifying signal availability with validators...",
-    purchasing_chain: "Processing on-chain purchase... (10\u201330s)",
+    purchasing_chain: purchaseLoading && !txHash
+      ? "Confirm the transaction in your wallet..."
+      : "Waiting for on-chain confirmation... (10\u201330s)",
     collecting_shares: "Collecting key shares from validators...",
     decrypting: "Decrypting your signal...",
   };
@@ -609,6 +624,22 @@ export default function PurchaseSignal() {
             <h2 className="text-lg font-semibold text-slate-900 mb-4">
               Purchase Signal
             </h2>
+
+            {isActive && escrowBalance !== undefined && (
+              <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 mb-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-slate-500">Your Escrow Balance</p>
+                  <p className="text-sm font-medium text-slate-900">
+                    ${(Number(escrowBalance) / 1e6).toFixed(2)}
+                  </p>
+                </div>
+                {escrowBalance === 0n && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    Deposit USDC on the <a href="/idiot" className="underline font-medium">Idiot Dashboard</a> to purchase signals.
+                  </p>
+                )}
+              </div>
+            )}
 
             {signalAvailable === null && isActive && (
               <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 mb-4">

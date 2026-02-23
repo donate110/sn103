@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { discoverMetagraph } from "@/lib/bt-metagraph";
 import { getIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
 
-const ALLOWED_PATHS = new Set(["health", "v1/signal", "v1/activity"]);
+const ALLOWED_PATHS = new Set(["health", "v1/signal", "v1/activity", "v1/attest"]);
 const PURCHASE_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/purchase$/;
 const REGISTER_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/register$/;
 const STATUS_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/status$/;
+const ATTEST_CREDITS_RE = /^v1\/attest\/credits\/[a-fA-F0-9x]+$/;
 
 function isAllowed(path: string): boolean {
-  return ALLOWED_PATHS.has(path) || PURCHASE_RE.test(path) || REGISTER_RE.test(path) || STATUS_RE.test(path);
+  return ALLOWED_PATHS.has(path) || PURCHASE_RE.test(path) || REGISTER_RE.test(path) || STATUS_RE.test(path) || ATTEST_CREDITS_RE.test(path);
 }
 
 async function resolveValidatorUrl(uid: number): Promise<string | null> {

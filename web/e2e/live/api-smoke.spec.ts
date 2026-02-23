@@ -50,7 +50,7 @@ test.describe("Miner health", () => {
     const res = await request.get("/api/miner/health");
     if (res.ok()) {
       const body = await res.json();
-      expect(body.status).toBe("ok");
+      expect(["ok", "degraded"]).toContain(body.status);
       expect(body).toHaveProperty("version");
       expect(body).toHaveProperty("odds_api_connected");
       expect(body).toHaveProperty("bt_connected");

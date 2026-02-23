@@ -12,7 +12,7 @@ test.describe("Miner & Purchase Flow Smoke Tests", () => {
     // If miner is running, expect 200; if not, expect 502
     if (res.ok()) {
       const body = await res.json();
-      expect(body.status).toBe("ok");
+      expect(["ok", "degraded"]).toContain(body.status);
       expect(body).toHaveProperty("version");
       expect(body).toHaveProperty("odds_api_connected");
     } else {

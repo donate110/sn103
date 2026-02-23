@@ -41,10 +41,10 @@ const IDIOT_KEY = (() => {
   return "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as `0x${string}`;
 })();
 
-const USDC_ADDRESS = "0x10B2BA7dc946c8CC7b6463b9E687378efE197AA0";
-const COLLATERAL_ADDRESS = "0x792EaaeF8a6Af261c2402b303819750D715f5eF5";
-const ESCROW_ADDRESS = "0xBC70ADF6f1310da8Dd4960062BdC32F5f8b2f343";
-const SIGNAL_COMMITMENT_ADDRESS = "0x906AAb7C36fB55e50eC4E86A3fB2F1D976788587";
+const USDC_ADDRESS = "0x7b8c194c848914c361cf34f2d2dd9eae74a9c9c6";
+const COLLATERAL_ADDRESS = "0x47bcae6055dff70137336211be22f34c7a631626";
+const ESCROW_ADDRESS = "0xa41fc0bd7a1ae0e713c8c7c1f3c323b38b51bbcf";
+const SIGNAL_COMMITMENT_ADDRESS = "0x184afff99bf4d742a1168281c029c06174477bf7";
 
 const transport = http(RPC_URL);
 const publicClient = createPublicClient({
@@ -74,13 +74,23 @@ async function connectWallet(page: Page) {
   if (await connectBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
     await connectBtn.click();
     // Wait for the RainbowKit modal to appear and find the mock wallet
-    // wallet-mock announces via EIP-6963 — RainbowKit shows it as an option
-    const mockWalletBtn = page.getByRole("button", { name: /mock/i });
-    if (await mockWalletBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await mockWalletBtn.click();
-      // Wait for connection
-      await page.waitForTimeout(2_000);
+    // wallet-mock announces via EIP-6963 — RainbowKit shows it as an option.
+    // RainbowKit re-renders its modal, which can detach the button from the DOM
+    // between isVisible and click. Retry up to 3 times with a short delay.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const mockWalletBtn = page.getByRole("button", { name: /mock/i });
+        await mockWalletBtn.waitFor({ state: "visible", timeout: 5_000 });
+        await page.waitForTimeout(500); // let RainbowKit stabilize
+        await mockWalletBtn.click({ timeout: 5_000 });
+        break; // click succeeded
+      } catch {
+        if (attempt === 2) break; // give up after 3 attempts
+        await page.waitForTimeout(1_000);
+      }
     }
+    // Wait for connection
+    await page.waitForTimeout(2_000);
   }
 }
 

@@ -14,14 +14,14 @@ import { ethers } from "ethers";
 const RPC_URL = "https://sepolia.base.org";
 
 const ADDRESSES = {
-  signalCommitment: "0x906AAb7C36fB55e50eC4E86A3fB2F1D976788587",
-  escrow: "0xBC70ADF6f1310da8Dd4960062BdC32F5f8b2f343",
-  collateral: "0x792EaaeF8a6Af261c2402b303819750D715f5eF5",
-  creditLedger: "0x15A0194060577B0f6C2fa05A4462Ee17326c1202",
-  account: "0x91e773bde5e508E5f745740D937d8fcF6836517a",
-  usdc: "0x10B2BA7dc946c8CC7b6463b9E687378efE197AA0",
-  trackRecord: "0x3A3B4b8484CE2c82A5636c2402c84300AfF88ace",
-  audit: "0x9C3372F79ee69B27d905e9B7083e9Ec054EbdE02",
+  signalCommitment: "0x184afff99bf4d742a1168281c029c06174477bf7",
+  escrow: "0xa41fc0bd7a1ae0e713c8c7c1f3c323b38b51bbcf",
+  collateral: "0x47bcae6055dff70137336211be22f34c7a631626",
+  creditLedger: "0xb2a4eac9baca31264894fb59a8a11c8ca1aa4efe",
+  account: "0x4f42f2c714ada4c55f2a967dda6effa19e211dec",
+  usdc: "0x7b8c194c848914c361cf34f2d2dd9eae74a9c9c6",
+  trackRecord: "0x0000000000000000000000000000000000000000",
+  audit: "0x95002b53f4f53a27a060502fe1f026f74e9110e9",
 };
 
 // Dedicated E2E test wallets on Base Sepolia
@@ -362,23 +362,60 @@ test("purchase signal: partial buy (10 USDC)", async () => {
   expect(purchases.length).toBeGreaterThanOrEqual(1);
 });
 
-test("purchase signal: second partial buy (20 USDC)", async () => {
+test("purchase signal: second partial buy from different buyer (20 USDC)", async () => {
   test.skip(!hasFunds, "No ETH — fund E2E wallet first");
 
-  const escrow = new ethers.Contract(
+  // Each buyer can only purchase once per signal (AlreadyPurchased check).
+  // Use a second derived buyer wallet for the second purchase.
+  const buyer2Key = ethers.keccak256(
+    ethers.solidityPacked(["bytes32", "string"], [BUYER_PRIVATE_KEY, "buyer2"]),
+  );
+  const buyer2Wallet = new ethers.Wallet(buyer2Key, provider);
+
+  // Fund buyer2 with ETH (for gas) and USDC
+  const ethTx = await wallet.sendTransaction({
+    to: buyer2Wallet.address,
+    value: ethers.parseEther("0.0002"),
+  });
+  await ethTx.wait();
+
+  const usdc = new ethers.Contract(
+    ADDRESSES.usdc,
+    [
+      "function mint(address to, uint256 amount) external",
+      "function approve(address spender, uint256 amount) external returns (bool)",
+    ],
+    buyer2Wallet,
+  );
+  const usdcMinter = new ethers.Contract(
+    ADDRESSES.usdc,
+    ["function mint(address to, uint256 amount) external"],
+    wallet,
+  );
+  const mintTx = await usdcMinter.mint(buyer2Wallet.address, ethers.parseUnits("100", 6));
+  await mintTx.wait();
+  const approveTx = await usdc.approve(ADDRESSES.escrow, ethers.parseUnits("100", 6));
+  await approveTx.wait();
+
+  // Deposit to escrow
+  const escrowAsBuyer2 = new ethers.Contract(
     ADDRESSES.escrow,
     [
+      "function deposit(uint256 amount) external",
       "function purchase(uint256 signalId, uint256 notional, uint256 odds) returns (uint256 purchaseId)",
       "function getSignalNotionalFilled(uint256) view returns (uint256)",
       "function getPurchasesBySignal(uint256) view returns (uint256[])",
     ],
-    buyerWallet,
+    buyer2Wallet,
   );
+  const depositTx = await escrowAsBuyer2.deposit(ethers.parseUnits("50", 6));
+  await depositTx.wait();
+  await waitForSync();
 
-  const filledBefore = await escrow.getSignalNotionalFilled(SIGNAL_ID);
+  const filledBefore = await escrowAsBuyer2.getSignalNotionalFilled(SIGNAL_ID);
 
   // 20 USDC notional at 1.2x odds; fee = 20 * 500 / 10_000 = 1.0 USDC
-  const tx = await escrow.purchase(
+  const tx = await escrowAsBuyer2.purchase(
     SIGNAL_ID,
     ethers.parseUnits("20", 6),
     1_200_000n, // 1.2x in 6-decimal precision
@@ -388,11 +425,11 @@ test("purchase signal: second partial buy (20 USDC)", async () => {
   await waitForSync();
 
   // Verify notional fill increased
-  const filledAfter = await escrow.getSignalNotionalFilled(SIGNAL_ID);
+  const filledAfter = await escrowAsBuyer2.getSignalNotionalFilled(SIGNAL_ID);
   expect(filledAfter - filledBefore).toBe(ethers.parseUnits("20", 6));
 
   // Verify second purchase recorded
-  const purchases = await escrow.getPurchasesBySignal(SIGNAL_ID);
+  const purchases = await escrowAsBuyer2.getPurchasesBySignal(SIGNAL_ID);
   expect(purchases.length).toBeGreaterThanOrEqual(2);
 });
 
