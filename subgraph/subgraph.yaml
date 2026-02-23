@@ -12,9 +12,9 @@ dataSources:
     name: SignalCommitment
     network: base-sepolia
     source:
-      address: "0x83F38eA8B66634643E6FEC8F18848DAa0c86F6DE"
+      address: "0x184AFFF99BF4D742a1168281c029c06174477Bf7"
       abi: SignalCommitment
-      startBlock: 37894200
+      startBlock: 38024000
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -40,9 +40,9 @@ dataSources:
     name: Escrow
     network: base-sepolia
     source:
-      address: "0x06e6d123DD2474599579B648dd56973120CcEFcA"
+      address: "0xA41Fc0bD7A1aE0E713C8c7c1f3c323B38B51BBCf"
       abi: Escrow
-      startBlock: 37894200
+      startBlock: 38024000
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -76,9 +76,9 @@ dataSources:
     name: Collateral
     network: base-sepolia
     source:
-      address: "0x06AAfF8643e99042f86f1EC93ED8A8BD36d6D9E7"
+      address: "0x47bCAE6055dfF70137336211bE22f34C7a631626"
       abi: Collateral
-      startBlock: 37894200
+      startBlock: 38024000
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -108,9 +108,9 @@ dataSources:
     name: Account
     network: base-sepolia
     source:
-      address: "0x7f5700896051f4af0F597135A39a6D9D24F8B2af"
+      address: "0x4f42F2c714adA4c55f2A967dDa6EFFA19E211deC"
       abi: Account
-      startBlock: 37894200
+      startBlock: 38024000
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -138,9 +138,9 @@ dataSources:
     name: Audit
     network: base-sepolia
     source:
-      address: "0x4ca56d7e1D10Ec78C26C98a39b17f83Ca85b68c3"
+      address: "0x95002b53F4f53A27a060502fE1f026F74e9110E9"
       abi: Audit
-      startBlock: 37894200
+      startBlock: 38024000
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -166,9 +166,9 @@ dataSources:
     name: CreditLedger
     network: base-sepolia
     source:
-      address: "0x09de6d7B81ED73707364ee772eAdA7c191c8a4FC"
+      address: "0xb2A4EaC9bAcA31264894Fb59a8A11C8CA1aa4eFE"
       abi: CreditLedger
-      startBlock: 37894200
+      startBlock: 38024000
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -192,9 +192,9 @@ dataSources:
     name: TrackRecord
     network: base-sepolia
     source:
-      address: "0xd3FA108474eb4EfC79649a17472c5F7d729Ac08b"
+      address: "0x0000000000000000000000000000000000000000"
       abi: TrackRecord
-      startBlock: 37894200
+      startBlock: 38024000
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9

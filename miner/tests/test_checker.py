@@ -39,10 +39,12 @@ def checker(odds_client: OddsApiClient) -> LineChecker:
 async def test_check_returns_results_for_all_lines(
     checker: LineChecker, sample_lines: list[CandidateLine]
 ) -> None:
-    results = await checker.check(sample_lines)
+    check_result = await checker.check(sample_lines)
+    results = check_result.results
     assert len(results) == len(sample_lines)
     indices = {r.index for r in results}
     assert indices == {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+    assert check_result.api_error is None
 
 
 @pytest.mark.asyncio
@@ -60,7 +62,7 @@ async def test_exact_spread_match(checker: LineChecker) -> None:
             side="Los Angeles Lakers",
         ),
     ]
-    results = await checker.check(lines)
+    results = (await checker.check(lines)).results
     assert results[0].available is True
     assert any(b.bookmaker == "FanDuel" for b in results[0].bookmakers)
 
@@ -81,7 +83,7 @@ async def test_spread_within_tolerance(checker: LineChecker) -> None:
         ),
     ]
     # DraftKings has -3.5, which is within 0.5 of -3.0
-    results = await checker.check(lines)
+    results = (await checker.check(lines)).results
     bookmaker_names = [b.bookmaker for b in results[0].bookmakers]
     assert "FanDuel" in bookmaker_names
     assert "DraftKings" in bookmaker_names
@@ -102,7 +104,7 @@ async def test_spread_outside_tolerance(checker: LineChecker) -> None:
             side="Los Angeles Lakers",
         ),
     ]
-    results = await checker.check(lines)
+    results = (await checker.check(lines)).results
     assert results[0].available is False
     assert len(results[0].bookmakers) == 0
 
@@ -122,7 +124,7 @@ async def test_h2h_match(checker: LineChecker) -> None:
             side="Los Angeles Lakers",
         ),
     ]
-    results = await checker.check(lines)
+    results = (await checker.check(lines)).results
     assert results[0].available is True
 
 
@@ -141,7 +143,7 @@ async def test_totals_match(checker: LineChecker) -> None:
             side="Over",
         ),
     ]
-    results = await checker.check(lines)
+    results = (await checker.check(lines)).results
     assert results[0].available is True
     assert len(results[0].bookmakers) >= 1
 
@@ -161,7 +163,7 @@ async def test_wrong_side_does_not_match(checker: LineChecker) -> None:
             side="Boston Celtics",  # Celtics have +3.0, not -3.0
         ),
     ]
-    results = await checker.check(lines)
+    results = (await checker.check(lines)).results
     assert results[0].available is False
 
 
@@ -170,7 +172,7 @@ async def test_full_10_line_check(
     checker: LineChecker, sample_lines: list[CandidateLine]
 ) -> None:
     """Full 10-line check produces the expected available/unavailable split."""
-    results = await checker.check(sample_lines)
+    results = (await checker.check(sample_lines)).results
 
     available = {r.index for r in results if r.available}
     unavailable = {r.index for r in results if not r.available}
@@ -220,8 +222,9 @@ async def test_check_with_api_failure() -> None:
             side="Los Angeles Lakers",
         ),
     ]
-    results = await chk.check(lines)
-    assert results[0].available is False
+    check_result = await chk.check(lines)
+    assert check_result.results[0].available is False
+    assert check_result.api_error is not None  # All sports failed => api_error set
 
 
 @pytest.mark.asyncio
@@ -309,10 +312,11 @@ async def test_check_multiple_sports() -> None:
         ),
     ]
 
-    results = await chk.check(lines)
-    assert len(results) == 2
-    assert results[0].available is True  # NBA h2h
-    assert results[1].available is True  # NFL spread
+    check_result = await chk.check(lines)
+    assert len(check_result.results) == 2
+    assert check_result.results[0].available is True  # NBA h2h
+    assert check_result.results[1].available is True  # NFL spread
+    assert check_result.api_error is None
 
 
 @pytest.mark.asyncio
@@ -360,8 +364,8 @@ async def test_strict_tolerance() -> None:
         ),
     ]
 
-    res_exact = await chk.check(exact)
-    res_close = await chk.check(close)
+    res_exact = (await chk.check(exact)).results
+    res_close = (await chk.check(close)).results
     assert res_exact[0].available is True
     assert res_close[0].available is False
 
@@ -409,12 +413,14 @@ async def test_partial_sport_failure_still_returns_results() -> None:
         ),
     ]
 
-    results = await chk.check(lines)
-    assert len(results) == 2
-    assert results[0].available is True  # NBA succeeded
-    assert results[1].available is False  # NFL failed
+    check_result = await chk.check(lines)
+    assert len(check_result.results) == 2
+    assert check_result.results[0].available is True  # NBA succeeded
+    assert check_result.results[1].available is False  # NFL failed
     # Health should record success since at least one sport succeeded
     assert health.get_status().odds_api_connected is True
+    # Partial failure: at least one sport succeeded, so no api_error
+    assert check_result.api_error is None
 
 
 @pytest.mark.asyncio
@@ -439,7 +445,8 @@ async def test_all_sports_fail_degrades_health() -> None:
 
     # Need CONSECUTIVE_FAILURE_THRESHOLD failures to degrade
     for _ in range(HealthTracker.CONSECUTIVE_FAILURE_THRESHOLD):
-        await chk.check(lines)
+        check_result = await chk.check(lines)
+        assert check_result.api_error is not None  # All fetches failed
 
     assert health.get_status().odds_api_connected is False
 
@@ -454,8 +461,10 @@ async def test_check_empty_odds_returns_all_unavailable(checker: LineChecker) ->
             market="h2h", line=None, side="Team A",
         ),
     ]
-    results = await checker.check(lines)
-    assert results[0].available is False
+    check_result = await checker.check(lines)
+    assert check_result.results[0].available is False
+    # API succeeded (returned data), just no matching event — no api_error
+    assert check_result.api_error is None
 
 
 @pytest.mark.asyncio
@@ -470,7 +479,7 @@ async def test_side_matching_case_insensitive(checker: LineChecker) -> None:
             side="los angeles lakers",  # lowercase
         ),
     ]
-    results = await checker.check(lines)
+    results = (await checker.check(lines)).results
     assert results[0].available is True
 
 
@@ -491,7 +500,7 @@ async def test_check_preserves_line_order(checker: LineChecker) -> None:
             market="spreads", line=-99.0, side="Los Angeles Lakers",
         ),
     ]
-    results = await checker.check(lines)
+    results = (await checker.check(lines)).results
     assert results[0].index == 5
     assert results[1].index == 2
 
@@ -554,3 +563,43 @@ class TestNaNGuard:
         line = self._make_line(-3.0)
         odds = self._make_odds(-3.0)
         assert chk._line_matches(line, odds) is True
+
+
+@pytest.mark.asyncio
+async def test_api_error_on_401_unauthorized() -> None:
+    """A 401 from the Odds API should surface as api_error, not just unavailable lines."""
+    mock_http = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(401, text="Unauthorized")
+        )
+    )
+    odds_client = OddsApiClient(api_key="bad-key", http_client=mock_http)
+    chk = LineChecker(odds_client=odds_client, line_tolerance=0.5)
+
+    lines = [
+        CandidateLine(
+            index=1, sport="basketball_nba", event_id="ev-1",
+            home_team="A", away_team="B",
+            market="h2h", line=None, side="A",
+        ),
+    ]
+    check_result = await chk.check(lines)
+    assert check_result.results[0].available is False
+    assert check_result.api_error is not None
+    assert "401" in check_result.api_error
+
+
+@pytest.mark.asyncio
+async def test_no_api_error_on_success(checker: LineChecker) -> None:
+    """Successful API responses should not set api_error."""
+    lines = [
+        CandidateLine(
+            index=1, sport="basketball_nba",
+            event_id="event-lakers-celtics-001",
+            home_team="Los Angeles Lakers", away_team="Boston Celtics",
+            market="h2h", line=None, side="Los Angeles Lakers",
+        ),
+    ]
+    check_result = await checker.check(lines)
+    assert check_result.api_error is None
+    assert check_result.results[0].available is True

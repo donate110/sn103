@@ -74,6 +74,7 @@ export interface CheckResponse {
   results: LineResult[];
   available_indices: number[];
   response_time_ms: number;
+  api_error?: string | null;
 }
 
 export interface MinerHealthResponse {

@@ -75,6 +75,12 @@ class CheckResponse(BaseModel):
         max_length=256,
         description="Opaque ID for requesting a TLSNotary proof of this check via /v1/proof",
     )
+    api_error: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Set when the upstream odds data source returned an error (e.g. 401, 500). "
+        "Distinguishes 'lines not found' from 'data source is broken'.",
+    )
 
 
 class ProofRequest(BaseModel):

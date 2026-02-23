@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import structlog
@@ -28,6 +29,14 @@ if TYPE_CHECKING:
     pass
 
 log = structlog.get_logger()
+
+
+@dataclass
+class CheckResult:
+    """Result bundle from a check operation: line results plus any API-level error."""
+
+    results: list[LineResult]
+    api_error: str | None = None
 
 
 class LineChecker:
@@ -48,11 +57,12 @@ class LineChecker:
         """The query_id from the most recent odds fetch, for proof requests."""
         return self._odds.last_query_id
 
-    async def check(self, lines: list[CandidateLine]) -> list[LineResult]:
+    async def check(self, lines: list[CandidateLine]) -> CheckResult:
         """Check availability of all candidate lines.
 
         Groups lines by sport to minimize API calls, then checks each line
-        against the fetched odds data.
+        against the fetched odds data. Returns a CheckResult that includes
+        both per-line results and any upstream API error encountered.
         """
         sports = {line.sport for line in lines}
 
@@ -66,10 +76,12 @@ class LineChecker:
         )
 
         any_success = False
+        api_errors: list[str] = []
         for sport, result in zip(fetch_tasks.keys(), results_map):
             if isinstance(result, Exception):
                 log.error("sport_fetch_failed", sport=sport, error=str(result))
                 odds_by_sport[sport] = []
+                api_errors.append(self._describe_api_error(result))
             else:
                 odds_by_sport[sport] = result
                 if not result:
@@ -93,7 +105,14 @@ class LineChecker:
             result = self._check_single_line(line, sport_odds)
             results.append(result)
 
-        return results
+        # Surface a single api_error string when ALL fetches failed (upstream is broken)
+        api_error: str | None = None
+        if api_errors and not any_success:
+            # Deduplicate and join
+            unique_errors = list(dict.fromkeys(api_errors))
+            api_error = "; ".join(unique_errors)
+
+        return CheckResult(results=results, api_error=api_error)
 
     async def _fetch_sport_odds(
         self,
@@ -176,6 +195,23 @@ class LineChecker:
                 return False
 
         return True
+
+    @staticmethod
+    def _describe_api_error(exc: Exception) -> str:
+        """Extract a human-readable error description from an upstream API exception."""
+        import httpx
+
+        from djinn_miner.data.odds_api import CircuitOpenError
+
+        if isinstance(exc, httpx.HTTPStatusError):
+            status = exc.response.status_code
+            reason = exc.response.reason_phrase or "Unknown"
+            return f"Odds API returned {status} {reason}"
+        if isinstance(exc, CircuitOpenError):
+            return f"Odds API circuit breaker open: {exc}"
+        if isinstance(exc, httpx.RequestError):
+            return f"Odds API request failed: {exc}"
+        return f"Odds API error: {exc}"
 
     @staticmethod
     def _side_matches(candidate_side: str, odds_name: str) -> bool:

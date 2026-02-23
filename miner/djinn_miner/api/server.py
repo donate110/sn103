@@ -117,7 +117,7 @@ def create_app(
         """
         start = time.perf_counter()
         try:
-            results = await asyncio.wait_for(
+            check_result = await asyncio.wait_for(
                 checker.check(request.lines),
                 timeout=10.0,
             )
@@ -135,6 +135,7 @@ def create_app(
             )
         elapsed_ms = (time.perf_counter() - start) * 1000
 
+        results = check_result.results
         available_indices = [r.index for r in results if r.available]
 
         CHECKS_PROCESSED.inc()
@@ -146,6 +147,7 @@ def create_app(
             total=len(request.lines),
             available=len(available_indices),
             time_ms=round(elapsed_ms, 1),
+            api_error=check_result.api_error,
         )
 
         return CheckResponse(
@@ -153,6 +155,7 @@ def create_app(
             available_indices=available_indices,
             response_time_ms=round(elapsed_ms, 1),
             query_id=checker.last_query_id,
+            api_error=check_result.api_error,
         )
 
     @app.post("/v1/proof", response_model=ProofResponse)

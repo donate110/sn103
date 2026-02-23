@@ -287,6 +287,19 @@ export default function CreateSignal() {
         const minerClient = getMinerClient();
         const checkResult = await minerClient.checkLines({ lines: candidateLines });
 
+        // If the miner's upstream data source returned an error (e.g. 401, 500),
+        // surface it distinctly so the user knows it's a data-source problem, not
+        // that their pick is unavailable.
+        if (checkResult.api_error) {
+          setStepError(
+            "The miner's odds data source is experiencing errors and cannot verify your lines right now.\n" +
+            `(${checkResult.api_error})\n` +
+            "Please try again in a few minutes.",
+          );
+          setStep("configure");
+          return;
+        }
+
         // Check which lines failed
         const failedLines: number[] = [];
         const realLineIdx = realIndex + 1; // Protocol uses 1-indexed
