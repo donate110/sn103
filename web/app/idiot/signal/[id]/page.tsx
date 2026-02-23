@@ -697,32 +697,54 @@ export default function PurchaseSignal() {
                       )}
                     </div>
                   )}
-                  <input
-                    id="notional"
-                    type="number"
-                    value={notional}
-                    onChange={(e) => setNotional(e.target.value)}
-                    placeholder="100.00"
-                    min={signal.minNotional > 0n ? Number(signal.minNotional) / 1e6 : 0.01}
-                    step="0.01"
-                    max={signal.maxNotional > 0n ? Number(signal.maxNotional - notionalFilled) / 1e6 : undefined}
-                    className="input"
-                    required
-                    disabled={signal.maxNotional > 0n && notionalFilled >= signal.maxNotional}
-                  />
-                  <p className="text-xs text-slate-500 mt-1">
-                    Your notional amount. This determines the signal fee and the Genius&apos;s collateral commitment.
-                    {signal.maxNotional > 0n && notionalFilled < signal.maxNotional && (
-                      <span className="block mt-0.5 text-slate-400">
-                        Remaining: ${formatUsdc(signal.maxNotional - notionalFilled)} of ${formatUsdc(signal.maxNotional)}
-                      </span>
-                    )}
-                    {signal.minNotional > 0n && (
-                      <span className="block mt-0.5 text-slate-400">
-                        Min purchase: ${formatUsdc(signal.minNotional)}
-                      </span>
-                    )}
-                  </p>
+                  {(() => {
+                    const minVal = signal.minNotional > 0n ? Number(signal.minNotional) / 1e6 : 0.01;
+                    const remaining = signal.maxNotional > 0n ? Number(signal.maxNotional - notionalFilled) / 1e6 : 0;
+                    const maxVal = signal.maxNotional > 0n ? remaining : undefined;
+                    const hasRange = maxVal !== undefined && maxVal > minVal;
+                    return (
+                      <>
+                        {hasRange && (
+                          <div className="mb-2">
+                            <input
+                              type="range"
+                              min={minVal}
+                              max={maxVal}
+                              step={0.01}
+                              value={notional || minVal}
+                              onChange={(e) => setNotional(e.target.value)}
+                              className="w-full h-2 bg-slate-200 rounded-full appearance-none cursor-pointer accent-idiot-500"
+                              disabled={signal.maxNotional > 0n && notionalFilled >= signal.maxNotional}
+                            />
+                            <div className="flex justify-between text-[11px] text-slate-400 mt-1">
+                              <button type="button" className="hover:text-idiot-500 transition-colors" onClick={() => setNotional(String(minVal))}>
+                                ${minVal.toFixed(2)}
+                              </button>
+                              <button type="button" className="hover:text-idiot-500 transition-colors" onClick={() => setNotional(String(maxVal))}>
+                                ${maxVal.toFixed(2)}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        <input
+                          id="notional"
+                          type="number"
+                          value={notional}
+                          onChange={(e) => setNotional(e.target.value)}
+                          placeholder={maxVal ? maxVal.toFixed(2) : "100.00"}
+                          min={minVal}
+                          step="0.01"
+                          max={maxVal}
+                          className="input"
+                          required
+                          disabled={signal.maxNotional > 0n && notionalFilled >= signal.maxNotional}
+                        />
+                        <p className="text-xs text-slate-500 mt-1">
+                          Your notional amount. This determines the signal fee and the Genius&apos;s collateral commitment.
+                        </p>
+                      </>
+                    );
+                  })()}
                 </div>
 
 
