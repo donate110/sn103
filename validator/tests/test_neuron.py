@@ -230,6 +230,56 @@ class TestSetWeightsSuccess:
         assert result is False
 
 
+class TestApplyBurn:
+    def test_apply_burn_empty(self) -> None:
+        v = DjinnValidator()
+        result = v.apply_burn({}, 0.95)
+        assert result == {0: 1.0}
+
+    def test_apply_burn_single_miner(self) -> None:
+        v = DjinnValidator()
+        result = v.apply_burn({1: 1.0}, 0.95)
+        assert abs(result[0] - 0.95) < 1e-9
+        assert abs(result[1] - 0.05) < 1e-9
+
+    def test_apply_burn_multiple_miners(self) -> None:
+        v = DjinnValidator()
+        result = v.apply_burn({1: 0.6, 2: 0.3, 3: 0.1}, 0.95)
+        assert abs(result[0] - 0.95) < 1e-9
+        assert abs(result[1] - 0.03) < 1e-9
+        assert abs(result[2] - 0.015) < 1e-9
+        assert abs(result[3] - 0.005) < 1e-9
+
+    def test_apply_burn_uid0_in_input(self) -> None:
+        """UID 0 in miner weights is replaced by burn allocation."""
+        v = DjinnValidator()
+        result = v.apply_burn({0: 0.5, 1: 0.5}, 0.95)
+        assert abs(result[0] - 0.95) < 1e-9
+        assert abs(result[1] - 0.025) < 1e-9
+        assert 0 in result
+        assert len(result) == 2
+
+    def test_apply_burn_sum_to_one(self) -> None:
+        v = DjinnValidator()
+        weights = {i: 1.0 / 10 for i in range(1, 11)}
+        result = v.apply_burn(weights, 0.95)
+        assert abs(sum(result.values()) - 1.0) < 1e-9
+
+    def test_apply_burn_full_burn(self) -> None:
+        """burn_fraction=1.0 sends everything to UID 0."""
+        v = DjinnValidator()
+        result = v.apply_burn({1: 0.5, 2: 0.5}, 1.0)
+        assert result == {0: 1.0}
+
+    def test_apply_burn_zero_burn(self) -> None:
+        """burn_fraction=0.0 leaves miners unchanged."""
+        v = DjinnValidator()
+        result = v.apply_burn({1: 0.6, 2: 0.4}, 0.0)
+        assert abs(result[0] - 0.0) < 1e-9
+        assert abs(result[1] - 0.6) < 1e-9
+        assert abs(result[2] - 0.4) < 1e-9
+
+
 class TestSetupWalletNotFound:
     def test_wallet_not_found(self) -> None:
         """FileNotFoundError in setup returns False with specific logging."""

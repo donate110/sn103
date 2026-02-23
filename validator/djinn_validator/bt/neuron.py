@@ -156,6 +156,41 @@ class DjinnValidator:
             pool.shutdown(wait=False)
             log.debug("metagraph_synced", n=self._safe_item(self.metagraph.n))
 
+    def apply_burn(self, weights: dict[int, float], burn_fraction: float) -> dict[int, float]:
+        """Allocate burn_fraction of weight to UID 0, scale miners to the remainder.
+
+        Args:
+            weights: Mapping of miner UID -> weight (should sum to ~1.0).
+            burn_fraction: Fraction of total weight to assign to UID 0 (e.g. 0.95).
+
+        Returns:
+            New weight dict with UID 0 receiving burn_fraction and miners scaled.
+        """
+        if not weights or burn_fraction >= 1.0:
+            return {0: 1.0}
+
+        miner_fraction = 1.0 - burn_fraction
+        total = sum(weights.values())
+        if total < 1e-12:
+            return {0: 1.0}
+
+        scale = miner_fraction / total
+        result: dict[int, float] = {0: burn_fraction}
+        for uid, w in weights.items():
+            if uid == 0:
+                continue
+            scaled = w * scale
+            if scaled > 1e-12:
+                result[uid] = scaled
+
+        log.info(
+            "burn_applied",
+            burn_fraction=burn_fraction,
+            miner_count=len(result) - 1,
+            miner_weight=round(miner_fraction, 4),
+        )
+        return result
+
     def set_weights(self, weights: dict[int, float]) -> bool:
         """Set miner weights on the Bittensor network.
 

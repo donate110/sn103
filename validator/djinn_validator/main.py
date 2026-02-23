@@ -235,17 +235,18 @@ async def epoch_loop(
             # so that challenge data accumulates across the full interval
             if neuron.should_set_weights():
                 weights = scorer.compute_weights(is_active)
-                if weights:
-                    success = neuron.set_weights(weights)
-                    if success:
-                        neuron.record_weight_set()
-                        if activity is not None:
-                            activity.record(
-                                ActivityCategory.WEIGHT_SET,
-                                f"Set weights for {len(weights)} miners",
-                                n_miners=len(weights), is_active=is_active,
-                            )
-                    log.info("weights_updated", n_miners=len(weights), active=is_active, success=success)
+                weights = neuron.apply_burn(weights or {}, config.bt_burn_fraction)
+                n_miners = len(weights) - 1  # exclude UID 0 burn entry
+                success = neuron.set_weights(weights)
+                if success:
+                    neuron.record_weight_set()
+                    if activity is not None:
+                        activity.record(
+                            ActivityCategory.WEIGHT_SET,
+                            f"Set weights for {n_miners} miners (burn={config.bt_burn_fraction})",
+                            n_miners=n_miners, is_active=is_active,
+                        )
+                log.info("weights_updated", n_miners=n_miners, active=is_active, success=success)
                 # Reset per-epoch metrics after weight setting (increments
                 # consecutive_epochs for miners that participated)
                 scorer.reset_epoch()
