@@ -31,9 +31,10 @@ function isValidOrigin(request: NextRequest): boolean {
   if (!origin) return true; // same-origin requests omit Origin
   const allowed = [
     process.env.NEXT_PUBLIC_APP_URL || "https://djinn.gg",
+    "https://www.djinn.gg",
     ...(process.env.NODE_ENV !== "production" ? ["http://localhost:3000"] : []),
   ];
-  return allowed.includes(origin);
+  return allowed.includes(origin) || origin.endsWith(".vercel.app");
 }
 
 async function proxy(
