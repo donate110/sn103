@@ -82,7 +82,23 @@ interface BurnHourStat {
   amount: number;
 }
 
-type AdminTab = "overview" | "network" | "protocol" | "attestations";
+interface FeedbackEntry {
+  id: number;
+  title: string;
+  body: string;
+  state: string;
+  labels: string[];
+  created_at: string;
+  updated_at: string;
+  html_url: string;
+  message?: string;
+  source?: string;
+  page?: string;
+  wallet?: string;
+  errorMessage?: string;
+}
+
+type AdminTab = "overview" | "network" | "protocol" | "attestations" | "feedback";
 
 const GRAFANA_URL = process.env.NEXT_PUBLIC_GRAFANA_URL || "";
 const BASE_EXPLORER = process.env.NEXT_PUBLIC_BASE_EXPLORER || "https://basescan.org";
@@ -117,6 +133,10 @@ export default function AdminDashboard() {
   const [attestations, setAttestations] = useState<AttestationEntry[]>([]);
   const [burnStats, setBurnStats] = useState<BurnHourStat[]>([]);
   const [hideZeroBurns, setHideZeroBurns] = useState(true);
+
+  // Feedback tab data
+  const [feedback, setFeedback] = useState<FeedbackEntry[]>([]);
+  const [feedbackFilter, setFeedbackFilter] = useState<"all" | "open" | "closed">("all");
 
   // Check for existing admin session cookie (set by server-side auth)
   useEffect(() => {
@@ -166,6 +186,9 @@ export default function AdminDashboard() {
     if (activeTab === "attestations") {
       fetches.push(fetchAttestationData());
     }
+    if (activeTab === "feedback") {
+      fetches.push(fetchFeedback(feedbackFilter));
+    }
 
     const results = await Promise.allSettled(fetches);
 
@@ -197,10 +220,13 @@ export default function AdminDashboard() {
       setAttestations(ad.attestations);
       setBurnStats(ad.burnStats);
     }
+    if (activeTab === "feedback" && results[4]?.status === "fulfilled") {
+      setFeedback(results[4].value as FeedbackEntry[]);
+    }
 
     setLastRefresh(new Date());
     setLoading(false);
-  }, [activeTab]);
+  }, [activeTab, feedbackFilter]);
 
   useEffect(() => {
     if (!authed) return;
@@ -281,6 +307,7 @@ export default function AdminDashboard() {
             ["network", "Network"],
             ["protocol", "Protocol"],
             ["attestations", "Attestations"],
+            ["feedback", "Feedback"],
           ] as const
         ).map(([tab, label]) => (
           <button
@@ -563,6 +590,15 @@ export default function AdminDashboard() {
           burnStats={burnStats}
           hideZeros={hideZeroBurns}
           onToggleZeros={() => setHideZeroBurns((h) => !h)}
+          loading={loading}
+        />
+      )}
+
+      {activeTab === "feedback" && (
+        <FeedbackTab
+          feedback={feedback}
+          filter={feedbackFilter}
+          onFilterChange={(f) => { setFeedbackFilter(f); }}
           loading={loading}
         />
       )}
@@ -959,6 +995,166 @@ function AttestationsTab({
 }
 
 // ---------------------------------------------------------------------------
+// Feedback Tab
+// ---------------------------------------------------------------------------
+
+const SOURCE_COLORS: Record<string, string> = {
+  "error-boundary": "bg-red-100 text-red-700",
+  "report-button": "bg-blue-100 text-blue-700",
+  "api-error": "bg-amber-100 text-amber-700",
+  other: "bg-slate-100 text-slate-600",
+};
+
+function FeedbackTab({
+  feedback,
+  filter,
+  onFilterChange,
+  loading,
+}: {
+  feedback: FeedbackEntry[];
+  filter: "all" | "open" | "closed";
+  onFilterChange: (f: "all" | "open" | "closed") => void;
+  loading: boolean;
+}) {
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  if (loading && feedback.length === 0) {
+    return <div className="text-center text-slate-400 py-12">Loading feedback...</div>;
+  }
+
+  const crashes = feedback.filter((f) => f.labels.includes("crash")).length;
+  const openCount = feedback.filter((f) => f.state === "open").length;
+
+  return (
+    <div className="space-y-8">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+          <div className="text-xs text-blue-600 font-medium">Total Reports</div>
+          <div className="text-2xl font-bold text-blue-900 mt-1">{feedback.length}</div>
+        </div>
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="text-xs text-amber-600 font-medium">Open</div>
+          <div className="text-2xl font-bold text-amber-900 mt-1">{openCount}</div>
+        </div>
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+          <div className="text-xs text-red-600 font-medium">Crashes</div>
+          <div className="text-2xl font-bold text-red-900 mt-1">{crashes}</div>
+        </div>
+        <div className="rounded-xl border border-green-200 bg-green-50 p-4">
+          <div className="text-xs text-green-600 font-medium">Resolved</div>
+          <div className="text-2xl font-bold text-green-900 mt-1">{feedback.length - openCount}</div>
+        </div>
+      </div>
+
+      {/* Filter + List */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+          <h3 className="text-sm font-medium text-slate-700">
+            User Feedback
+            <span className="ml-2 text-xs text-slate-400">({feedback.length})</span>
+          </h3>
+          <div className="flex gap-1.5">
+            {(["all", "open", "closed"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => onFilterChange(f)}
+                className={`px-2.5 py-1 text-[11px] font-medium rounded transition-colors ${
+                  filter === f
+                    ? "bg-slate-900 text-white"
+                    : "bg-slate-200 text-slate-500 hover:bg-slate-300"
+                }`}
+              >
+                {f.charAt(0).toUpperCase() + f.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {feedback.length === 0 ? (
+          <div className="px-4 py-8 text-center text-slate-400 text-sm">
+            No feedback reports yet
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
+            {feedback.map((f) => {
+              const isExpanded = expandedId === f.id;
+              const date = new Date(f.created_at);
+              const source = f.source || (f.labels.includes("crash") ? "error-boundary" : "report-button");
+              return (
+                <div key={f.id} className="hover:bg-slate-50">
+                  <button
+                    onClick={() => setExpandedId(isExpanded ? null : f.id)}
+                    className="w-full px-4 py-3 text-left"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`inline-block px-1.5 py-0.5 text-[10px] font-medium rounded ${
+                            SOURCE_COLORS[source] || SOURCE_COLORS.other
+                          }`}>
+                            {source.replace("-", " ")}
+                          </span>
+                          <span className={`inline-block px-1.5 py-0.5 text-[10px] font-medium rounded ${
+                            f.state === "open" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"
+                          }`}>
+                            {f.state}
+                          </span>
+                          {f.wallet && (
+                            <span className="text-[10px] font-mono text-slate-400">{f.wallet}</span>
+                          )}
+                        </div>
+                        <p className="text-sm text-slate-900 truncate">
+                          {f.message || f.title.replace("[User Report] ", "")}
+                        </p>
+                        {f.page && (
+                          <p className="text-[11px] text-slate-400 mt-0.5 truncate">{f.page}</p>
+                        )}
+                      </div>
+                      <div className="text-right whitespace-nowrap flex-shrink-0">
+                        <span className="text-[10px] text-slate-400 block">{date.toLocaleDateString()}</span>
+                        <span className="text-[10px] text-slate-400 block">{date.toLocaleTimeString()}</span>
+                      </div>
+                    </div>
+                  </button>
+
+                  {isExpanded && (
+                    <div className="px-4 pb-3 space-y-2">
+                      {f.errorMessage && (
+                        <div className="p-2 bg-red-50 border border-red-200 rounded-lg">
+                          <p className="text-xs text-red-700 font-mono whitespace-pre-wrap break-all">
+                            {f.errorMessage}
+                          </p>
+                        </div>
+                      )}
+                      {f.body && (
+                        <div className="text-xs text-slate-600 whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto bg-slate-50 rounded-lg p-2 border border-slate-200">
+                          {f.body.slice(0, 1500)}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-3">
+                        <a
+                          href={f.html_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                        >
+                          View on GitHub #{f.id}
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Shared components
 // ---------------------------------------------------------------------------
 
@@ -1218,6 +1414,20 @@ async function fetchAttestationData(): Promise<{ attestations: AttestationEntry[
     return { attestations, burnStats };
   } catch {
     return { attestations: [], burnStats: [] };
+  }
+}
+
+async function fetchFeedback(state: "all" | "open" | "closed"): Promise<FeedbackEntry[]> {
+  try {
+    const res = await fetch(`/api/admin/feedback?limit=50&state=${state}`, {
+      signal: AbortSignal.timeout(10_000),
+      credentials: "same-origin",
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.feedback || [];
+  } catch {
+    return [];
   }
 }
 
