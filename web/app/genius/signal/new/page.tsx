@@ -357,14 +357,25 @@ export default function CreateSignal() {
       // same key, enabling cross-device recovery.
       if (!walletClient) throw new Error("Wallet not connected");
       let aesKey: Uint8Array;
+      let didSignTypedData = false;
       try {
         const masterSeed = await deriveMasterSeedTyped(
-          (params) => walletClient.signTypedData(params),
+          async (params) => {
+            const sig = await walletClient.signTypedData(params);
+            didSignTypedData = true;
+            return sig;
+          },
         );
         aesKey = await deriveSignalKey(masterSeed, signalId);
       } catch (keyErr) {
         console.warn("EIP-712 key derivation failed, using random key (cross-device recovery unavailable):", keyErr);
         aesKey = generateAesKey();
+      }
+
+      // Coinbase Smart Wallet needs time between wallet popups — if we
+      // just closed a signTypedData popup, wait before opening writeContract
+      if (didSignTypedData) {
+        await new Promise((r) => setTimeout(r, 1500));
       }
 
       const pickPayload = JSON.stringify({
