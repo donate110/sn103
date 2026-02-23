@@ -764,14 +764,17 @@ def create_app(
         miner_axons: list[dict] = []
         if neuron:
             for uid in neuron.get_miner_uids():
-                axon = neuron.get_axon_info(uid)
-                ip = axon.get("ip", "")
-                port = axon.get("port", 0)
-                if ip and port:
-                    miner_axons.append({
-                        "uid": uid, "ip": ip, "port": port,
-                        "hotkey": axon.get("hotkey", ""),
-                    })
+                try:
+                    axon = neuron.get_axon_info(uid)
+                    ip = axon.get("ip", "")
+                    port = axon.get("port", 0)
+                    if ip and port:
+                        miner_axons.append({
+                            "uid": uid, "ip": ip, "port": port,
+                            "hotkey": axon.get("hotkey", ""),
+                        })
+                except (IndexError, KeyError, AttributeError) as exc:
+                    log.warning("attest_axon_lookup_failed", uid=uid, error=str(exc))
 
         if not miner_axons:
             # Refund the burn credit since no miner can process the request

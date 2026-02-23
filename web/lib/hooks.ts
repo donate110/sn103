@@ -49,6 +49,8 @@ const REVERT_PATTERNS: [RegExp, string][] = [
   [/nonce.*already.*used/i, "Transaction nonce conflict — please wait and try again"],
   [/replacement.*underpriced/i, "Gas price too low — try increasing gas"],
   [/insufficient funds for gas/i, "Not enough ETH to cover gas fees"],
+  [/No request found/i, "Wallet lost track of the request — please try again"],
+  [/execution reverted/i, "Transaction reverted on-chain — check your balances and try again"],
 ];
 
 /** Convert a raw transaction error to a user-friendly message. */

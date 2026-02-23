@@ -710,15 +710,6 @@ export default function PurchaseSignal() {
                   </p>
                 </div>
 
-                {marketOdds && (
-                  <div className="rounded-lg bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Market Odds</p>
-                    <p className="text-lg font-bold text-slate-900">{marketOdds.toFixed(2)}</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      Best available odds via miner network
-                    </p>
-                  </div>
-                )}
 
                 {notional && (
                   <div className="rounded-lg bg-slate-50 p-3 space-y-2">
