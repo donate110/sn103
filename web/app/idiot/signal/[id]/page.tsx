@@ -667,7 +667,7 @@ export default function PurchaseSignal() {
             {address && signal.genius && address.toLowerCase() === signal.genius.toLowerCase() && (
               <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 mb-4" role="status">
                 <p className="text-xs text-amber-700 font-medium">
-                  This is your own signal. You can still purchase it, but it won&apos;t affect your track record.
+                  Heads up: this is your own signal.
                 </p>
               </div>
             )}
