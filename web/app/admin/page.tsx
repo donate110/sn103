@@ -6,12 +6,10 @@ import {
   fetchRecentSignals,
   fetchRecentPurchases,
   fetchRecentAudits,
-  fetchRecentTrackRecordProofs,
   type SubgraphProtocolStats,
   type SubgraphRecentSignal,
   type SubgraphRecentPurchase,
   type SubgraphRecentAudit,
-  type SubgraphRecentTrackRecord,
 } from "@/lib/subgraph";
 import { formatUsdc } from "@/lib/types";
 
@@ -92,7 +90,6 @@ export default function AdminDashboard() {
   const [recentSignals, setRecentSignals] = useState<SubgraphRecentSignal[]>([]);
   const [recentPurchases, setRecentPurchases] = useState<SubgraphRecentPurchase[]>([]);
   const [recentAudits, setRecentAudits] = useState<SubgraphRecentAudit[]>([]);
-  const [recentTrackRecords, setRecentTrackRecords] = useState<SubgraphRecentTrackRecord[]>([]);
 
   // Check for existing admin session cookie (set by server-side auth)
   useEffect(() => {
@@ -138,7 +135,6 @@ export default function AdminDashboard() {
       fetches.push(fetchRecentSignals(50));
       fetches.push(fetchRecentPurchases(50));
       fetches.push(fetchRecentAudits(50));
-      fetches.push(fetchRecentTrackRecordProofs(50));
     }
 
     const results = await Promise.allSettled(fetches);
@@ -163,7 +159,6 @@ export default function AdminDashboard() {
       if (results[4]?.status === "fulfilled") setRecentSignals(results[4].value as SubgraphRecentSignal[]);
       if (results[5]?.status === "fulfilled") setRecentPurchases(results[5].value as SubgraphRecentPurchase[]);
       if (results[6]?.status === "fulfilled") setRecentAudits(results[6].value as SubgraphRecentAudit[]);
-      if (results[7]?.status === "fulfilled") setRecentTrackRecords(results[7].value as SubgraphRecentTrackRecord[]);
     }
 
     setLastRefresh(new Date());
@@ -412,7 +407,7 @@ export default function AdminDashboard() {
           {stats && (
             <div className="mb-8">
               <h2 className="text-xl font-semibold text-slate-900 mb-4">Protocol Statistics</h2>
-              <div className="bg-white rounded-xl border border-slate-200 p-6 grid grid-cols-2 sm:grid-cols-4 gap-6">
+              <div className="bg-white rounded-xl border border-slate-200 p-6 grid grid-cols-3 gap-6">
                 <div>
                   <span className="text-xs text-slate-400 block mb-1">Unique Geniuses</span>
                   <span className="text-2xl font-bold text-slate-900">{stats.uniqueGeniuses}</span>
@@ -424,10 +419,6 @@ export default function AdminDashboard() {
                 <div>
                   <span className="text-xs text-slate-400 block mb-1">Total Audits</span>
                   <span className="text-2xl font-bold text-slate-900">{stats.totalAudits}</span>
-                </div>
-                <div>
-                  <span className="text-xs text-slate-400 block mb-1">Track Record Proofs</span>
-                  <span className="text-2xl font-bold text-slate-900">{stats.totalTrackRecordProofs}</span>
                 </div>
               </div>
             </div>
@@ -524,7 +515,6 @@ export default function AdminDashboard() {
           signals={recentSignals}
           purchases={recentPurchases}
           audits={recentAudits}
-          trackRecords={recentTrackRecords}
           loading={loading}
         />
       )}
@@ -610,13 +600,11 @@ function ProtocolActivityTab({
   signals,
   purchases,
   audits,
-  trackRecords,
   loading,
 }: {
   signals: SubgraphRecentSignal[];
   purchases: SubgraphRecentPurchase[];
   audits: SubgraphRecentAudit[];
-  trackRecords: SubgraphRecentTrackRecord[];
   loading: boolean;
 }) {
   if (loading && signals.length === 0 && purchases.length === 0) {
@@ -676,20 +664,6 @@ function ProtocolActivityTab({
         ))}
       </ActivitySection>
 
-      {/* Track Record Proofs */}
-      <ActivitySection title="Track Record Proofs" count={trackRecords.length}>
-        {trackRecords.slice(0, 25).map((tr) => (
-          <ActivityRow
-            key={tr.id}
-            badge={`${tr.signalCount} signals`}
-            badgeColor="bg-purple-100 text-purple-700"
-            title={`Proof #${tr.id} by ${truncAddr(tr.genius.id)}`}
-            subtitle={`W/L/V: ${tr.favCount}/${tr.unfavCount}/${tr.voidCount} | +${formatUsdc(BigInt(tr.totalGain))} / -${formatUsdc(BigInt(tr.totalLoss))}`}
-            timestamp={Number(tr.submittedAt)}
-            txHash={tr.submittedAtTx}
-          />
-        ))}
-      </ActivitySection>
     </div>
   );
 }

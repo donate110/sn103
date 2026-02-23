@@ -193,6 +193,11 @@ TEAM_ALIASES: dict[str, str] = {
     "bolts": "tampa bay lightning",
     "jets": "winnipeg jets",
     "stars": "dallas stars",
+    # Cross-source aliases (Odds API vs ESPN naming differences)
+    "los angeles clippers": "la clippers",
+    "utah hockey club": "utah mammoth",
+    "connecticut huskies": "uconn huskies",
+    "connecticut": "uconn",
 }
 
 
@@ -398,7 +403,14 @@ def normalize_team(name: str) -> str:
 
     Checks the alias table first, then falls back to lowercased input.
     """
-    lower = name.strip().lower()
+    import unicodedata
+    # Strip accents (é → e, etc.) and normalize unicode
+    nfkd = unicodedata.normalize("NFKD", name)
+    lower = "".join(c for c in nfkd if not unicodedata.combining(c)).strip().lower()
+    # Normalize & to and
+    lower = lower.replace("&", "and")
+    # Strip apostrophes/okina (Hawai'i → hawaii)
+    lower = lower.replace("'", "").replace("\u02bb", "").replace("\u2018", "").replace("\u2019", "")
     return TEAM_ALIASES.get(lower, lower)
 
 

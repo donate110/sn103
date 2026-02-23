@@ -43,21 +43,7 @@ export const SPORT_GROUPS: SportGroup[] = [
     label: "Soccer",
     sports: [
       { key: "soccer_epl", label: "EPL" },
-      { key: "soccer_spain_la_liga", label: "La Liga" },
-      { key: "soccer_germany_bundesliga", label: "Bundesliga" },
-      { key: "soccer_italy_serie_a", label: "Serie A" },
-      { key: "soccer_france_ligue_one", label: "Ligue 1" },
-      { key: "soccer_uefa_champs_league", label: "Champions League" },
       { key: "soccer_usa_mls", label: "MLS" },
-    ],
-  },
-  {
-    label: "Other",
-    sports: [
-      { key: "mma_mixed_martial_arts", label: "MMA" },
-      { key: "tennis_atp_french_open", label: "Tennis (ATP)" },
-      { key: "golf_pga_championship_winner", label: "Golf (PGA)" },
-      { key: "boxing_boxing", label: "Boxing" },
     ],
   },
 ];

@@ -466,6 +466,9 @@ export default function GeniusDashboard() {
                   {depositLoading ? "Depositing..." : "Deposit"}
                 </button>
               </div>
+              <p className="text-xs text-slate-400 mt-1">
+                First deposit requires a one-time USDC approval.
+              </p>
             </form>
             <form onSubmit={(e) => { e.preventDefault(); handleWithdraw(); }}>
               <label htmlFor="withdrawCollateral" className="label">Withdraw Available Collateral</label>

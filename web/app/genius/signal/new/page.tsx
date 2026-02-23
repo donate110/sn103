@@ -482,6 +482,7 @@ export default function CreateSignal() {
       saveSavedSignals(geniusAddress, updated);
 
       setStep("success");
+      setTimeout(() => router.push("/genius"), 3000);
     } catch (err) {
       const { humanizeError } = await import("@/lib/hooks");
       const msg = humanizeError(err, "Signal creation failed");
@@ -1118,6 +1119,12 @@ export default function CreateSignal() {
         Set your pricing and expiration.
       </p>
 
+      {(commitError || stepError) && (
+        <div className="rounded-lg bg-red-50 border border-red-200 p-4 mb-6" role="alert">
+          <p className="text-sm text-red-600 whitespace-pre-line">{commitError || stepError}</p>
+        </div>
+      )}
+
       {realPick && (
         <div className="rounded-lg bg-genius-50 border border-genius-200 p-4 mb-6">
           <p className="text-xs text-genius-600 uppercase tracking-wide mb-1">Your Pick</p>
@@ -1344,12 +1351,6 @@ export default function CreateSignal() {
             );
           })()}
         </div>
-        )}
-
-        {(commitError || stepError) && (
-          <div className="rounded-lg bg-red-50 border border-red-200 p-4" role="alert">
-            <p className="text-sm text-red-600 whitespace-pre-line">{commitError || stepError}</p>
-          </div>
         )}
 
         <SecretModal
