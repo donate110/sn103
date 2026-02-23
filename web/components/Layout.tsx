@@ -14,6 +14,7 @@ const NAV_LINKS = [
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/attest", label: "Attest" },
   { href: "/about", label: "About" },
+  { href: "/education", label: "Education" },
   { href: "/press", label: "Press" },
 ] as const;
 
@@ -238,6 +239,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <ul className="space-y-2 text-sm text-slate-500">
                 <li><a href="https://github.com/djinn-inc/djinn" target="_blank" rel="noopener noreferrer" className="hover:text-slate-700 transition-colors">GitHub</a></li>
                 <li><a href="https://github.com/djinn-inc/djinn/blob/main/docs/whitepaper.md" target="_blank" rel="noopener noreferrer" className="hover:text-slate-700 transition-colors">Whitepaper</a></li>
+                <li><Link href="/education" className="hover:text-slate-700 transition-colors">Education &amp; Research</Link></li>
                 <li><Link href="/about" className="hover:text-slate-700 transition-colors">About</Link></li>
               </ul>
             </div>
