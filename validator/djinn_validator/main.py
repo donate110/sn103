@@ -365,7 +365,14 @@ async def async_main() -> None:
     )
 
     bt_ok = neuron.setup()
-    if not bt_ok:
+    if not bt_ok and config.bt_network in ("finney", "mainnet"):
+        log.error(
+            "bt_setup_failed_production",
+            msg="Wallet/subtensor setup failed on production network — refusing to start. "
+            "Check that your coldkeypub.txt is valid JSON: {\"ss58Address\": \"5Your...\"}",
+        )
+        raise SystemExit(1)
+    elif not bt_ok:
         log.warning(
             "running_without_bittensor",
             msg="Validator API will start but no weights will be set",

@@ -132,6 +132,13 @@ async def async_main() -> None:
     if bt_ok:
         health_tracker.set_uid(neuron.uid)  # type: ignore[arg-type]
         health_tracker.set_bt_connected(True)
+    elif config.bt_network in ("finney", "mainnet"):
+        log.error(
+            "bt_setup_failed_production",
+            msg="Wallet/subtensor setup failed on production network — refusing to start. "
+            "Check that your coldkeypub.txt is valid JSON: {\"ss58Address\": \"5Your...\"}",
+        )
+        raise SystemExit(1)
     else:
         log.warning(
             "running_without_bittensor",

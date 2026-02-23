@@ -11,7 +11,7 @@ from djinn_validator.core.outcomes import OutcomeAttestor
 from djinn_validator.core.scoring import MinerScorer
 from djinn_validator.core.shares import ShareStore
 from djinn_validator.core.mpc_coordinator import MPCCoordinator
-from djinn_validator.main import epoch_loop, mpc_cleanup_loop
+from djinn_validator.main import async_main, epoch_loop, mpc_cleanup_loop
 
 
 @pytest.fixture
@@ -323,3 +323,127 @@ class TestMPCCleanupLoop:
         with patch("djinn_validator.main.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             mock_sleep.side_effect = asyncio.CancelledError()
             await mpc_cleanup_loop(coordinator)
+
+
+class TestAsyncMainBtFailure:
+    """Test that async_main exits on production when BT setup fails."""
+
+    @pytest.mark.asyncio
+    async def test_bt_failure_exits_on_finney(self, tmp_path) -> None:
+        """On finney, a BT setup failure should raise SystemExit(1)."""
+        mock_config = MagicMock()
+        mock_config.bt_network = "finney"
+        mock_config.validate.return_value = []
+        mock_config.data_dir = str(tmp_path)
+        mock_config.sports_api_key = "test"
+        mock_config.base_rpc_url = "https://rpc.test.com"
+        mock_config.base_chain_id = 8453
+        mock_config.escrow_address = ""
+        mock_config.signal_commitment_address = ""
+        mock_config.account_address = ""
+        mock_config.outcome_voting_address = ""
+        mock_config.base_validator_private_key = ""
+        mock_config.api_host = "0.0.0.0"
+        mock_config.api_port = 8421
+        mock_config.bt_netuid = 103
+        mock_config.bt_wallet_name = "default"
+        mock_config.bt_wallet_hotkey = "default"
+        mock_config.external_ip = ""
+        mock_config.external_port = 0
+
+        mock_neuron = MagicMock()
+        mock_neuron.setup.return_value = False
+
+        with (
+            patch("djinn_validator.main.Config", return_value=mock_config),
+            patch("djinn_validator.main.DjinnValidator", return_value=mock_neuron),
+            patch("djinn_validator.main.ChainClient"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            await async_main()
+
+        assert exc_info.value.code == 1
+
+    @pytest.mark.asyncio
+    async def test_bt_failure_exits_on_mainnet(self, tmp_path) -> None:
+        """On mainnet, a BT setup failure should raise SystemExit(1)."""
+        mock_config = MagicMock()
+        mock_config.bt_network = "mainnet"
+        mock_config.validate.return_value = []
+        mock_config.data_dir = str(tmp_path)
+        mock_config.sports_api_key = "test"
+        mock_config.base_rpc_url = "https://rpc.test.com"
+        mock_config.base_chain_id = 8453
+        mock_config.escrow_address = ""
+        mock_config.signal_commitment_address = ""
+        mock_config.account_address = ""
+        mock_config.outcome_voting_address = ""
+        mock_config.base_validator_private_key = ""
+        mock_config.api_host = "0.0.0.0"
+        mock_config.api_port = 8421
+        mock_config.bt_netuid = 103
+        mock_config.bt_wallet_name = "default"
+        mock_config.bt_wallet_hotkey = "default"
+        mock_config.external_ip = ""
+        mock_config.external_port = 0
+
+        mock_neuron = MagicMock()
+        mock_neuron.setup.return_value = False
+
+        with (
+            patch("djinn_validator.main.Config", return_value=mock_config),
+            patch("djinn_validator.main.DjinnValidator", return_value=mock_neuron),
+            patch("djinn_validator.main.ChainClient"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            await async_main()
+
+        assert exc_info.value.code == 1
+
+    @pytest.mark.asyncio
+    async def test_bt_failure_continues_on_test_network(self, tmp_path) -> None:
+        """On test/local networks, BT failure should NOT exit."""
+        mock_config = MagicMock()
+        mock_config.bt_network = "test"
+        mock_config.validate.return_value = []
+        mock_config.data_dir = str(tmp_path)
+        mock_config.sports_api_key = "test"
+        mock_config.base_rpc_url = "https://rpc.test.com"
+        mock_config.base_chain_id = 8453
+        mock_config.escrow_address = ""
+        mock_config.signal_commitment_address = ""
+        mock_config.account_address = ""
+        mock_config.outcome_voting_address = ""
+        mock_config.base_validator_private_key = ""
+        mock_config.api_host = "0.0.0.0"
+        mock_config.api_port = 8421
+        mock_config.bt_netuid = 103
+        mock_config.bt_wallet_name = "default"
+        mock_config.bt_wallet_hotkey = "default"
+        mock_config.external_ip = ""
+        mock_config.external_port = 0
+        mock_config.rate_limit_capacity = 60
+        mock_config.rate_limit_rate = 10
+        mock_config.mpc_availability_timeout = 15.0
+        mock_config.shares_threshold = 7
+        mock_config.attest_burn_amount = 0.0001
+        mock_config.attest_burn_address = "5GrsjiBeCErhUGj339vu5GubTgyJMyZLGQqUFBJAtKrCziU9"
+
+        mock_neuron = MagicMock()
+        mock_neuron.setup.return_value = False
+
+        shutdown_event = asyncio.Event()
+        shutdown_event.set()
+
+        with (
+            patch("djinn_validator.main.Config", return_value=mock_config),
+            patch("djinn_validator.main.DjinnValidator", return_value=mock_neuron),
+            patch("djinn_validator.main.ChainClient"),
+            patch("djinn_validator.main.create_app"),
+            patch("djinn_validator.main.run_server", new_callable=AsyncMock),
+            patch("djinn_validator.main.mpc_cleanup_loop", new_callable=AsyncMock),
+            patch("djinn_validator.main.asyncio.Event", return_value=shutdown_event),
+            patch("asyncio.get_running_loop") as mock_loop,
+        ):
+            mock_loop.return_value.add_signal_handler = MagicMock()
+            await async_main()
