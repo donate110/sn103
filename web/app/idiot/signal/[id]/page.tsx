@@ -619,7 +619,7 @@ export default function PurchaseSignal() {
 
             {/* Lines hidden pre-purchase — idiot can't distinguish real from decoy */}
             <p className="text-xs text-slate-400 italic">
-              {signal.decoyLines.length} encrypted lines &mdash; the real pick is revealed after purchase.
+              {signal.decoyLines.length} encrypted lines &mdash; the real signal is revealed after purchase.
             </p>
           </div>
 
