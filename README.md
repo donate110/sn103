@@ -89,7 +89,7 @@ Djinn provides a public web attestation service at [djinn.gg/attest](https://dji
 
 **Use cases:** Legal evidence, journalism verification, governance transparency, academic citations.
 
-**Burn address:** `5GrsjiBeCErhUGj339vu5GubTgyJMyZLGQqUFBJAtKrCziU9`
+**Burn address:** `5E9tjcvFc9F9xPzGeCDoSkHoWKWmUvq4T4saydcSGL5ZbxKV`
 
 ---
 

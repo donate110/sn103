@@ -186,7 +186,7 @@ test.describe("Attest page", () => {
     // Should mention the burn address or TAO cost
     const body = await page.locator("body").textContent();
     expect(
-      body!.includes("5GrsjiBeCErhUGj339vu5GubTgyJMyZLGQqUFBJAtKrCziU9") ||
+      body!.includes("5E9tjcvFc9F9xPzGeCDoSkHoWKWmUvq4T4saydcSGL5ZbxKV") ||
         body!.includes("TAO") ||
         body!.includes("burn") ||
         body!.includes("Burn"),

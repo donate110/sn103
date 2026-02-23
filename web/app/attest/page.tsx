@@ -24,7 +24,7 @@ interface BatchItem {
   elapsed?: number;
 }
 
-const BURN_ADDRESS = "5GrsjiBeCErhUGj339vu5GubTgyJMyZLGQqUFBJAtKrCziU9";
+const BURN_ADDRESS = "5E9tjcvFc9F9xPzGeCDoSkHoWKWmUvq4T4saydcSGL5ZbxKV";
 const COST_PER_ATTEST = 0.0001;
 
 function useElapsedTimer(running: boolean) {

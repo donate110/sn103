@@ -93,7 +93,7 @@ class Config:
     attest_burn_amount: float = _float_env("ATTEST_BURN_AMOUNT", "0.0001")
     attest_burn_address: str = os.getenv(
         "ATTEST_BURN_ADDRESS",
-        "5GrsjiBeCErhUGj339vu5GubTgyJMyZLGQqUFBJAtKrCziU9",  # Djinn-specific burn wallet (seed discarded)
+        "5E9tjcvFc9F9xPzGeCDoSkHoWKWmUvq4T4saydcSGL5ZbxKV",  # Djinn burn collection wallet (controlled)
     )
 
     # Data directory for SQLite databases (shares, burns, purchases)

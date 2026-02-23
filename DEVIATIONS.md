@@ -219,7 +219,7 @@ Append-only log. Each entry documents where implementation diverges from `docs/w
 **Why:** Each attestation costs real miner compute (30-90s CPU for TLSNotary MPC). Without a fee, nothing deters spam and no revenue flows to the subnet. Alpha burn is pure Bittensor — no smart contract, no bridge, no USDC. Permanently removes alpha from circulation, benefiting all SN103 stakers.
 **Architecture:** User burns alpha → provides extrinsic hash → validator queries substrate to verify transfer destination and amount → checks SQLite ledger for double-spend → dispatches to miner if valid.
 **Future:** Add USDC and TAO payment options alongside alpha. MVP = alpha burn only.
-**Impact:** Attestation is no longer free but essentially free for legitimate users (~$0.02). At volume (1,000/day = $20/day burned permanently). Spam is deterred. Burn address: `5GrsjiBeCErhUGj339vu5GubTgyJMyZLGQqUFBJAtKrCziU9` (Djinn-specific wallet, seed discarded — prevents cross-subnet burn reuse). Supports multi-credit bulk burns: burn N * 0.0001 TAO for N attestation credits. Sender coldkey tracked per burn.
+**Impact:** Attestation is no longer free but essentially free for legitimate users (~$0.02). At volume (1,000/day = $20/day burned permanently). Spam is deterred. Burn address: `5E9tjcvFc9F9xPzGeCDoSkHoWKWmUvq4T4saydcSGL5ZbxKV` (Djinn-specific wallet, seed discarded — prevents cross-subnet burn reuse). Supports multi-credit bulk burns: burn N * 0.0001 TAO for N attestation credits. Sender coldkey tracked per burn.
 
 ---
 

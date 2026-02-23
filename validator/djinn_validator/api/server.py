@@ -181,7 +181,7 @@ def create_app(
     shares_threshold: int = 7,
     burn_ledger: BurnLedger | None = None,
     attest_burn_amount: float = 0.0001,
-    attest_burn_address: str = "5GrsjiBeCErhUGj339vu5GubTgyJMyZLGQqUFBJAtKrCziU9",
+    attest_burn_address: str = "5E9tjcvFc9F9xPzGeCDoSkHoWKWmUvq4T4saydcSGL5ZbxKV",
     scorer: MinerScorer | None = None,
     activity_buffer: ActivityBuffer | None = None,
     audit_set_store: AuditSetStore | None = None,
