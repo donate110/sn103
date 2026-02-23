@@ -42,6 +42,8 @@ interface MinerNode {
 
 interface ValidatorHealth {
   uid: number;
+  ip: string;
+  port: number;
   status: string;
   version: string;
   shares_held: number;
@@ -52,6 +54,8 @@ interface ValidatorHealth {
 
 interface MinerHealth {
   uid: number;
+  ip: string;
+  port: number;
   status: string;
   version: string;
   odds_api_connected: boolean;
@@ -386,6 +390,7 @@ export default function AdminDashboard() {
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">UID</th>
+                    <th className="px-4 py-3 text-left font-medium">IP</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Version</th>
                     <th className="px-4 py-3 text-right font-medium">Shares</th>
@@ -396,7 +401,7 @@ export default function AdminDashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {validators.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                         No validators discovered
                       </td>
                     </tr>
@@ -404,6 +409,7 @@ export default function AdminDashboard() {
                   {validators.map((v) => (
                     <tr key={v.uid} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-mono text-slate-700">{v.uid}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-500">{v.ip}:{v.port}</td>
                       <td className="px-4 py-3">
                         {v.error ? (
                           <span className="inline-flex items-center gap-1 text-red-600">
@@ -454,6 +460,7 @@ export default function AdminDashboard() {
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">UID</th>
+                    <th className="px-4 py-3 text-left font-medium">IP</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Version</th>
                     <th className="px-4 py-3 text-center font-medium">Odds API</th>
@@ -464,7 +471,7 @@ export default function AdminDashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {miners.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                         No miners discovered
                       </td>
                     </tr>
@@ -472,6 +479,7 @@ export default function AdminDashboard() {
                   {miners.map((m) => (
                     <tr key={m.uid} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-mono text-slate-700">{m.uid}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.ip}:{m.port}</td>
                       <td className="px-4 py-3">
                         {m.error ? (
                           <span className="inline-flex items-center gap-1 text-red-600">
@@ -1396,14 +1404,14 @@ async function fetchValidatorHealth(): Promise<ValidatorHealth[]> {
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
-        return { ...data, uid: v.uid } as ValidatorHealth;
+        return { ...data, uid: v.uid, ip: v.ip, port: v.port } as ValidatorHealth;
       }),
     );
 
     return results.map((r, i) =>
       r.status === "fulfilled"
         ? r.value
-        : { uid: validators[i].uid, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, error: String((r as PromiseRejectedResult).reason) },
+        : { uid: validators[i].uid, ip: validators[i].ip, port: validators[i].port, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, error: String((r as PromiseRejectedResult).reason) },
     );
   } catch {
     return [];
@@ -1523,14 +1531,14 @@ async function fetchMinerHealth(): Promise<MinerHealth[]> {
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
-        return { ...data, uid: m.uid } as MinerHealth;
+        return { ...data, uid: m.uid, ip: m.ip, port: m.port } as MinerHealth;
       }),
     );
 
     return results.map((r, i) =>
       r.status === "fulfilled"
         ? r.value
-        : { uid: miners[i].uid, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
+        : { uid: miners[i].uid, ip: miners[i].ip, port: miners[i].port, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
     );
   } catch {
     return [];
