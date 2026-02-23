@@ -559,6 +559,7 @@ export function useDepositEscrow() {
   const { address } = useAccount();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsApproval, setNeedsApproval] = useState(false);
 
   const deposit = useCallback(
     async (amount: bigint) => {
@@ -579,6 +580,8 @@ export function useDepositEscrow() {
         // Check existing allowance — skip approve if already sufficient
         const allowance: bigint = await usdcRead.allowance(address, escrowAddr);
         if (allowance < amount) {
+          // Coinbase Smart Wallet can only handle one popup per user action.
+          // Do ONLY the approve here, then return. Caller clicks again for deposit.
           const MAX_UINT256 = 2n ** 256n - 1n;
           debug("[escrow-deposit] approving (max allowance)");
           const approveHash = await walletClient.writeContract({
@@ -589,11 +592,12 @@ export function useDepositEscrow() {
           });
           debug("[escrow-deposit] approve tx:", approveHash);
           await waitForTx(approveHash);
-        } else {
-          debug("[escrow-deposit] allowance sufficient, skipping approve");
+          setNeedsApproval(false);
+          // Return "approved" so caller knows to retry for the actual deposit
+          return "approved" as const;
         }
 
-        // Deposit into escrow
+        // Deposit into escrow (single popup)
         debug("[escrow-deposit] depositing", amount.toString());
         const depositHash = await walletClient.writeContract({
           address: escrowAddr,
@@ -617,7 +621,18 @@ export function useDepositEscrow() {
     [walletClient, address]
   );
 
-  return { deposit, loading, error };
+  // Check approval state on mount and after deposit
+  const checkApproval = useCallback(async (amount: bigint) => {
+    if (!address) return;
+    try {
+      const usdcRead = getUsdcContract(getReadProvider());
+      const escrowAddr = ADDRESSES.escrow as Hex;
+      const allowance: bigint = await usdcRead.allowance(address, escrowAddr);
+      setNeedsApproval(allowance < amount);
+    } catch { /* ignore */ }
+  }, [address]);
+
+  return { deposit, loading, error, needsApproval, checkApproval };
 }
 
 export function useDepositCollateral() {
@@ -625,6 +640,7 @@ export function useDepositCollateral() {
   const { address } = useAccount();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsApproval, setNeedsApproval] = useState(false);
 
   const deposit = useCallback(
     async (amount: bigint) => {
@@ -645,7 +661,8 @@ export function useDepositCollateral() {
         // Check existing allowance — skip approve if already sufficient
         const allowance: bigint = await usdcRead.allowance(address, collateralAddr);
         if (allowance < amount) {
-          // Use MaxUint256 so user only approves once (avoids Safari popup-block on 2nd tx)
+          // Coinbase Smart Wallet can only handle one popup per user action.
+          // Do ONLY the approve here, then return. Caller clicks again for deposit.
           const MAX_UINT256 = 2n ** 256n - 1n;
           debug("[collateral-deposit] approving (max allowance)");
           const approveHash = await walletClient.writeContract({
@@ -656,11 +673,11 @@ export function useDepositCollateral() {
           });
           debug("[collateral-deposit] approve tx:", approveHash);
           await waitForTx(approveHash);
-        } else {
-          debug("[collateral-deposit] allowance sufficient, skipping approve");
+          setNeedsApproval(false);
+          return "approved" as const;
         }
 
-        // Deposit into collateral
+        // Deposit into collateral (single popup)
         debug("[collateral-deposit] depositing", amount.toString());
         const depositHash = await walletClient.writeContract({
           address: collateralAddr,
@@ -684,7 +701,17 @@ export function useDepositCollateral() {
     [walletClient, address]
   );
 
-  return { deposit, loading, error };
+  const checkApproval = useCallback(async (amount: bigint) => {
+    if (!address) return;
+    try {
+      const usdcRead = getUsdcContract(getReadProvider());
+      const collateralAddr = ADDRESSES.collateral as Hex;
+      const allowance: bigint = await usdcRead.allowance(address, collateralAddr);
+      setNeedsApproval(allowance < amount);
+    } catch { /* ignore */ }
+  }, [address]);
+
+  return { deposit, loading, error, needsApproval, checkApproval };
 }
 
 // ---------------------------------------------------------------------------

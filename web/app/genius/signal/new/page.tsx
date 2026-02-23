@@ -1488,7 +1488,11 @@ export default function CreateSignal() {
                       setInlineDepositError(null);
                       try {
                         const { parseUsdc } = await import("@/lib/types");
-                        await depositCollateral(parseUsdc(displayAmount));
+                        const result = await depositCollateral(parseUsdc(displayAmount));
+                        if (result === "approved") {
+                          // Approval done — user clicks again for the actual deposit
+                          return;
+                        }
                         setInlineDepositAmount("");
                         refreshCollateral();
                       } catch (err) {
@@ -1497,7 +1501,7 @@ export default function CreateSignal() {
                       }
                     }}
                   >
-                    {depositCollateralLoading ? "Depositing..." : "Deposit Collateral"}
+                    {depositCollateralLoading ? "Processing..." : "Deposit Collateral"}
                   </button>
                 </div>
                 {inlineDepositError && (

@@ -26,7 +26,7 @@ vi.mock("../../app/providers", () => ({
 
 // Mock contracts module
 const mockBalanceOf = vi.fn();
-const mockAllowance = vi.fn().mockResolvedValue(0n);
+const mockAllowance = vi.fn();
 vi.mock("../contracts", () => ({
   getSignalCommitmentContract: () => ({}),
   getEscrowContract: () => ({}),
@@ -62,6 +62,7 @@ import { usePurchaseSignal, useDepositEscrow, useWithdrawEscrow } from "../hooks
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockAllowance.mockResolvedValue(0n);
 });
 
 describe("usePurchaseSignal", () => {
@@ -152,27 +153,34 @@ describe("useDepositEscrow", () => {
     expect(typeof result.current.deposit).toBe("function");
   });
 
-  it("approves USDC then deposits", async () => {
+  it("approves USDC on first call, deposits on second", async () => {
+    // First call: allowance is 0, so approve only (returns "approved")
     mockBalanceOf.mockResolvedValueOnce(10_000_000_000n);
-    mockWriteContract
-      .mockResolvedValueOnce("0xapprove-hash")
-      .mockResolvedValueOnce("0xdeposit-hash");
+    mockAllowance.mockResolvedValueOnce(0n);
+    mockWriteContract.mockResolvedValueOnce("0xapprove-hash");
 
     const { result } = renderHook(() => useDepositEscrow());
+
+    await act(async () => {
+      const hash = await result.current.deposit(1_000_000_000n);
+      expect(hash).toBe("approved");
+    });
+
+    expect(mockWriteContract).toHaveBeenCalledTimes(1);
+    expect(mockWriteContract).toHaveBeenCalledWith(
+      expect.objectContaining({ functionName: "approve" }),
+    );
+
+    // Second call: allowance is now sufficient, so deposit happens
+    mockBalanceOf.mockResolvedValueOnce(10_000_000_000n);
+    mockAllowance.mockResolvedValueOnce(BigInt("0xffffffffffffffff"));
+    mockWriteContract.mockResolvedValueOnce("0xdeposit-hash");
 
     await act(async () => {
       const hash = await result.current.deposit(1_000_000_000n);
       expect(hash).toBe("0xdeposit-hash");
     });
 
-    // Should call writeContract twice (approve + deposit)
-    expect(mockWriteContract).toHaveBeenCalledTimes(2);
-    expect(mockWriteContract).toHaveBeenCalledWith(
-      expect.objectContaining({ functionName: "approve" }),
-    );
-    expect(mockWriteContract).toHaveBeenCalledWith(
-      expect.objectContaining({ functionName: "deposit" }),
-    );
     expect(result.current.loading).toBe(false);
     expect(result.current.error).toBeNull();
   });

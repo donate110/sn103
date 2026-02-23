@@ -40,7 +40,11 @@ export default function GeniusDashboard() {
     setTxError(null);
     setTxSuccess(null);
     try {
-      await depositCollateral(parseUsdc(depositAmount));
+      const result = await depositCollateral(parseUsdc(depositAmount));
+      if (result === "approved") {
+        setTxSuccess("USDC approved! Click Deposit again to complete.");
+        return;
+      }
       setDepositAmount("");
       setTxSuccess(`Deposited ${depositAmount} USDC collateral`);
       refreshCollateral();

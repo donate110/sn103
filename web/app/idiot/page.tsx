@@ -177,13 +177,19 @@ export default function IdiotDashboard() {
     setTxError(null);
     setTxSuccess(null);
     try {
-      await depositEscrow(parseUsdc(depositAmount));
+      const result = await depositEscrow(parseUsdc(depositAmount));
+      if (result === "approved") {
+        // Approval done in one popup. Don't chain a second popup —
+        // Coinbase Smart Wallet can't handle it. Let the user click again.
+        setTxSuccess("USDC approved! Click Deposit again to complete.");
+        return;
+      }
       setTxSuccess(`Deposited ${depositAmount} USDC to escrow`);
       setDepositAmount("");
       refreshEscrow();
       refreshWalletUsdc();
     } catch (err) {
-      setTxError(err instanceof Error ? err.message : "Deposit failed");
+      setTxError(humanizeError(err, "Deposit failed"));
     }
   };
 
