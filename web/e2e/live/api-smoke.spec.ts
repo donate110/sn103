@@ -418,7 +418,7 @@ test.describe("Validator store share validation", () => {
 
 test.describe("Subgraph queries", () => {
   const SUBGRAPH_URL =
-    "https://api.studio.thegraph.com/query/1742249/djinn/v2.3.0";
+    "https://api.studio.thegraph.com/query/1742249/djinn/v2.4.0";
 
   test("protocolStats query responds (may be null)", async ({ request }) => {
     const res = await request.post(SUBGRAPH_URL, {
