@@ -214,6 +214,30 @@ OUTCOME_VOTING_ABI = [
         "stateMutability": "view",
         "type": "function",
     },
+    {
+        "inputs": [],
+        "name": "getValidators",
+        "outputs": [{"name": "", "type": "address[]"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "syncNonce",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [
+            {"name": "newValidators", "type": "address[]"},
+            {"name": "nonce", "type": "uint256"},
+        ],
+        "name": "proposeSync",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
 ]
 
 # Connection-type errors that indicate the RPC endpoint is unreachable
@@ -751,6 +775,43 @@ class ChainClient:
         except Exception as e:
             log.error("is_registered_validator_failed", err=str(e))
             return False
+
+    async def get_validators(self) -> list[str]:
+        """Read the on-chain validator set from OutcomeVoting."""
+        if self._outcome_voting is None:
+            return []
+        try:
+            result = await self._with_failover(
+                lambda: self._outcome_voting.functions.getValidators().call()  # type: ignore[union-attr]
+            )
+            return [str(addr) for addr in result]
+        except Exception as e:
+            log.error("get_validators_failed", err=str(e))
+            return []
+
+    async def get_sync_nonce(self) -> int:
+        """Read the current sync nonce from OutcomeVoting."""
+        if self._outcome_voting is None:
+            return 0
+        try:
+            return await self._with_failover(
+                lambda: self._outcome_voting.functions.syncNonce().call()  # type: ignore[union-attr]
+            )
+        except Exception as e:
+            log.error("get_sync_nonce_failed", err=str(e))
+            return 0
+
+    async def propose_sync(self, new_validators: list[str], nonce: int) -> str:
+        """Propose a new validator set on-chain via OutcomeVoting.proposeSync(). Returns tx hash."""
+        if self._outcome_voting is None:
+            raise RuntimeError("OutcomeVoting contract not configured")
+
+        checksum_addrs = [self._w3.to_checksum_address(addr) for addr in new_validators]
+        return await self._send_tx(
+            self._outcome_voting, "proposeSync",
+            checksum_addrs, nonce,
+            gas_limit=500_000,
+        )
 
     async def close(self) -> None:
         """Close the underlying HTTP provider session."""

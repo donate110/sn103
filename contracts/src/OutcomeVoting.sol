@@ -28,10 +28,12 @@ interface IAccountForVoting {
 ///         quality score (in USDC) reaches the chain, preventing retroactive
 ///         identification of real picks from on-chain data.
 ///
-/// @dev Validator set is managed by the contract owner (maps to Bittensor
-///      metagraph in production). Votes are per (genius, idiot, cycle) tuple.
-///      Each validator can vote once per cycle. Finalization is automatic
-///      when quorum is reached.
+/// @dev Validator set is managed via consensus-based sync from the Bittensor
+///      metagraph. Validators propose the full set via proposeSync(); when 2/3+
+///      agree on the same set, it atomically replaces the current one. Owner
+///      retains addValidator/removeValidator for bootstrap and emergencies.
+///      Votes are per (genius, idiot, cycle) tuple. Each validator can vote
+///      once per cycle. Finalization is automatic when quorum is reached.
 contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
     // ─── Constants ──────────────────────────────────────────────
 
@@ -80,6 +82,18 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
     /// @notice Who requested the early exit
     mapping(bytes32 => address) public earlyExitRequestedBy;
 
+    /// @notice Nonce incremented on every validator set change (add/remove/sync).
+    ///         Used by proposeSync to prevent stale or replayed proposals.
+    uint256 public syncNonce;
+
+    /// @notice Vote count for each proposed set hash at a given nonce
+    /// @dev nonce => proposalHash => vote count
+    mapping(uint256 => mapping(bytes32 => uint256)) public syncProposalVotes;
+
+    /// @notice Whether a validator has voted for a sync proposal at a given nonce
+    /// @dev nonce => validator => voted
+    mapping(uint256 => mapping(address => bool)) public hasSyncVoted;
+
     // ─── Events ─────────────────────────────────────────────────
 
     /// @notice Emitted when a validator submits their vote
@@ -103,6 +117,12 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
 
     /// @notice Emitted when a validator is added or removed
     event ValidatorUpdated(address indexed validator, bool added);
+
+    /// @notice Emitted when a validator proposes a sync
+    event SyncProposed(address indexed proposer, uint256 nonce, address[] proposed);
+
+    /// @notice Emitted when quorum is reached on a sync proposal and the set is replaced
+    event SyncApplied(uint256 nonce, uint256 newCount);
 
     /// @notice Emitted when an early exit is requested
     event EarlyExitRequested(
@@ -144,6 +164,18 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
     /// @notice No purchases in cycle
     error NoPurchases(address genius, address idiot);
 
+    /// @notice Sync nonce mismatch (stale or replayed proposal)
+    error StaleNonce(uint256 expected, uint256 provided);
+
+    /// @notice Validator already voted on this sync proposal
+    error AlreadySyncVoted(address validator, uint256 nonce);
+
+    /// @notice Proposed validator set is empty
+    error EmptyValidatorSet();
+
+    /// @notice Proposed validator array is not sorted or contains duplicates
+    error UnsortedOrDuplicateValidators();
+
     // ─── Constructor ────────────────────────────────────────────
 
     /// @param _owner Contract owner (manages validator set)
@@ -165,7 +197,7 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
         account = IAccountForVoting(_account);
     }
 
-    /// @notice Register a new validator
+    /// @notice Register a new validator (owner-only, for bootstrap/emergencies)
     /// @param validator Address to register
     function addValidator(address validator) external onlyOwner {
         if (validator == address(0)) revert ZeroAddress();
@@ -174,11 +206,12 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
         isValidator[validator] = true;
         validators.push(validator);
         _validatorIndex[validator] = validators.length; // 1-indexed
+        syncNonce++;
 
         emit ValidatorUpdated(validator, true);
     }
 
-    /// @notice Remove a validator
+    /// @notice Remove a validator (owner-only, for bootstrap/emergencies)
     /// @param validator Address to remove
     function removeValidator(address validator) external onlyOwner {
         if (!isValidator[validator]) revert ValidatorNotRegistered(validator);
@@ -197,6 +230,7 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
 
         validators.pop();
         delete _validatorIndex[validator];
+        syncNonce++;
 
         emit ValidatorUpdated(validator, false);
     }
@@ -226,6 +260,66 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
         earlyExitRequestedBy[cycleKey] = msg.sender;
 
         emit EarlyExitRequested(genius, idiot, cycle, msg.sender);
+    }
+
+    // ─── Validator Set Sync ─────────────────────────────────────
+
+    /// @notice Propose a new validator set. When 2/3+ of current validators
+    ///         propose the same set (same sorted addresses at the same nonce),
+    ///         the set is atomically replaced.
+    /// @param newValidators Sorted array of new validator addresses (no duplicates, no zero)
+    /// @param nonce Must equal current syncNonce to prevent stale proposals
+    function proposeSync(address[] calldata newValidators, uint256 nonce) external whenNotPaused {
+        if (!isValidator[msg.sender]) revert NotValidator(msg.sender);
+        if (nonce != syncNonce) revert StaleNonce(syncNonce, nonce);
+        if (newValidators.length == 0) revert EmptyValidatorSet();
+        if (hasSyncVoted[nonce][msg.sender]) revert AlreadySyncVoted(msg.sender, nonce);
+
+        // Validate sorted + no duplicates + no zero addresses
+        for (uint256 i = 0; i < newValidators.length; i++) {
+            if (newValidators[i] == address(0)) revert ZeroAddress();
+            if (i > 0 && newValidators[i] <= newValidators[i - 1]) {
+                revert UnsortedOrDuplicateValidators();
+            }
+        }
+
+        bytes32 proposalHash = keccak256(abi.encode(newValidators));
+        hasSyncVoted[nonce][msg.sender] = true;
+        uint256 newCount = syncProposalVotes[nonce][proposalHash] + 1;
+        syncProposalVotes[nonce][proposalHash] = newCount;
+
+        emit SyncProposed(msg.sender, nonce, newValidators);
+
+        // Check quorum: 2/3 of current validator set
+        uint256 total = validators.length;
+        uint256 threshold = (total * QUORUM_NUMERATOR + QUORUM_DENOMINATOR - 1)
+            / QUORUM_DENOMINATOR;
+
+        if (newCount >= threshold) {
+            _applySync(newValidators);
+            emit SyncApplied(nonce, newValidators.length);
+        }
+    }
+
+    /// @dev Atomically replace the entire validator set and increment nonce
+    function _applySync(address[] calldata newValidators) internal {
+        // Clear old set
+        for (uint256 i = 0; i < validators.length; i++) {
+            address old = validators[i];
+            isValidator[old] = false;
+            delete _validatorIndex[old];
+        }
+        delete validators;
+
+        // Populate new set
+        for (uint256 i = 0; i < newValidators.length; i++) {
+            address v = newValidators[i];
+            isValidator[v] = true;
+            validators.push(v);
+            _validatorIndex[v] = i + 1; // 1-indexed
+        }
+
+        syncNonce++;
     }
 
     // ─── Voting ─────────────────────────────────────────────────
@@ -350,6 +444,12 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
         bytes32 cycleKey = _cycleKey(genius, idiot, cycle);
         bytes32 scoreHash = keccak256(abi.encode(qualityScore));
         return voteCounts[cycleKey][scoreHash];
+    }
+
+    /// @notice Get the full list of registered validators
+    /// @return The array of validator addresses
+    function getValidators() external view returns (address[] memory) {
+        return validators;
     }
 
     // ─── Internal ───────────────────────────────────────────────

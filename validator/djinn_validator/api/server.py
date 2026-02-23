@@ -59,6 +59,7 @@ from djinn_validator.api.models import (
     AttestResponse,
     AuditSetStatusResponse,
     HealthResponse,
+    IdentityResponse,
     MPCAbortRequest,
     MPCAbortResponse,
     MPCComputeGateRequest,
@@ -969,6 +970,25 @@ def create_app(
         truncated = {k: v for k, v in list(req.data.items())[:20]}
         log.info("analytics", event_type=req.event_type, data=truncated)
         return {"received": True}
+
+    @app.get("/v1/identity", response_model=IdentityResponse)
+    async def identity() -> IdentityResponse:
+        """Return this validator's identity for peer discovery.
+
+        Used by other validators running metagraph sync to discover
+        this validator's Base (EVM) address.
+        """
+        from djinn_validator import __version__
+
+        base_addr = chain_client.validator_address if chain_client else ""
+        hotkey = ""
+        if neuron and neuron.wallet:
+            hotkey = neuron.wallet.hotkey.ss58_address
+        return IdentityResponse(
+            base_address=base_addr or "",
+            hotkey=hotkey,
+            version=__version__,
+        )
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:

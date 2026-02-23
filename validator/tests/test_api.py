@@ -65,6 +65,28 @@ class TestHealthEndpoint:
         assert data["version"] == "0.1.0"
 
 
+class TestIdentityEndpoint:
+    def test_identity_returns_empty_without_chain(self, client: TestClient) -> None:
+        resp = client.get("/v1/identity")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["base_address"] == ""
+        assert data["hotkey"] == ""
+        assert "version" in data
+
+    def test_identity_returns_base_address(self, share_store: ShareStore) -> None:
+        purchase_orch = PurchaseOrchestrator(share_store)
+        outcome_attestor = OutcomeAttestor()
+        mock_chain = AsyncMock()
+        mock_chain.validator_address = "0x1234567890abcdef1234567890abcdef12345678"
+        app = create_app(share_store, purchase_orch, outcome_attestor, chain_client=mock_chain)
+        test_client = TestClient(app)
+        resp = test_client.get("/v1/identity")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["base_address"] == "0x1234567890abcdef1234567890abcdef12345678"
+
+
 class TestStoreShare:
     def test_store_share(self, client: TestClient, share_store: ShareStore) -> None:
         resp = client.post("/v1/signal", json={

@@ -416,11 +416,11 @@ contract OutcomeVotingTest is Test {
         assertEq(result.qualityScore, score);
         assertEq(result.trancheA, 0, "Early exit: no USDC refund");
         assertEq(result.trancheB, uint256(-score), "Early exit: all damages as credits");
-        assertEq(result.protocolFee, 0, "Early exit: no protocol fee");
+        assertGt(result.protocolFee, 0, "Early exit: protocol fee charged");
 
         // No USDC movement for idiot
         assertEq(usdc.balanceOf(idiot), idiotUsdcBefore);
-        // Credits minted
+        // Credits minted (full damages — fee is slashed from genius collateral separately)
         assertEq(creditLedger.balanceOf(idiot), uint256(-score));
     }
 
@@ -777,7 +777,7 @@ contract OutcomeVotingTest is Test {
         assertTrue(voting.isCycleFinalized(genius, idiot, 0));
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.qualityScore, score);
-        assertEq(result.protocolFee, 0, "Early exit: no protocol fee");
+        assertGt(result.protocolFee, 0, "Early exit: protocol fee charged");
     }
 
     // ─── Signal Lock Per-Purchase Release ────────────────────

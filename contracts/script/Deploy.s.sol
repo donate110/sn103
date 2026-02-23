@@ -6,14 +6,11 @@ import {MockUSDC} from "../test/MockUSDC.sol";
 import {Account as DjinnAccount} from "../src/Account.sol";
 import {CreditLedger} from "../src/CreditLedger.sol";
 import {SignalCommitment} from "../src/SignalCommitment.sol";
-import {ZKVerifier} from "../src/ZKVerifier.sol";
 import {KeyRecovery} from "../src/KeyRecovery.sol";
 import {Collateral} from "../src/Collateral.sol";
 import {Escrow} from "../src/Escrow.sol";
 import {Audit} from "../src/Audit.sol";
-import {Groth16AuditVerifier} from "../src/Groth16AuditVerifier.sol";
-import {Groth16TrackRecordVerifier} from "../src/Groth16TrackRecordVerifier.sol";
-import {TrackRecord} from "../src/TrackRecord.sol";
+import {OutcomeVoting} from "../src/OutcomeVoting.sol";
 
 /// @title Deploy
 /// @notice Deploys the full Djinn Protocol to Base (Sepolia testnet or mainnet).
@@ -26,8 +23,10 @@ contract Deploy is Script {
     function run() external {
         uint256 deployerKey = vm.envUint("DEPLOYER_KEY");
         address deployer = vm.addr(deployerKey);
+        address treasury = vm.envOr("PROTOCOL_TREASURY", deployer);
 
         console.log("Deployer:", deployer);
+        console.log("Protocol Treasury:", treasury);
         console.log("Chain ID:", block.chainid);
 
         bool isMainnet = block.chainid == 8453;
@@ -57,9 +56,6 @@ contract Deploy is Script {
         SignalCommitment sc_ = new SignalCommitment(deployer);
         console.log("SignalCommitment:", address(sc_));
 
-        ZKVerifier zk_ = new ZKVerifier(deployer);
-        console.log("ZKVerifier:", address(zk_));
-
         KeyRecovery kr_ = new KeyRecovery();
         console.log("KeyRecovery:", address(kr_));
 
@@ -71,20 +67,15 @@ contract Deploy is Script {
         Escrow esc_ = new Escrow(usdcAddr, deployer);
         console.log("Escrow:", address(esc_));
 
-        // ─── 4. Deploy Audit
+        // ─── 4. Deploy Audit + OutcomeVoting
         // ────────────────────────────────────────────
         Audit aud_ = new Audit(deployer);
         console.log("Audit:", address(aud_));
 
-        // ─── 5. Deploy Groth16 verifiers
-        // ────────────────────────────────
-        Groth16AuditVerifier audVerifier_ = new Groth16AuditVerifier();
-        console.log("Groth16AuditVerifier:", address(audVerifier_));
+        OutcomeVoting voting_ = new OutcomeVoting(deployer);
+        console.log("OutcomeVoting:", address(voting_));
 
-        Groth16TrackRecordVerifier trVerifier_ = new Groth16TrackRecordVerifier();
-        console.log("Groth16TrackRecordVerifier:", address(trVerifier_));
-
-        // ─── 6. Wire contracts
+        // ─── 5. Wire contracts
         // ──────────────────────────────────────────
 
         // Audit -> all protocol contracts + treasury
@@ -93,7 +84,12 @@ contract Deploy is Script {
         aud_.setCreditLedger(address(cl_));
         aud_.setAccount(address(acct_));
         aud_.setSignalCommitment(address(sc_));
-        aud_.setProtocolTreasury(deployer); // deployer receives protocol fees for testing
+        aud_.setProtocolTreasury(treasury);
+        aud_.setOutcomeVoting(address(voting_));
+
+        // OutcomeVoting -> Audit + Account
+        voting_.setAudit(address(aud_));
+        voting_.setAccount(address(acct_));
 
         // Escrow -> protocol contracts + audit
         esc_.setSignalCommitment(address(sc_));
@@ -117,23 +113,16 @@ contract Deploy is Script {
         // SignalCommitment: authorize Escrow to update signal status
         sc_.setAuthorizedCaller(address(esc_), true);
 
-        // ZKVerifier: point to deployed Groth16 verifier contracts
-        zk_.setAuditVerifier(address(audVerifier_));
-        zk_.setTrackRecordVerifier(address(trVerifier_));
-
-        // ─── 6b. Deploy and wire TrackRecord
-        // ──────────────────────────────
-        TrackRecord tr_ = new TrackRecord(deployer);
-        tr_.setZKVerifier(address(zk_));
-        console.log("TrackRecord:", address(tr_));
-
-        // ─── 7. Verify wiring
+        // ─── 6. Verify wiring
         // ──────────────────────────────────────────
         require(address(aud_.escrow()) == address(esc_), "Audit.escrow not wired");
         require(address(aud_.collateral()) == address(coll_), "Audit.collateral not wired");
         require(address(aud_.creditLedger()) == address(cl_), "Audit.creditLedger not wired");
         require(address(aud_.account()) == address(acct_), "Audit.account not wired");
         require(address(aud_.signalCommitment()) == address(sc_), "Audit.signalCommitment not wired");
+        require(address(aud_.outcomeVoting()) == address(voting_), "Audit.outcomeVoting not wired");
+        require(address(voting_.audit()) == address(aud_), "OutcomeVoting.audit not wired");
+        require(address(voting_.account()) == address(acct_), "OutcomeVoting.account not wired");
         require(address(esc_.signalCommitment()) == address(sc_), "Escrow.signalCommitment not wired");
         require(address(esc_.collateral()) == address(coll_), "Escrow.collateral not wired");
         require(address(esc_.creditLedger()) == address(cl_), "Escrow.creditLedger not wired");
@@ -145,11 +134,9 @@ contract Deploy is Script {
         require(cl_.authorizedCallers(address(aud_)), "CreditLedger: Audit not authorized");
         require(acct_.authorizedCallers(address(esc_)), "Account: Escrow not authorized");
         require(acct_.authorizedCallers(address(aud_)), "Account: Audit not authorized");
-        require(zk_.auditVerifier() == address(audVerifier_), "ZKVerifier.auditVerifier not wired");
-        require(zk_.trackRecordVerifier() == address(trVerifier_), "ZKVerifier.trackRecordVerifier not wired");
         console.log("All contract wiring verified");
 
-        // ─── 8. Mint test USDC to deployer (testnet only)
+        // ─── 7. Mint test USDC to deployer (testnet only)
         // ──────────────────────────────
         if (!isMainnet) {
             MockUSDC(usdcAddr).mint(deployer, 1_000_000 * 1e6); // 1M USDC
@@ -172,9 +159,8 @@ contract Deploy is Script {
         console.log("NEXT_PUBLIC_COLLATERAL_ADDRESS=", address(coll_));
         console.log("NEXT_PUBLIC_CREDIT_LEDGER_ADDRESS=", address(cl_));
         console.log("NEXT_PUBLIC_ACCOUNT_ADDRESS=", address(acct_));
-        console.log("AUDIT_ADDRESS=", address(aud_));
-        console.log("ZK_VERIFIER_ADDRESS=", address(zk_));
+        console.log("NEXT_PUBLIC_AUDIT_ADDRESS=", address(aud_));
+        console.log("OUTCOME_VOTING_ADDRESS=", address(voting_));
         console.log("KEY_RECOVERY_ADDRESS=", address(kr_));
-        console.log("NEXT_PUBLIC_TRACK_RECORD_ADDRESS=", address(tr_));
     }
 }

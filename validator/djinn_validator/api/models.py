@@ -164,6 +164,14 @@ class ResolveResponse(BaseModel):
     results: list[dict] = Field(default_factory=list)
 
 
+class IdentityResponse(BaseModel):
+    """GET /v1/identity — Validator identity for peer discovery."""
+
+    base_address: str = ""
+    hotkey: str = ""
+    version: str = "0.1.0"
+
+
 class HealthResponse(BaseModel):
     """GET /health — Validator health check."""
 

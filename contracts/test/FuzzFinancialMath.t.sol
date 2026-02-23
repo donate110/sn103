@@ -422,7 +422,7 @@ contract FuzzFinancialMathTest is Test {
     }
 
     /// @notice Protocol fee is zero for early exits regardless of notional
-    function testFuzz_earlyExitProtocolFeeZero(uint256 notionalSeed) public {
+    function testFuzz_earlyExitProtocolFeeCharged(uint256 notionalSeed) public {
         uint256 notional = bound(notionalSeed, 1e6, 1e10);
         uint256 sla = DEFAULT_SLA;
 
@@ -444,12 +444,17 @@ contract FuzzFinancialMathTest is Test {
             escrow.setOutcome(purchaseId, Outcome.Unfavorable);
         }
 
+        // Extra collateral for protocol fee
+        uint256 expectedFee = (5 * notional * 50) / 10_000;
+        _depositGeniusCollateral(expectedFee);
+
         // Early exit as the idiot
         vm.prank(idiot);
         audit.earlyExit(genius, idiot);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
-        assertEq(result.protocolFee, 0, "Early exit: protocol fee must be zero");
+        assertGt(result.protocolFee, 0, "Early exit: protocol fee charged");
+        assertEq(result.protocolFee, expectedFee, "Early exit: fee = 0.5% of total notional");
         assertEq(result.trancheA, 0, "Early exit: trancheA must be zero");
         assertTrue(result.trancheB > 0, "Early exit: trancheB must be positive for negative score");
     }

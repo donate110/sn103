@@ -34,6 +34,7 @@ from djinn_validator.core.audit_set import AuditSetStore
 from djinn_validator.core.mpc_audit import batch_settle_audit_set
 from djinn_validator.core.scoring import MinerScorer
 from djinn_validator.core.shares import ShareStore
+from djinn_validator.core.validator_sync import ValidatorSetSyncer
 
 
 def _sanitize_url(url: str) -> str:
@@ -290,6 +291,20 @@ async def mpc_cleanup_loop(mpc_coordinator: MPCCoordinator) -> None:
             log.error("mpc_cleanup_error", error=str(e))
 
 
+async def validator_sync_loop(syncer: ValidatorSetSyncer) -> None:
+    """Periodically sync the on-chain validator set with the Bittensor metagraph."""
+    log.info("validator_sync_loop_started")
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every 60 seconds
+            await syncer.sync_once()
+        except asyncio.CancelledError:
+            log.info("validator_sync_loop_cancelled")
+            return
+        except Exception as e:
+            log.error("validator_sync_error", error=str(e))
+
+
 async def run_server(app: object, host: str, port: int) -> None:
     """Run uvicorn as an async task."""
     config = uvicorn.Config(
@@ -390,7 +405,7 @@ async def async_main() -> None:
         log_format=os.getenv("LOG_FORMAT", "console"),
     )
 
-    # Run API server, epoch loop, and MPC cleanup concurrently
+    # Run API server, epoch loop, MPC cleanup, and validator sync concurrently
     running_tasks = [
         asyncio.create_task(run_server(app, config.api_host, config.api_port)),
         asyncio.create_task(mpc_cleanup_loop(mpc_coordinator)),
@@ -399,6 +414,10 @@ async def async_main() -> None:
         running_tasks.append(asyncio.create_task(
             epoch_loop(neuron, scorer, share_store, outcome_attestor, chain_client, activity, audit_set_store)
         ))
+        # Validator set sync: discover peers via metagraph, propose on-chain changes
+        if chain_client.can_write:
+            syncer = ValidatorSetSyncer(chain_client, neuron)
+            running_tasks.append(asyncio.create_task(validator_sync_loop(syncer)))
 
     shutdown_event = asyncio.Event()
 
