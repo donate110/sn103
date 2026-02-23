@@ -58,6 +58,7 @@ async def epoch_loop(
     chain_client: ChainClient | None = None,
     activity: ActivityBuffer | None = None,
     audit_set_store: AuditSetStore | None = None,
+    burn_fraction: float = 0.95,
 ) -> None:
     """Main validator epoch loop: sync metagraph, score miners, set weights."""
     log.info(
@@ -235,7 +236,7 @@ async def epoch_loop(
             # so that challenge data accumulates across the full interval
             if neuron.should_set_weights():
                 weights = scorer.compute_weights(is_active)
-                weights = neuron.apply_burn(weights or {}, config.bt_burn_fraction)
+                weights = neuron.apply_burn(weights or {}, burn_fraction)
                 n_miners = len(weights) - 1  # exclude UID 0 burn entry
                 success = neuron.set_weights(weights)
                 if success:
@@ -243,7 +244,7 @@ async def epoch_loop(
                     if activity is not None:
                         activity.record(
                             ActivityCategory.WEIGHT_SET,
-                            f"Set weights for {n_miners} miners (burn={config.bt_burn_fraction})",
+                            f"Set weights for {n_miners} miners (burn={burn_fraction})",
                             n_miners=n_miners, is_active=is_active,
                         )
                 log.info("weights_updated", n_miners=n_miners, active=is_active, success=success)
@@ -422,7 +423,7 @@ async def async_main() -> None:
     ]
     if bt_ok:
         running_tasks.append(asyncio.create_task(
-            epoch_loop(neuron, scorer, share_store, outcome_attestor, chain_client, activity, audit_set_store)
+            epoch_loop(neuron, scorer, share_store, outcome_attestor, chain_client, activity, audit_set_store, config.bt_burn_fraction)
         ))
         # Validator set sync: discover peers via metagraph, propose on-chain changes
         if chain_client.can_write:
