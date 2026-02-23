@@ -85,6 +85,7 @@ export default function AdminDashboard() {
 
   // Network tab data
   const [networkEvents, setNetworkEvents] = useState<NetworkEvent[]>([]);
+  const [networkDiag, setNetworkDiag] = useState<{ discovered: number; responded: number; error?: string } | null>(null);
 
   // Protocol tab data
   const [recentSignals, setRecentSignals] = useState<SubgraphRecentSignal[]>([]);
@@ -153,7 +154,9 @@ export default function AdminDashboard() {
 
     // Tab-specific results
     if (activeTab === "network" && results[4]?.status === "fulfilled") {
-      setNetworkEvents(results[4].value as NetworkEvent[]);
+      const actResult = results[4].value as NetworkActivityResult;
+      setNetworkEvents(actResult.events);
+      setNetworkDiag({ discovered: actResult.validatorsDiscovered, responded: actResult.validatorsResponded, error: actResult.error });
     }
     if (activeTab === "protocol") {
       if (results[4]?.status === "fulfilled") setRecentSignals(results[4].value as SubgraphRecentSignal[]);
@@ -506,7 +509,7 @@ export default function AdminDashboard() {
 
       {/* ── Network Tab (Miners & Validators Activity) ── */}
       {activeTab === "network" && (
-        <NetworkActivityTab events={networkEvents} loading={loading} />
+        <NetworkActivityTab events={networkEvents} loading={loading} diag={networkDiag} />
       )}
 
       {/* ── Protocol Tab (Geniuses & Idiots Activity) ── */}
@@ -536,7 +539,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   share_stored: "bg-slate-100 text-slate-600",
 };
 
-function NetworkActivityTab({ events, loading }: { events: NetworkEvent[]; loading: boolean }) {
+function NetworkActivityTab({ events, loading, diag }: { events: NetworkEvent[]; loading: boolean; diag: { discovered: number; responded: number; error?: string } | null }) {
   if (loading && events.length === 0) {
     return <div className="text-center text-slate-400 py-12">Loading network activity...</div>;
   }
@@ -548,10 +551,21 @@ function NetworkActivityTab({ events, loading }: { events: NetworkEvent[]; loadi
           Validator &amp; Miner Activity
           <span className="ml-2 text-xs text-slate-400">({events.length} events)</span>
         </h3>
+        {diag && (
+          <p className="text-[11px] text-slate-400 mt-1">
+            {diag.discovered} validator{diag.discovered !== 1 ? "s" : ""} discovered, {diag.responded} responded
+            {diag.error && <span className="text-red-400 ml-2">{diag.error}</span>}
+          </p>
+        )}
       </div>
       {events.length === 0 ? (
         <div className="px-4 py-8 text-center text-slate-400 text-sm">
-          No activity recorded yet. Events appear after the validator runs an epoch.
+          {diag?.discovered === 0
+            ? "No validators discovered in the metagraph. Validators must register their axon to be visible."
+            : diag?.responded === 0
+              ? "Validators discovered but none responded. They may be behind a firewall or still starting up."
+              : "No activity recorded yet. Validators record events every ~12 seconds once the epoch loop starts."
+          }
         </div>
       ) : (
         <div className="divide-y divide-slate-100 max-h-[700px] overflow-y-auto">
@@ -845,11 +859,22 @@ async function fetchValidatorHealth(): Promise<ValidatorHealth[]> {
   }
 }
 
-async function fetchNetworkActivity(): Promise<NetworkEvent[]> {
+interface NetworkActivityResult {
+  events: NetworkEvent[];
+  validatorsDiscovered: number;
+  validatorsResponded: number;
+  error?: string;
+}
+
+async function fetchNetworkActivity(): Promise<NetworkActivityResult> {
   try {
     const discoverRes = await fetch("/api/validators/discover");
-    if (!discoverRes.ok) return [];
+    if (!discoverRes.ok) return { events: [], validatorsDiscovered: 0, validatorsResponded: 0, error: `Discovery failed (${discoverRes.status})` };
     const { validators } = (await discoverRes.json()) as { validators: ValidatorNode[] };
+
+    if (validators.length === 0) {
+      return { events: [], validatorsDiscovered: 0, validatorsResponded: 0, error: "No validators found in metagraph" };
+    }
 
     const results = await Promise.allSettled(
       validators.map(async (v) => {
@@ -865,13 +890,14 @@ async function fetchNetworkActivity(): Promise<NetworkEvent[]> {
       }),
     );
 
+    const responded = results.filter((r) => r.status === "fulfilled" && (r.value as NetworkEvent[]).length >= 0).length;
     const all: NetworkEvent[] = results
       .filter((r) => r.status === "fulfilled")
       .flatMap((r) => (r as PromiseFulfilledResult<NetworkEvent[]>).value);
     all.sort((a, b) => b.timestamp - a.timestamp);
-    return all.slice(0, 200);
-  } catch {
-    return [];
+    return { events: all.slice(0, 200), validatorsDiscovered: validators.length, validatorsResponded: responded };
+  } catch (err) {
+    return { events: [], validatorsDiscovered: 0, validatorsResponded: 0, error: String(err) };
   }
 }
 
