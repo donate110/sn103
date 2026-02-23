@@ -34,14 +34,22 @@ export default function SignalCard({
 }: SignalCardProps) {
   const expiresDate = new Date(Number(signal.expiresAt) * 1000);
   const isExpired = expiresDate < new Date();
+  const isExclusive = signal.minNotional > 0n && signal.minNotional === signal.maxNotional;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-6 hover:border-slate-300 transition-colors">
       <div className="flex items-start justify-between mb-4">
         <div>
-          <h3 className="text-lg font-semibold text-slate-900 mb-1">
-            Signal #{signalId}
-          </h3>
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="text-lg font-semibold text-slate-900">
+              Signal #{signalId}
+            </h3>
+            {isExclusive && (
+              <span className="inline-flex items-center rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-700 uppercase tracking-wide">
+                Exclusive
+              </span>
+            )}
+          </div>
           <p className="text-sm text-slate-500">
             by {truncateAddress(signal.genius)}
           </p>

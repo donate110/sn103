@@ -298,4 +298,45 @@ describe("SignalCard", () => {
       expect(screen.getByText("Expires")).toBeInTheDocument();
     });
   });
+
+  describe("exclusive badge", () => {
+    it("shows Exclusive badge when minNotional equals maxNotional", () => {
+      render(
+        <SignalCard
+          signalId="1"
+          signal={createMockSignal({
+            maxNotional: 500_000000n,
+            minNotional: 500_000000n,
+          })}
+        />,
+      );
+      expect(screen.getByText("Exclusive")).toBeInTheDocument();
+    });
+
+    it("does not show Exclusive badge when minNotional is zero", () => {
+      render(
+        <SignalCard
+          signalId="1"
+          signal={createMockSignal({
+            maxNotional: 500_000000n,
+            minNotional: 0n,
+          })}
+        />,
+      );
+      expect(screen.queryByText("Exclusive")).not.toBeInTheDocument();
+    });
+
+    it("does not show Exclusive badge when minNotional differs from maxNotional", () => {
+      render(
+        <SignalCard
+          signalId="1"
+          signal={createMockSignal({
+            maxNotional: 500_000000n,
+            minNotional: 100_000000n,
+          })}
+        />,
+      );
+      expect(screen.queryByText("Exclusive")).not.toBeInTheDocument();
+    });
+  });
 });

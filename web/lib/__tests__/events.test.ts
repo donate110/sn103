@@ -16,8 +16,9 @@ const mockFilters = {
 
 // Use a regular function (not arrow) so it works with `new`
 const mockIsActive = vi.fn().mockResolvedValue(true);
+const mockGetSignal = vi.fn().mockResolvedValue({ minNotional: BigInt(0) });
 function MockContract() {
-  return { filters: mockFilters, queryFilter: mockQueryFilter, isActive: mockIsActive };
+  return { filters: mockFilters, queryFilter: mockQueryFilter, isActive: mockIsActive, getSignal: mockGetSignal };
 }
 
 vi.mock("ethers", () => ({

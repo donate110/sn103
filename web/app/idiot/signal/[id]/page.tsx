@@ -546,9 +546,16 @@ export default function PurchaseSignal() {
           <div className="card">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h1 className="text-2xl font-bold text-slate-900">
-                  Signal #{truncateAddress(String(params.id))}
-                </h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-2xl font-bold text-slate-900">
+                    Signal #{truncateAddress(String(params.id))}
+                  </h1>
+                  {signal.minNotional > 0n && signal.minNotional === signal.maxNotional && (
+                    <span className="inline-flex items-center rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-700 uppercase tracking-wide">
+                      Exclusive
+                    </span>
+                  )}
+                </div>
                 <p className="text-sm text-slate-500 mt-1">
                   by {truncateAddress(signal.genius)}
                 </p>

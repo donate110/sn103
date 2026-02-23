@@ -268,6 +268,11 @@ export function clearMasterSeedCache(): void {
   _cachedMasterSeed = null;
 }
 
+/** Check whether the master seed is already cached (no wallet interaction). */
+export function isMasterSeedCached(): boolean {
+  return _cachedMasterSeed !== null;
+}
+
 /**
  * Derive a master seed from the Genius's wallet signature.
  * Signs a fixed message — same wallet always produces the same seed (RFC 6979).

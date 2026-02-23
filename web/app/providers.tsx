@@ -80,7 +80,9 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     return (
       <WagmiProvider config={wagmiConfig}>
         <QueryClientProvider client={queryClient}>
-          <E2EAutoConnect>{children}</E2EAutoConnect>
+          <E2EAutoConnect>
+            {children}
+          </E2EAutoConnect>
         </QueryClientProvider>
       </WagmiProvider>
     );

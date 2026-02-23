@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAccount, useWalletClient } from "wagmi";
 import { useCommitSignal, useCollateral, useDepositCollateral, useWalletUsdcBalance } from "@/lib/hooks";
@@ -16,6 +16,7 @@ import {
   toHex,
   deriveMasterSeedTyped,
   deriveSignalKey,
+  isMasterSeedCached,
 } from "@/lib/crypto";
 import { discoverValidatorClients, getMinerClient } from "@/lib/api";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
@@ -108,6 +109,24 @@ export default function CreateSignal() {
   const [isExclusive, setIsExclusive] = useState(false);
   const [expiresIn, setExpiresIn] = useState("24");
   const [selectedSportsbooks, setSelectedSportsbooks] = useState<string[]>([]);
+
+  // Master seed derivation — prompt on page load so it's cached before submit
+  const [seedDeriving, setSeedDeriving] = useState(false);
+  const seedAttemptedRef = useRef(false);
+
+  useEffect(() => {
+    if (!walletClient || seedAttemptedRef.current || isMasterSeedCached()) return;
+    seedAttemptedRef.current = true;
+    setSeedDeriving(true);
+    deriveMasterSeedTyped(async (params) => {
+      const sig = await walletClient.signTypedData(params);
+      return sig;
+    })
+      .catch(() => {
+        // User dismissed — the submit flow will retry if needed
+      })
+      .finally(() => setSeedDeriving(false));
+  }, [walletClient]);
 
   // Platform liquidity (from subgraph)
   const [totalVolume, setTotalVolume] = useState<string | null>(null);
@@ -355,14 +374,16 @@ export default function CreateSignal() {
       // Unlike personal_sign, EIP-712 works on ERC-4337 smart wallets
       // (Coinbase Smart Wallet, etc.). Same wallet always produces the
       // same key, enabling cross-device recovery.
+      //
+      // The master seed is pre-derived on page load (see seedDeriving
+      // state above), so this call normally returns instantly from
+      // cache — no wallet popup here.
       if (!walletClient) throw new Error("Wallet not connected");
       let aesKey: Uint8Array;
-      let didSignTypedData = false;
       try {
         const masterSeed = await deriveMasterSeedTyped(
           async (params) => {
             const sig = await walletClient.signTypedData(params);
-            didSignTypedData = true;
             return sig;
           },
         );
@@ -370,12 +391,6 @@ export default function CreateSignal() {
       } catch (keyErr) {
         console.warn("EIP-712 key derivation failed, using random key (cross-device recovery unavailable):", keyErr);
         aesKey = generateAesKey();
-      }
-
-      // Coinbase Smart Wallet needs time between wallet popups — if we
-      // just closed a signTypedData popup, wait before opening writeContract
-      if (didSignTypedData) {
-        await new Promise((r) => setTimeout(r, 1500));
       }
 
       const pickPayload = JSON.stringify({
@@ -584,6 +599,19 @@ export default function CreateSignal() {
     return (
       <PrivateWorkspace open onClose={() => router.push("/genius")}>
       <div className="max-w-3xl mx-auto">
+        {/* Encryption key derivation overlay — shown once on first visit */}
+        {seedDeriving && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/80 backdrop-blur-sm">
+            <div className="text-center max-w-sm mx-auto px-6">
+              <div className="inline-block w-10 h-10 border-2 border-genius-500 border-t-transparent rounded-full animate-spin mb-4" />
+              <h2 className="text-lg font-semibold text-slate-900 mb-2">Setting up encryption</h2>
+              <p className="text-sm text-slate-500">
+                Your wallet will ask you to sign a message. This is free (no gas)
+                and derives your encryption key so your picks stay secret.
+              </p>
+            </div>
+          </div>
+        )}
         <WizardStepper currentStep="browse" />
         {stepError && (
           <div className="rounded-lg bg-red-50 border border-red-200 p-4 mb-4" role="alert">
@@ -1401,7 +1429,7 @@ export default function CreateSignal() {
           </p>
           {step === "committing" && (
             <p className="text-xs text-slate-400 mt-2">
-              Your wallet will ask you to sign a message. This is free (no gas cost) and just derives your encryption key. It does not send any funds.
+              Your wallet will ask you to confirm the on-chain transaction.
             </p>
           )}
         </SecretModal>

@@ -194,6 +194,7 @@ export default function BrowseSignals() {
             const msLeft = Math.max(0, expires.getTime() - Date.now());
             const hoursLeft = msLeft / 3_600_000;
             const isUrgent = hoursLeft < 2;
+            const isExclusive = s.minNotional > 0n && s.minNotional === s.maxNotional;
 
             let timeLabel: string;
             if (hoursLeft < 1) {
@@ -213,9 +214,16 @@ export default function BrowseSignals() {
                 className="card block hover:border-idiot-300 hover:shadow-md transition-all"
               >
                 <div className="flex items-start justify-between mb-3">
-                  <span className="inline-flex items-center rounded-full bg-idiot-50 px-2.5 py-0.5 text-xs font-medium text-idiot-700">
-                    {s.sport}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-flex items-center rounded-full bg-idiot-50 px-2.5 py-0.5 text-xs font-medium text-idiot-700">
+                      {s.sport}
+                    </span>
+                    {isExclusive && (
+                      <span className="inline-flex items-center rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-700 uppercase tracking-wide">
+                        Exclusive
+                      </span>
+                    )}
+                  </div>
                   <span
                     className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
                       isUrgent

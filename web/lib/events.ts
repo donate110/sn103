@@ -181,6 +181,7 @@ export interface SignalEvent {
   maxPriceBps: bigint;
   slaMultiplierBps: bigint;
   maxNotional: bigint;
+  minNotional: bigint;
   expiresAt: bigint;
   blockNumber: number;
 }
@@ -200,6 +201,7 @@ function parseSignalEvents(
       maxPriceBps: BigInt(log.args.maxPriceBps),
       slaMultiplierBps: BigInt(log.args.slaMultiplierBps),
       maxNotional: BigInt(log.args.maxNotional),
+      minNotional: 0n, // Not in event; enriched from contract in getActiveSignals
       expiresAt: BigInt(log.args.expiresAt),
       blockNumber: log.blockNumber,
     });
@@ -241,13 +243,22 @@ export async function getActiveSignals(
   const now = BigInt(Math.floor(Date.now() / 1000));
   const notExpired = all.filter((s) => s.expiresAt > now);
 
-  // Check on-chain status to filter out voided signals
-  const activeChecks = await Promise.all(
-    notExpired.map((s) =>
-      contract.isActive(BigInt(s.signalId)).catch(() => false),
-    ),
+  // Check on-chain status and fetch minNotional (for exclusive badge)
+  const enriched = await Promise.all(
+    notExpired.map(async (s) => {
+      const id = BigInt(s.signalId);
+      const [active, signalData] = await Promise.all([
+        contract.isActive(id).catch(() => false),
+        contract.getSignal(id).catch(() => null),
+      ]);
+      if (!active) return null;
+      if (signalData && signalData.minNotional != null) {
+        s.minNotional = BigInt(signalData.minNotional);
+      }
+      return s;
+    }),
   );
-  return notExpired.filter((_, i) => activeChecks[i]);
+  return enriched.filter((s): s is SignalEvent => s !== null);
 }
 
 export async function getSignalsByGenius(
@@ -287,13 +298,22 @@ export async function getSignalsByGenius(
   const now = BigInt(Math.floor(Date.now() / 1000));
   const notExpired = all.filter((s) => s.expiresAt > now);
 
-  // Check on-chain status to filter out cancelled/voided signals
-  const activeChecks = await Promise.all(
-    notExpired.map((s) =>
-      contract.isActive(BigInt(s.signalId)).catch(() => false),
-    ),
+  // Check on-chain status and fetch minNotional (for exclusive badge)
+  const enriched = await Promise.all(
+    notExpired.map(async (s) => {
+      const id = BigInt(s.signalId);
+      const [active, signalData] = await Promise.all([
+        contract.isActive(id).catch(() => false),
+        contract.getSignal(id).catch(() => null),
+      ]);
+      if (!active) return null;
+      if (signalData && signalData.minNotional != null) {
+        s.minNotional = BigInt(signalData.minNotional);
+      }
+      return s;
+    }),
   );
-  return notExpired.filter((_, i) => activeChecks[i]);
+  return enriched.filter((s): s is SignalEvent => s !== null);
 }
 
 // ---------------------------------------------------------------------------
