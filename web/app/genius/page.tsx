@@ -71,6 +71,11 @@ export default function GeniusDashboard() {
         setCancelProgress(`Cancelling ${cancelled + 1} of ${active.length}...`);
         await cancelSignal(BigInt(signal.signalId));
         cancelled++;
+        // Brief delay between txs — Coinbase Smart Wallet (ERC-4337)
+        // needs time to update its internal nonce after each UserOperation
+        if (cancelled < active.length) {
+          await new Promise((r) => setTimeout(r, 2000));
+        }
       } catch (err) {
         setTxError(humanizeError(err, `Failed to cancel signal ${signal.signalId.slice(0, 8)}...`));
         break;

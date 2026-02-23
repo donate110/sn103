@@ -140,7 +140,7 @@ contract Escrow is Ownable, Pausable, ReentrancyGuard {
     error CycleNotSettled(address genius, address idiot, uint256 cycle);
     error NoFeesToClaim(address genius, address idiot, uint256 cycle);
     error AlreadyPurchased(uint256 signalId, address idiot);
-    error SelfPurchaseNotAllowed();
+
 
     /// @notice Minimum notional per purchase (1 USDC in 6 decimals — prevents dust griefing)
     uint256 public constant MIN_NOTIONAL = 1e6;
@@ -306,7 +306,6 @@ contract Escrow is Ownable, Pausable, ReentrancyGuard {
         if (sig.status != SignalStatus.Active) revert SignalNotActive(signalId);
         if (block.timestamp >= sig.expiresAt) revert SignalExpired(signalId);
         if (hasPurchased[signalId][msg.sender]) revert AlreadyPurchased(signalId, msg.sender);
-        if (msg.sender == sig.genius) revert SelfPurchaseNotAllowed();
         if (sig.minNotional > 0 && notional < sig.minNotional) {
             revert NotionalTooSmall(notional, sig.minNotional);
         }

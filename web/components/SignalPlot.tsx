@@ -17,19 +17,76 @@ const SPORT_COLOR_ENTRIES = Object.entries(SPORT_COLORS);
 
 const PADDING = { top: 28, right: 24, bottom: 52, left: 60 };
 
-// Genius Confidence axis: 0 to 6
-// Confidence = winRate * log2(N + 1)
-// - 60% WR with 30 signals = 0.6 * 4.95 = 2.97
-// - 55% WR with 100 signals = 0.55 * 6.66 = 3.66
-// - New genius with 0 signals = 0
-const CONF_MIN = 0;
-const CONF_MAX = 6;
-const CONF_TICKS = [0, 1, 2, 3, 4, 5, 6];
+// Fallback static ranges (used as absolute maximums)
+const CONF_ABS_MAX = 6;
+const SLA_ABS_MIN = 10000; // 100%
 
-// SLA axis: 10000 to 30000 bps (100% to 300%)
-const SLA_MIN = 10000;
-const SLA_MAX = 30000;
-const SLA_TICKS = [10000, 15000, 20000, 25000, 30000];
+/**
+ * Compute nice axis bounds and ticks from actual data.
+ * When all values are identical or clustered at a minimum, we use a tight
+ * range so dots are visible in the middle of the chart, not smushed at a corner.
+ */
+function computeAxisRange(
+  values: number[],
+  absMin: number,
+  absMax: number,
+  minSpan: number,
+  preferredTickCount: number,
+): { min: number; max: number; ticks: number[] } {
+  if (values.length === 0) {
+    return niceRange(absMin, absMax, preferredTickCount);
+  }
+
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+  const dataSpan = dataMax - dataMin;
+
+  // If all values are identical or nearly so, create a range centered on the value
+  // but ensure at least minSpan width
+  let lo: number, hi: number;
+  if (dataSpan < minSpan * 0.1) {
+    // Tight cluster — pad around the center
+    const center = (dataMin + dataMax) / 2;
+    lo = Math.max(absMin, center - minSpan / 2);
+    hi = lo + minSpan;
+  } else {
+    // Real spread — pad by 15% on each side
+    const pad = dataSpan * 0.15;
+    lo = Math.max(absMin, dataMin - pad);
+    hi = dataMax + pad;
+    // Ensure minimum span
+    if (hi - lo < minSpan) hi = lo + minSpan;
+  }
+
+  return niceRange(lo, hi, preferredTickCount);
+}
+
+/** Round to "nice" numbers for axis ticks */
+function niceRange(
+  lo: number,
+  hi: number,
+  tickCount: number,
+): { min: number; max: number; ticks: number[] } {
+  const rawStep = (hi - lo) / Math.max(tickCount - 1, 1);
+  // Round step to a nice number (1, 2, 5 multiples of powers of 10)
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const residual = rawStep / mag;
+  let niceStep: number;
+  if (residual <= 1.5) niceStep = 1 * mag;
+  else if (residual <= 3.5) niceStep = 2 * mag;
+  else if (residual <= 7.5) niceStep = 5 * mag;
+  else niceStep = 10 * mag;
+
+  const niceMin = Math.floor(lo / niceStep) * niceStep;
+  const niceMax = Math.ceil(hi / niceStep) * niceStep;
+
+  const ticks: number[] = [];
+  for (let v = niceMin; v <= niceMax + niceStep * 0.01; v += niceStep) {
+    ticks.push(Math.round(v * 1e6) / 1e6); // avoid floating point drift
+  }
+
+  return { min: niceMin, max: niceMax, ticks };
+}
 
 // Dot sizing: radius 8 to 18 based on inverse fee
 const MIN_DOT_R = 8;
@@ -107,60 +164,108 @@ export default function SignalPlot({
   const plotWidth = dimensions.width - PADDING.left - PADDING.right;
   const plotHeight = dimensions.height - PADDING.top - PADDING.bottom;
 
+  // Pre-compute raw data values so we can derive dynamic axes
+  const rawData = useMemo(() => {
+    return signals.map((s) => {
+      const fee = Number(s.maxPriceBps);
+      const sla = Number(s.slaMultiplierBps);
+      const expires = new Date(Number(s.expiresAt) * 1000);
+      const hoursLeft = Math.max(
+        0,
+        (expires.getTime() - Date.now()) / 3_600_000,
+      );
+      const stats = geniusScoreMap?.get(s.genius.toLowerCase());
+      const confidence = computeConfidence(stats);
+      const n = stats ? stats.favCount + stats.unfavCount : 0;
+      const winRate =
+        n > 0 && stats ? ((stats.favCount / n) * 100).toFixed(0) : "\u2014";
+      const roi = stats ? `${stats.roi >= 0 ? "+" : ""}${stats.roi.toFixed(1)}%` : "\u2014";
+      const r = feeToRadius(fee);
+      return { signal: s, fee, sla, hoursLeft, confidence, n, winRate, roi, r };
+    });
+  }, [signals, geniusScoreMap]);
+
+  // Dynamic axis ranges based on actual data
+  const xAxis = useMemo(() => {
+    const confValues = rawData.map((d) => d.confidence);
+    // minSpan=1 so even if all confidence=0 we show 0..1 range
+    return computeAxisRange(confValues, 0, CONF_ABS_MAX, 1, 5);
+  }, [rawData]);
+
+  const yAxis = useMemo(() => {
+    const slaValues = rawData.map((d) => d.sla);
+    // minSpan=5000 bps (50%) — tight enough to spread dots on early testnet
+    return computeAxisRange(slaValues, SLA_ABS_MIN, 30000, 5000, 5);
+  }, [rawData]);
+
   const toX = useCallback(
     (confidence: number) => {
-      const clamped = Math.max(CONF_MIN, Math.min(CONF_MAX, confidence));
-      return PADDING.left + (clamped / CONF_MAX) * plotWidth;
+      const span = xAxis.max - xAxis.min;
+      if (span === 0) return PADDING.left + plotWidth / 2;
+      const clamped = Math.max(xAxis.min, Math.min(xAxis.max, confidence));
+      return PADDING.left + ((clamped - xAxis.min) / span) * plotWidth;
     },
-    [plotWidth],
+    [plotWidth, xAxis],
   );
 
   const toY = useCallback(
     (slaBps: number) => {
-      const clamped = Math.max(SLA_MIN, Math.min(SLA_MAX, slaBps));
+      const span = yAxis.max - yAxis.min;
+      if (span === 0) return PADDING.top + plotHeight / 2;
+      const clamped = Math.max(yAxis.min, Math.min(yAxis.max, slaBps));
       return (
         PADDING.top +
         plotHeight -
-        ((clamped - SLA_MIN) / (SLA_MAX - SLA_MIN)) * plotHeight
+        ((clamped - yAxis.min) / span) * plotHeight
       );
     },
-    [plotHeight],
+    [plotHeight, yAxis],
   );
 
-  const dots = useMemo(
-    () =>
-      signals.map((s) => {
-        const fee = Number(s.maxPriceBps);
-        const sla = Number(s.slaMultiplierBps);
-        const expires = new Date(Number(s.expiresAt) * 1000);
-        const hoursLeft = Math.max(
-          0,
-          (expires.getTime() - Date.now()) / 3_600_000,
-        );
-        const stats = geniusScoreMap?.get(s.genius.toLowerCase());
-        const confidence = computeConfidence(stats);
-        const n = stats ? stats.favCount + stats.unfavCount : 0;
-        const winRate =
-          n > 0 && stats ? ((stats.favCount / n) * 100).toFixed(0) : "—";
-        const roi = stats ? `${stats.roi >= 0 ? "+" : ""}${stats.roi.toFixed(1)}%` : "—";
-        const r = feeToRadius(fee);
-        return {
-          signal: s,
-          cx: toX(confidence),
-          cy: toY(sla),
-          r,
-          color: SPORT_COLORS[s.sport] || "#6b7280",
-          fee,
-          sla,
-          hoursLeft,
-          confidence,
-          winRate,
-          n,
-          roi,
-        };
-      }),
-    [signals, toX, toY, geniusScoreMap],
+  // Deterministic jitter: when multiple dots map to the same pixel location,
+  // offset them slightly so they don't perfectly overlap.
+  const jitter = useCallback(
+    (signalId: string, index: number, total: number) => {
+      if (total <= 1) return { dx: 0, dy: 0 };
+      // Simple hash from signalId for deterministic scatter
+      let hash = 0;
+      for (let i = 0; i < signalId.length; i++) {
+        hash = (hash * 31 + signalId.charCodeAt(i)) | 0;
+      }
+      const angle = ((hash % 360) / 360) * Math.PI * 2;
+      const maxOffset = Math.min(plotWidth, plotHeight) * 0.04;
+      const radius = maxOffset * (0.4 + 0.6 * ((index % 7) / 6));
+      return { dx: Math.cos(angle) * radius, dy: Math.sin(angle) * radius };
+    },
+    [plotWidth, plotHeight],
   );
+
+  // Check if dots would cluster (all same pixel position)
+  const dots = useMemo(() => {
+    const preliminary = rawData.map((d) => ({
+      ...d,
+      cx: toX(d.confidence),
+      cy: toY(d.sla),
+      color: SPORT_COLORS[d.signal.sport] || "#6b7280",
+    }));
+
+    // Detect clustering: if all cx/cy are within 2px of each other, apply jitter
+    const allSameSpot =
+      preliminary.length > 1 &&
+      preliminary.every(
+        (p) =>
+          Math.abs(p.cx - preliminary[0].cx) < 2 &&
+          Math.abs(p.cy - preliminary[0].cy) < 2,
+      );
+
+    if (allSameSpot) {
+      return preliminary.map((p, i) => {
+        const j = jitter(p.signal.signalId, i, preliminary.length);
+        return { ...p, cx: p.cx + j.dx, cy: p.cy + j.dy };
+      });
+    }
+    return preliminary;
+  }, [rawData, toX, toY, jitter]);
 
   const handleDotEnter = (
     dot: (typeof dots)[0],
@@ -205,6 +310,14 @@ export default function SignalPlot({
     return `${Math.floor(hours / 24)}d left`;
   };
 
+  // Format tick labels based on magnitude
+  const formatConfTick = (tick: number): string => {
+    if (Number.isInteger(tick)) return String(tick);
+    return tick.toFixed(1);
+  };
+
+  const formatSlaTick = (tick: number): string => `${tick / 100}%`;
+
   return (
     <div ref={containerRef} className="relative w-full">
       {/* Quadrant hint: top-right is the sweet spot */}
@@ -223,7 +336,7 @@ export default function SignalPlot({
       >
         {/* Background quadrant shading — top-right is "ideal" */}
         <rect
-          x={toX(CONF_MAX / 2)}
+          x={toX((xAxis.min + xAxis.max) / 2)}
           y={PADDING.top}
           width={plotWidth / 2}
           height={plotHeight / 2}
@@ -232,7 +345,7 @@ export default function SignalPlot({
         />
 
         {/* Grid lines */}
-        {CONF_TICKS.map((tick) => (
+        {xAxis.ticks.map((tick) => (
           <line
             key={`gx-${tick}`}
             x1={toX(tick)}
@@ -243,7 +356,7 @@ export default function SignalPlot({
             strokeWidth={1}
           />
         ))}
-        {SLA_TICKS.map((tick) => (
+        {yAxis.ticks.map((tick) => (
           <line
             key={`gy-${tick}`}
             x1={PADDING.left}
@@ -274,7 +387,7 @@ export default function SignalPlot({
         />
 
         {/* X axis labels */}
-        {CONF_TICKS.map((tick) => (
+        {xAxis.ticks.map((tick) => (
           <text
             key={`lx-${tick}`}
             x={toX(tick)}
@@ -282,7 +395,7 @@ export default function SignalPlot({
             textAnchor="middle"
             className="fill-slate-500 text-[11px]"
           >
-            {tick}
+            {formatConfTick(tick)}
           </text>
         ))}
         <text
@@ -295,7 +408,7 @@ export default function SignalPlot({
         </text>
 
         {/* Y axis labels */}
-        {SLA_TICKS.map((tick) => (
+        {yAxis.ticks.map((tick) => (
           <text
             key={`ly-${tick}`}
             x={PADDING.left - 8}
@@ -303,7 +416,7 @@ export default function SignalPlot({
             textAnchor="end"
             className="fill-slate-500 text-[11px]"
           >
-            {tick / 100}%
+            {formatSlaTick(tick)}
           </text>
         ))}
         <text

@@ -1,13 +1,9 @@
-# Network-specific addresses and start blocks are in networks.json.
-# Deploy with: graph deploy --network base-sepolia (or --network base for mainnet)
-# After mainnet deployment, update networks.json "base" entries with real addresses.
 specVersion: 1.0.0
 indexerHints:
   prune: auto
 schema:
   file: ./schema.graphql
 dataSources:
-  # --- SignalCommitment ---
   - kind: ethereum
     name: SignalCommitment
     network: base-sepolia
@@ -27,20 +23,19 @@ dataSources:
         - name: SignalCommitment
           file: ./abis/SignalCommitment.json
       eventHandlers:
-        - event: SignalCommitted(indexed uint256,indexed address,string,uint256,uint256,uint256,uint256)
+        - event: SignalCommitted(indexed uint256,indexed
+            address,string,uint256,uint256,uint256,uint256)
           handler: handleSignalCommitted
         - event: SignalCancelled(indexed uint256,indexed address)
           handler: handleSignalCancelled
         - event: SignalStatusUpdated(indexed uint256,uint8)
           handler: handleSignalStatusUpdated
       file: ./src/signal-commitment.ts
-
-  # --- Escrow ---
   - kind: ethereum
     name: Escrow
     network: base-sepolia
     source:
-      address: "0xA41Fc0bD7A1aE0E713C8c7c1f3c323B38B51BBCf"
+      address: "0x290E97c4B26ef1FdcF7BC27aFc43169B4a804a75"
       abi: Escrow
       startBlock: 38024000
     mapping:
@@ -61,7 +56,8 @@ dataSources:
           handler: handleDeposited
         - event: Withdrawn(indexed address,uint256)
           handler: handleWithdrawn
-        - event: SignalPurchased(indexed uint256,indexed address,uint256,uint256,uint256,uint256,uint256)
+        - event: SignalPurchased(indexed uint256,indexed
+            address,uint256,uint256,uint256,uint256,uint256)
           handler: handleSignalPurchased
         - event: Refunded(indexed address,indexed address,uint256,uint256)
           handler: handleRefunded
@@ -70,8 +66,6 @@ dataSources:
         - event: FeesClaimed(indexed address,indexed address,uint256,uint256)
           handler: handleFeesClaimed
       file: ./src/escrow.ts
-
-  # --- Collateral ---
   - kind: ethereum
     name: Collateral
     network: base-sepolia
@@ -102,8 +96,6 @@ dataSources:
         - event: Slashed(indexed address,uint256,indexed address)
           handler: handleCollateralSlashed
       file: ./src/collateral.ts
-
-  # --- Account ---
   - kind: ethereum
     name: Account
     network: base-sepolia
@@ -132,8 +124,6 @@ dataSources:
         - event: SettledChanged(indexed address,indexed address,bool)
           handler: handleSettledChanged
       file: ./src/account.ts
-
-  # --- Audit ---
   - kind: ethereum
     name: Audit
     network: base-sepolia
@@ -155,13 +145,12 @@ dataSources:
         - name: Audit
           file: ./abis/Audit.json
       eventHandlers:
-        - event: AuditSettled(indexed address,indexed address,uint256,int256,uint256,uint256,uint256)
+        - event: AuditSettled(indexed address,indexed
+            address,uint256,int256,uint256,uint256,uint256)
           handler: handleAuditSettled
         - event: EarlyExitSettled(indexed address,indexed address,uint256,int256,uint256)
           handler: handleEarlyExitSettled
       file: ./src/audit.ts
-
-  # --- CreditLedger ---
   - kind: ethereum
     name: CreditLedger
     network: base-sepolia
@@ -186,8 +175,6 @@ dataSources:
         - event: CreditsBurned(indexed address,uint256)
           handler: handleCreditsBurned
       file: ./src/credit-ledger.ts
-
-  # --- TrackRecord ---
   - kind: ethereum
     name: TrackRecord
     network: base-sepolia
@@ -207,6 +194,7 @@ dataSources:
         - name: TrackRecord
           file: ./abis/TrackRecord.json
       eventHandlers:
-        - event: TrackRecordSubmitted(indexed uint256,indexed address,uint256,uint256,uint256,uint256,uint256,uint256,bytes32)
+        - event: TrackRecordSubmitted(indexed uint256,indexed
+            address,uint256,uint256,uint256,uint256,uint256,uint256,bytes32)
           handler: handleTrackRecordSubmitted
       file: ./src/track-record.ts
