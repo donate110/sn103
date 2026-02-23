@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAccount, useWalletClient } from "wagmi";
 import { useSignal, usePurchaseSignal, useSignalNotionalFilled } from "@/lib/hooks";
-import { getValidatorClients, getMinerClient } from "@/lib/api";
+import { discoverValidatorClients, getMinerClient } from "@/lib/api";
 import { decrypt, fromHex, bigIntToKey, reconstructSecret } from "@/lib/crypto";
 import type { ShamirShare } from "@/lib/crypto";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
@@ -200,7 +200,7 @@ export default function PurchaseSignal() {
       // Step 2: Verify availability with validators (MPC check — before payment)
       setStep("purchasing_validator");
 
-      const validators = getValidatorClients();
+      const validators = await discoverValidatorClients();
       const purchaseReq = {
         buyer_address: buyerAddress,
         sportsbook: "",
