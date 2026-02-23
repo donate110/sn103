@@ -38,12 +38,21 @@ export const metadata: Metadata = {
     description:
       "Unbundling information from execution. Encrypted predictions, verifiable track records, settled in USDC on Base.",
     siteName: "Djinn",
+    images: [
+      {
+        url: "https://djinn.gg/icon-512.png",
+        width: 512,
+        height: 512,
+        alt: "Djinn Protocol",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "Djinn | Sports Intelligence Marketplace",
     description:
       "Unbundling information from execution. Encrypted predictions, verifiable track records, settled in USDC on Base.",
+    images: ["https://djinn.gg/icon-512.png"],
   },
 };
 

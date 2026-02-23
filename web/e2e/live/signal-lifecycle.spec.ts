@@ -455,7 +455,7 @@ test("verify: subgraph indexes the signal", async ({ request }) => {
   await new Promise((r) => setTimeout(r, 5000));
 
   const SUBGRAPH_URL =
-    "https://api.studio.thegraph.com/query/1742249/djinn/v2.3.0";
+    "https://api.studio.thegraph.com/query/1742249/djinn/v2.4.0";
 
   const res = await request.post(SUBGRAPH_URL, {
     headers: { "Content-Type": "application/json" },
