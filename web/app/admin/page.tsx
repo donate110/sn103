@@ -138,10 +138,11 @@ export default function AdminDashboard() {
   const [feedback, setFeedback] = useState<FeedbackEntry[]>([]);
   const [feedbackFilter, setFeedbackFilter] = useState<"all" | "open" | "closed">("all");
 
-  // Check for existing admin session cookie (set by server-side auth)
+  // Check for existing admin session via server-side cookie verification
   useEffect(() => {
-    const hasCookie = document.cookie.includes("djinn_admin_token=");
-    if (hasCookie) setAuthed(true);
+    fetch("/api/admin/auth", { credentials: "same-origin" })
+      .then((res) => { if (res.ok) setAuthed(true); })
+      .catch(() => {});
   }, []);
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -166,67 +167,61 @@ export default function AdminDashboard() {
   const refresh = useCallback(async () => {
     setLoading(true);
 
-    // Always fetch core data
-    const fetches: Promise<unknown>[] = [
-      fetchValidatorHealth(),
-      fetchMinerHealth(),
-      fetchProtocolStats(),
-      fetchErrorReports(),
-    ];
+    // Fetch all data in parallel so badge counts are always available
+    const [
+      validatorRes,
+      minerRes,
+      statsRes,
+      errorsRes,
+      networkRes,
+      signalsRes,
+      purchasesRes,
+      auditsRes,
+      attestRes,
+      feedbackRes,
+    ] = await Promise.allSettled([
+      fetchValidatorHealth(),       // 0
+      fetchMinerHealth(),           // 1
+      fetchProtocolStats(),         // 2
+      fetchErrorReports(),          // 3
+      fetchNetworkActivity(),       // 4
+      fetchRecentSignals(50),       // 5
+      fetchRecentPurchases(50),     // 6
+      fetchRecentAudits(50),        // 7
+      fetchAttestationData(),       // 8
+      fetchFeedback(feedbackFilter),// 9
+    ]);
 
-    // Conditionally fetch tab data
-    if (activeTab === "network") {
-      fetches.push(fetchNetworkActivity());
-    }
-    if (activeTab === "protocol") {
-      fetches.push(fetchRecentSignals(50));
-      fetches.push(fetchRecentPurchases(50));
-      fetches.push(fetchRecentAudits(50));
-    }
-    if (activeTab === "attestations") {
-      fetches.push(fetchAttestationData());
-    }
-    if (activeTab === "feedback") {
-      fetches.push(fetchFeedback(feedbackFilter));
-    }
-
-    const results = await Promise.allSettled(fetches);
-
-    // Core results (indices 0-3)
-    if (results[0].status === "fulfilled") setValidators(results[0].value as ValidatorHealth[]);
-    if (results[1].status === "fulfilled") setMiner(results[1].value as MinerHealth | null);
-    if (results[2].status === "fulfilled") setStats(results[2].value as SubgraphProtocolStats | null);
-    if (results[3].status === "fulfilled") {
-      const errData = results[3].value as { errors: ErrorReport[]; total: number } | null;
+    if (validatorRes.status === "fulfilled") setValidators(validatorRes.value as ValidatorHealth[]);
+    if (minerRes.status === "fulfilled") setMiner(minerRes.value as MinerHealth | null);
+    if (statsRes.status === "fulfilled") setStats(statsRes.value as SubgraphProtocolStats | null);
+    if (errorsRes.status === "fulfilled") {
+      const errData = errorsRes.value as { errors: ErrorReport[]; total: number } | null;
       if (errData) {
         setErrorReports(errData.errors);
         setErrorTotal(errData.total);
       }
     }
-
-    // Tab-specific results
-    if (activeTab === "network" && results[4]?.status === "fulfilled") {
-      const actResult = results[4].value as NetworkActivityResult;
+    if (networkRes.status === "fulfilled") {
+      const actResult = networkRes.value as NetworkActivityResult;
       setNetworkEvents(actResult.events);
       setNetworkDiag({ discovered: actResult.validatorsDiscovered, responded: actResult.validatorsResponded, error: actResult.error });
     }
-    if (activeTab === "protocol") {
-      if (results[4]?.status === "fulfilled") setRecentSignals(results[4].value as SubgraphRecentSignal[]);
-      if (results[5]?.status === "fulfilled") setRecentPurchases(results[5].value as SubgraphRecentPurchase[]);
-      if (results[6]?.status === "fulfilled") setRecentAudits(results[6].value as SubgraphRecentAudit[]);
-    }
-    if (activeTab === "attestations" && results[4]?.status === "fulfilled") {
-      const ad = results[4].value as { attestations: AttestationEntry[]; burnStats: BurnHourStat[] };
+    if (signalsRes.status === "fulfilled") setRecentSignals(signalsRes.value as SubgraphRecentSignal[]);
+    if (purchasesRes.status === "fulfilled") setRecentPurchases(purchasesRes.value as SubgraphRecentPurchase[]);
+    if (auditsRes.status === "fulfilled") setRecentAudits(auditsRes.value as SubgraphRecentAudit[]);
+    if (attestRes.status === "fulfilled") {
+      const ad = attestRes.value as { attestations: AttestationEntry[]; burnStats: BurnHourStat[] };
       setAttestations(ad.attestations);
       setBurnStats(ad.burnStats);
     }
-    if (activeTab === "feedback" && results[4]?.status === "fulfilled") {
-      setFeedback(results[4].value as FeedbackEntry[]);
+    if (feedbackRes.status === "fulfilled") {
+      setFeedback(feedbackRes.value as FeedbackEntry[]);
     }
 
     setLastRefresh(new Date());
     setLoading(false);
-  }, [activeTab, feedbackFilter]);
+  }, [feedbackFilter]);
 
   useEffect(() => {
     if (!authed) return;
@@ -309,19 +304,33 @@ export default function AdminDashboard() {
             ["attestations", "Attestations"],
             ["feedback", "Feedback"],
           ] as const
-        ).map(([tab, label]) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === tab
-                ? "border-slate-900 text-slate-900"
-                : "border-transparent text-slate-400 hover:text-slate-600"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+        ).map(([tab, label]) => {
+          const badge = getBadge(tab, {
+            networkEvents, recentSignals, recentPurchases, attestations, feedback,
+          });
+          return (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`relative px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab
+                  ? "border-slate-900 text-slate-900"
+                  : "border-transparent text-slate-400 hover:text-slate-600"
+              }`}
+            >
+              {label}
+              {badge && (
+                <span className={`ml-1.5 inline-flex items-center justify-center text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 ${
+                  tab === "feedback"
+                    ? "bg-red-500 text-white"
+                    : "bg-slate-200 text-slate-600"
+                }`}>
+                  {badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* ── Overview Tab ── */}
@@ -1265,6 +1274,39 @@ function ExternalLink({ href, title, description }: { href: string; title: strin
 // ---------------------------------------------------------------------------
 // Utility functions
 // ---------------------------------------------------------------------------
+
+function getBadge(
+  tab: AdminTab,
+  data: {
+    networkEvents: NetworkEvent[];
+    recentSignals: SubgraphRecentSignal[];
+    recentPurchases: SubgraphRecentPurchase[];
+    attestations: AttestationEntry[];
+    feedback: FeedbackEntry[];
+  },
+): string | null {
+  switch (tab) {
+    case "network": {
+      const n = data.networkEvents.length;
+      return n > 0 ? String(n) : null;
+    }
+    case "protocol": {
+      const p = data.recentPurchases.length;
+      const s = data.recentSignals.length;
+      return p > 0 || s > 0 ? `${p} / ${s}` : null;
+    }
+    case "attestations": {
+      const a = data.attestations.length;
+      return a > 0 ? String(a) : null;
+    }
+    case "feedback": {
+      const open = data.feedback.filter((f) => f.state === "open").length;
+      return open > 0 ? String(open) : null;
+    }
+    default:
+      return null;
+  }
+}
 
 function truncAddr(addr: string): string {
   if (!addr || addr.length < 10) return addr;

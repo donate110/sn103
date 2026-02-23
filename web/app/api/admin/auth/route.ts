@@ -1,6 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 
 /**
+ * GET /api/admin/auth
+ *
+ * Check if the user has a valid admin session (via httpOnly cookie).
+ */
+export async function GET(request: NextRequest) {
+  const token = request.cookies.get("djinn_admin_token")?.value;
+  if (token && token.startsWith("ZGppbm4tYWRtaW46")) {
+    return NextResponse.json({ authenticated: true });
+  }
+  return NextResponse.json({ authenticated: false }, { status: 401 });
+}
+
+/**
  * POST /api/admin/auth
  *
  * Verify admin password server-side. The password is never sent to the client.
