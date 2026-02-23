@@ -34,6 +34,12 @@ interface ValidatorNode {
   port: number;
 }
 
+interface MinerNode {
+  uid: number;
+  ip: string;
+  port: number;
+}
+
 interface ValidatorHealth {
   uid: number;
   status: string;
@@ -45,6 +51,7 @@ interface ValidatorHealth {
 }
 
 interface MinerHealth {
+  uid: number;
   status: string;
   version: string;
   odds_api_connected: boolean;
@@ -109,7 +116,7 @@ const BASE_EXPLORER = process.env.NEXT_PUBLIC_BASE_EXPLORER || "https://basescan
 
 export default function AdminDashboard() {
   const [validators, setValidators] = useState<ValidatorHealth[]>([]);
-  const [miner, setMiner] = useState<MinerHealth | null>(null);
+  const [miners, setMiners] = useState<MinerHealth[]>([]);
   const [stats, setStats] = useState<SubgraphProtocolStats | null>(null);
   const [errorReports, setErrorReports] = useState<ErrorReport[]>([]);
   const [errorTotal, setErrorTotal] = useState(0);
@@ -193,7 +200,7 @@ export default function AdminDashboard() {
     ]);
 
     if (validatorRes.status === "fulfilled") setValidators(validatorRes.value as ValidatorHealth[]);
-    if (minerRes.status === "fulfilled") setMiner(minerRes.value as MinerHealth | null);
+    if (minerRes.status === "fulfilled") setMiners(minerRes.value as MinerHealth[]);
     if (statsRes.status === "fulfilled") setStats(statsRes.value as SubgraphProtocolStats | null);
     if (errorsRes.status === "fulfilled") {
       const errData = errorsRes.value as { errors: ErrorReport[]; total: number } | null;
@@ -256,6 +263,7 @@ export default function AdminDashboard() {
   }
 
   const healthyValidators = validators.filter((v) => v.status === "ok");
+  const healthyMiners = miners.filter((m) => m.status === "ok");
   const totalShares = validators.reduce((sum, v) => sum + (v.shares_held || 0), 0);
 
   return (
@@ -344,9 +352,9 @@ export default function AdminDashboard() {
               status={healthyValidators.length >= 7 ? "green" : healthyValidators.length >= 4 ? "yellow" : "red"}
             />
             <StatCard
-              label="Miner"
-              value={miner?.status === "ok" ? "UP" : "DOWN"}
-              status={miner?.status === "ok" ? "green" : "red"}
+              label="Miners"
+              value={miners.length > 0 ? `${healthyMiners.length}/${miners.length}` : "0"}
+              status={healthyMiners.length > 0 ? "green" : miners.length > 0 ? "red" : "yellow"}
             />
             <StatCard
               label="Key Shares"
@@ -438,42 +446,71 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* Miner Status */}
+          {/* Miners Grid */}
           <div className="mb-8">
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">Miner</h2>
-            <div className="bg-white rounded-xl border border-slate-200 p-6">
-              {miner?.error ? (
-                <div className="text-red-600 flex items-center gap-2">
-                  <Dot color="red" /> Miner unreachable: {miner.error}
-                </div>
-              ) : miner ? (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
-                  <div>
-                    <span className="text-xs text-slate-400 block mb-1">Status</span>
-                    <span className={`font-medium ${miner.status === "ok" ? "text-green-600" : "text-yellow-600"}`}>
-                      {miner.status === "ok" ? "Healthy" : miner.status}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400 block mb-1">Version</span>
-                    <span className="font-mono text-sm text-slate-700">{miner.version || "-"}</span>
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400 block mb-1">Odds API</span>
-                    <span className={miner.odds_api_connected ? "text-green-600" : "text-red-600"}>
-                      {miner.odds_api_connected ? "Connected" : "Disconnected"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400 block mb-1">Uptime</span>
-                    <span className="font-mono text-sm text-slate-700">
-                      {formatUptime(miner.uptime_seconds)}
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-slate-400">Loading...</div>
-              )}
+            <h2 className="text-xl font-semibold text-slate-900 mb-4">Miners</h2>
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium">UID</th>
+                    <th className="px-4 py-3 text-left font-medium">Status</th>
+                    <th className="px-4 py-3 text-left font-medium">Version</th>
+                    <th className="px-4 py-3 text-center font-medium">Odds API</th>
+                    <th className="px-4 py-3 text-center font-medium">Bittensor</th>
+                    <th className="px-4 py-3 text-right font-medium">Uptime</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {miners.length === 0 && !loading && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                        No miners discovered
+                      </td>
+                    </tr>
+                  )}
+                  {miners.map((m) => (
+                    <tr key={m.uid} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-mono text-slate-700">{m.uid}</td>
+                      <td className="px-4 py-3">
+                        {m.error ? (
+                          <span className="inline-flex items-center gap-1 text-red-600">
+                            <Dot color="red" /> Unreachable
+                          </span>
+                        ) : m.status === "ok" ? (
+                          <span className="inline-flex items-center gap-1 text-green-600">
+                            <Dot color="green" /> Healthy
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-yellow-600">
+                            <Dot color="yellow" /> {m.status}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-500">
+                        {m.version || "-"}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {m.error ? "-" : m.odds_api_connected ? (
+                          <span className="text-green-500">connected</span>
+                        ) : (
+                          <span className="text-red-500">disconnected</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {m.error ? "-" : m.bt_connected ? (
+                          <span className="text-green-500">connected</span>
+                        ) : (
+                          <span className="text-red-500">disconnected</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-sm text-slate-700">
+                        {m.error ? "-" : formatUptime(m.uptime_seconds)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -1473,14 +1510,29 @@ async function fetchFeedback(state: "all" | "open" | "closed"): Promise<Feedback
   }
 }
 
-async function fetchMinerHealth(): Promise<MinerHealth | null> {
+async function fetchMinerHealth(): Promise<MinerHealth[]> {
   try {
-    const res = await fetch("/api/miner/health", {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return { status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: `${res.status}` };
-    return await res.json();
-  } catch (err) {
-    return { status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String(err) };
+    const discoverRes = await fetch("/api/miners/discover");
+    if (!discoverRes.ok) return [];
+    const { miners } = (await discoverRes.json()) as { miners: MinerNode[] };
+
+    const results = await Promise.allSettled(
+      miners.map(async (m) => {
+        const res = await fetch(`/api/miners/${m.uid}/health`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data = await res.json();
+        return { ...data, uid: m.uid } as MinerHealth;
+      }),
+    );
+
+    return results.map((r, i) =>
+      r.status === "fulfilled"
+        ? r.value
+        : { uid: miners[i].uid, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
+    );
+  } catch {
+    return [];
   }
 }

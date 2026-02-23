@@ -238,33 +238,45 @@ export async function discoverValidatorUrls(): Promise<string[]> {
 }
 
 /**
+ * Discover all miner nodes from the metagraph.
+ * Returns non-validator nodes with public IPs, sorted by UID.
+ * On testnet where all nodes may have validatorPermit=true,
+ * probes public nodes for `odds_api_connected` to identify miners.
+ */
+export async function discoverMiners(): Promise<DiscoveredNode[]> {
+  const { nodes } = await discoverMetagraph();
+  const publicNodes = nodes.filter((n) => n.port > 0 && isPublicIp(n.ip));
+
+  // Prefer nodes without validator permit (classic miners)
+  const miners = publicNodes.filter((n) => !n.isValidator);
+  if (miners.length > 0) return miners.sort((a, b) => a.uid - b.uid);
+
+  // Fallback: probe all public nodes for miner health signature
+  const identified: DiscoveredNode[] = [];
+  for (const n of publicNodes) {
+    try {
+      const url = `http://${n.ip}:${n.port}`;
+      const resp = await fetch(`${url}/health`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      const data = await resp.json();
+      if (data.odds_api_connected !== undefined) identified.push(n);
+    } catch {
+      continue;
+    }
+  }
+
+  return identified.sort((a, b) => a.uid - b.uid);
+}
+
+/**
  * Discover a miner URL from the metagraph.
  * First tries non-validator nodes; if none found, probes all nodes' /health
  * for `odds_api_connected` to identify miners (on testnet, all nodes may
  * have validatorPermit=true).
  */
 export async function discoverMinerUrl(): Promise<string | null> {
-  const { nodes } = await discoverMetagraph();
-  const publicNodes = nodes.filter((n) => n.port > 0 && isPublicIp(n.ip));
-
-  // Prefer nodes without validator permit (classic miners)
-  const miners = publicNodes.filter((n) => !n.isValidator);
+  const miners = await discoverMiners();
   if (miners.length > 0) return `http://${miners[0].ip}:${miners[0].port}`;
-
-  // Fallback: probe all public nodes for miner health signature
-  for (const n of publicNodes) {
-    try {
-      const url = `http://${n.ip}:${n.port}`;
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 3000);
-      const resp = await fetch(`${url}/health`, { signal: ctrl.signal });
-      clearTimeout(timer);
-      const data = await resp.json();
-      if (data.odds_api_connected !== undefined) return url;
-    } catch {
-      continue;
-    }
-  }
-
   return null;
 }

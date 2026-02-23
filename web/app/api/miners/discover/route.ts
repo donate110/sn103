@@ -1,0 +1,24 @@
+import { NextResponse } from "next/server";
+import { discoverMiners } from "@/lib/bt-metagraph";
+
+/**
+ * Returns all reachable miner nodes from the metagraph.
+ * Used by the admin dashboard to probe each miner's health individually.
+ */
+export async function GET() {
+  try {
+    const nodes = await discoverMiners();
+
+    const miners = nodes.map((n) => ({ uid: n.uid, ip: n.ip, port: n.port }));
+
+    return NextResponse.json({ miners }, {
+      headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" },
+    });
+  } catch (err) {
+    console.error("[discover-miners] Metagraph discovery failed:", err);
+    return NextResponse.json(
+      { error: "Metagraph discovery failed", miners: [] },
+      { status: 500 },
+    );
+  }
+}
