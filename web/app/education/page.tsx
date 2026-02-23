@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Image from "next/image";
+import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Education & Research | Djinn",
@@ -25,7 +26,7 @@ const RESOURCES: Resource[] = [
   {
     title: "TAO Valuation: Top-Down vs Bottom-Up",
     source: "Djinn Research",
-    url: "https://research.djinn.gg/",
+    url: "/research/tao-valuation",
     description:
       "Interactive analysis examining Bittensor\u2019s network valuation through two lenses: market-based (top-down) versus sum-of-components (bottom-up). Tracks weekly snapshots from dTAO\u2019s launch in February 2025 through February 2026, with four interactive charts across 51 data points.",
     tag: "interactive",
@@ -34,7 +35,7 @@ const RESOURCES: Resource[] = [
   {
     title: "AMM-Implied Options on Bittensor Subnet Tokens",
     source: "Djinn Research",
-    url: "https://research.djinn.gg/amm-options-paper.pdf",
+    url: "/research/amm-options-paper.pdf",
     description:
       "Examines how the dTAO constant-product AMM mechanism generates implicit option-like payoffs for subnet stakers, establishing formal connections between liquidity provision mechanics and options valuation theory.",
     tag: "paper",
@@ -97,12 +98,16 @@ export default function Education() {
       {/* Resource cards */}
       <section className="mb-16">
         <div className="grid gap-6">
-          {RESOURCES.map((resource) => (
-            <a
+          {RESOURCES.map((resource) => {
+            const isExternal = resource.url.startsWith("http");
+            const Wrapper = isExternal ? "a" : Link;
+            const linkProps = isExternal
+              ? { href: resource.url, target: "_blank" as const, rel: "noopener noreferrer" }
+              : { href: resource.url };
+            return (
+            <Wrapper
               key={resource.url}
-              href={resource.url}
-              target="_blank"
-              rel="noopener noreferrer"
+              {...linkProps}
               className="group card flex flex-col sm:flex-row sm:items-start gap-5 hover:shadow-lg transition-shadow"
             >
               {/* Icon */}
@@ -191,8 +196,9 @@ export default function Education() {
                   d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
                 />
               </svg>
-            </a>
-          ))}
+            </Wrapper>
+            );
+          })}
         </div>
       </section>
     </div>
