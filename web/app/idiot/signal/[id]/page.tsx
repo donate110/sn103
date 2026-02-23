@@ -758,21 +758,7 @@ export default function PurchaseSignal() {
                           </div>
                         )}
                         <div className="flex gap-2 mb-2">
-                          {minVal > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => setNotional(String(minVal))}
-                              disabled={isFull}
-                              className={`flex-1 rounded-lg border py-1.5 text-xs font-medium transition-colors ${
-                                notional === String(minVal)
-                                  ? "border-idiot-300 bg-idiot-50 text-idiot-700"
-                                  : "border-slate-200 text-slate-500 hover:border-idiot-300 hover:text-idiot-600"
-                              }`}
-                            >
-                              Min ${minVal.toFixed(2)}
-                            </button>
-                          )}
-                          {maxVal !== undefined && maxVal !== minVal && (
+                          {maxVal !== undefined && maxVal === minVal ? (
                             <button
                               type="button"
                               onClick={() => setNotional(String(maxVal))}
@@ -783,22 +769,39 @@ export default function PurchaseSignal() {
                                   : "border-slate-200 text-slate-500 hover:border-idiot-300 hover:text-idiot-600"
                               }`}
                             >
-                              Max ${maxVal.toFixed(2)}
+                              ${maxVal.toFixed(2)}
                             </button>
-                          )}
-                          {maxVal !== undefined && maxVal === minVal && (
-                            <button
-                              type="button"
-                              onClick={() => setNotional(String(maxVal))}
-                              disabled={isFull}
-                              className={`flex-1 rounded-lg border py-1.5 text-xs font-medium transition-colors ${
-                                notional === String(maxVal)
-                                  ? "border-idiot-300 bg-idiot-50 text-idiot-700"
-                                  : "border-slate-200 text-slate-500 hover:border-idiot-300 hover:text-idiot-600"
-                              }`}
-                            >
-                              ${maxVal.toFixed(2)} (fixed)
-                            </button>
+                          ) : (
+                            <>
+                              {minVal > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setNotional(String(minVal))}
+                                  disabled={isFull}
+                                  className={`flex-1 rounded-lg border py-1.5 text-xs font-medium transition-colors ${
+                                    notional === String(minVal)
+                                      ? "border-idiot-300 bg-idiot-50 text-idiot-700"
+                                      : "border-slate-200 text-slate-500 hover:border-idiot-300 hover:text-idiot-600"
+                                  }`}
+                                >
+                                  Min ${minVal.toFixed(2)}
+                                </button>
+                              )}
+                              {maxVal !== undefined && (
+                                <button
+                                  type="button"
+                                  onClick={() => setNotional(String(maxVal))}
+                                  disabled={isFull}
+                                  className={`flex-1 rounded-lg border py-1.5 text-xs font-medium transition-colors ${
+                                    notional === String(maxVal)
+                                      ? "border-idiot-300 bg-idiot-50 text-idiot-700"
+                                      : "border-slate-200 text-slate-500 hover:border-idiot-300 hover:text-idiot-600"
+                                  }`}
+                                >
+                                  Max ${maxVal.toFixed(2)}
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                         <input

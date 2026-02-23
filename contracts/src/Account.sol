@@ -336,12 +336,11 @@ contract Account is Ownable {
         return keccak256(abi.encode(genius, idiot));
     }
 
-    /// @dev Validates that genius and idiot addresses are non-zero and different
+    /// @dev Validates that genius and idiot addresses are non-zero
     /// @param genius The Genius address
     /// @param idiot The Idiot address
     function _validatePair(address genius, address idiot) internal pure {
         if (genius == address(0)) revert ZeroGeniusAddress();
         if (idiot == address(0)) revert ZeroIdiotAddress();
-        if (genius == idiot) revert GeniusEqualsIdiot(genius);
     }
 }
