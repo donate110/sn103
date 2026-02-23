@@ -296,8 +296,9 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
     }
 
     /// @notice Either party can trigger early exit before 10 signals.
-    ///         Settlement uses the current Quality Score but pays entirely in Credits
-    ///         (not USDC), per whitepaper: "insufficient sample for USDC movement."
+    ///         Settlement uses the current Quality Score. Damages to Idiot are paid
+    ///         in Credits only (insufficient sample for USDC movement), but the 0.5%
+    ///         protocol fee is still charged to Genius collateral to prevent fee dodging.
     /// @param genius The Genius address
     /// @param idiot The Idiot address
     function earlyExit(address genius, address idiot) external whenNotPaused nonReentrant {
@@ -519,12 +520,10 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
         // before any slashing to avoid undercollateralizing other active signal locks.
         _releaseSignalLocks(genius, purchaseIds);
 
-        // Protocol fee -- slash from genius collateral to treasury
-        // Early exits use credits only, no USDC movement.
+        // Protocol fee -- slash from genius collateral to treasury.
+        // Charged on ALL settlements including early exits to prevent fee dodging.
         // Record actual slashed amount (may be less if collateral insufficient).
-        if (isEarlyExit) {
-            protocolFee = 0;
-        } else if (protocolFee > 0) {
+        if (protocolFee > 0) {
             protocolFee = collateral.slash(genius, protocolFee, protocolTreasury);
         }
 
@@ -592,11 +591,10 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
         // Release signal locks before slashing
         _releaseSignalLocks(genius, purchaseIds);
 
-        // Protocol fee — early exits use credits only, no USDC movement.
+        // Protocol fee -- slash from genius collateral to treasury.
+        // Charged on ALL settlements including early exits to prevent fee dodging.
         // Record actual slashed amount (may be less if collateral insufficient).
-        if (isEarlyExit) {
-            protocolFee = 0;
-        } else if (protocolFee > 0) {
+        if (protocolFee > 0) {
             protocolFee = collateral.slash(genius, protocolFee, protocolTreasury);
         }
 

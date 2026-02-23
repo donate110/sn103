@@ -504,6 +504,11 @@ contract AuditIntegrationTest is Test {
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.trancheA, 0, "Early exit should have no tranche A");
         assertEq(result.trancheB, expectedDamages, "Early exit tranche B should be all damages");
+
+        // Protocol fee should still be charged on early exits (prevents fee dodging)
+        uint256 expectedFee = (5 * NOTIONAL * 50) / 10_000;
+        assertGt(result.protocolFee, 0, "Early exit should charge protocol fee");
+        assertEq(result.protocolFee, expectedFee, "Early exit protocol fee should be 0.5% of notional");
     }
 
     function test_earlyExit_positiveScore_noDamages() public {
@@ -515,6 +520,10 @@ contract AuditIntegrationTest is Test {
         audit.earlyExit(genius, idiot);
 
         assertEq(creditLedger.balanceOf(idiot), 0, "No credits should be minted for positive score");
+
+        // Protocol fee charged even on positive early exits
+        AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
+        assertGt(result.protocolFee, 0, "Positive early exit should still charge protocol fee");
     }
 
     function test_earlyExit_onlyPartyCanTrigger() public {
