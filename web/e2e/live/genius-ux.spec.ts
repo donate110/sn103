@@ -108,11 +108,11 @@ test.describe("Track Record page", () => {
     ).toBeVisible();
   });
 
-  test("explains zero-knowledge proof process", async ({ page }) => {
+  test("explains settlement process", async ({ page }) => {
     await page.goto("/genius/track-record");
-    // Even without wallet, the page should explain the ZK proof concept
+    // Even without wallet, the page should explain the settlement process
     await expect(
-      page.getByText(/zero-knowledge proof|track record/i).first(),
+      page.getByText(/track record|connect your wallet/i).first(),
     ).toBeVisible({ timeout: 10_000 });
   });
 });

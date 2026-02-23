@@ -441,11 +441,6 @@ const SIGNAL_COMMITMENT_VIEM_ABI = parseAbi([
   "function cancelSignal(uint256 signalId)",
 ]);
 
-const TRACK_RECORD_VIEM_ABI = parseAbi([
-  "function commitProof(bytes32 commitHash)",
-  "function submit(uint256[2] _pA, uint256[2][2] _pB, uint256[2] _pC, uint256[106] _pubSignals) returns (uint256 recordId)",
-]);
-
 const AUDIT_VIEM_ABI = parseAbi([
   "function earlyExit(address genius, address idiot)",
 ]);
@@ -807,90 +802,6 @@ export function useApproveUsdc() {
   );
 
   return { approve, loading, error };
-}
-
-// ---------------------------------------------------------------------------
-// Track record proof submission hook
-// ---------------------------------------------------------------------------
-
-export function useSubmitTrackRecord() {
-  const { data: walletClient } = useWalletClient();
-  const { address } = useAccount();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [txHash, setTxHash] = useState<string | null>(null);
-  const [step, setStep] = useState<"idle" | "committing" | "waiting" | "submitting">("idle");
-
-  const submit = useCallback(
-    async (
-      pA: [bigint, bigint],
-      pB: [[bigint, bigint], [bigint, bigint]],
-      pC: [bigint, bigint],
-      pubSignals: bigint[],
-    ) => {
-      if (!walletClient || !address) throw new Error("Wallet not connected");
-      setLoading(true);
-      setError(null);
-      setTxHash(null);
-      try {
-        const trackRecordAddr = ADDRESSES.trackRecord as Hex;
-
-        // Step 1: Compute proof hash matching contract's keccak256(abi.encodePacked(_pA, _pB, _pC, _pubSignals))
-        setStep("committing");
-        const allValues = [...pA, ...pB[0], ...pB[1], ...pC, ...pubSignals];
-        const types = allValues.map(() => "uint256" as const);
-        const proofHash = keccak256(encodePacked(types, allValues));
-
-        debug("[track-record] committing proof hash");
-        const commitHash = await walletClient.writeContract({
-          address: trackRecordAddr,
-          abi: TRACK_RECORD_VIEM_ABI,
-          functionName: "commitProof",
-          args: [proofHash as Hex],
-        });
-        debug("[track-record] commit tx:", commitHash);
-        await waitForTx(commitHash);
-
-        // Step 2: Wait for next block (commit-reveal requires submission in a later block)
-        setStep("waiting");
-        const startBlock = await getBlockNumber(wagmiConfig);
-        let currentBlock = startBlock;
-        const maxWaitMs = 60_000; // 60s timeout
-        const waitStart = Date.now();
-        while (currentBlock <= startBlock) {
-          if (Date.now() - waitStart > maxWaitMs) {
-            throw new Error("Timed out waiting for next block. Please try again.");
-          }
-          await new Promise(r => setTimeout(r, 2000));
-          currentBlock = await getBlockNumber(wagmiConfig);
-        }
-
-        // Step 3: Submit the proof
-        setStep("submitting");
-        debug("[track-record] submitting proof");
-        const hash = await walletClient.writeContract({
-          address: trackRecordAddr,
-          abi: TRACK_RECORD_VIEM_ABI,
-          functionName: "submit",
-          args: [pA, pB, pC, pubSignals as readonly bigint[] & { length: 106 }],
-        });
-        debug("[track-record] submit tx:", hash);
-        setTxHash(hash);
-        await waitForTx(hash);
-        return hash;
-      } catch (err) {
-        console.error("[track-record] FAILED:", err);
-        setError(humanizeError(err, "Track record submission failed"));
-        throw err;
-      } finally {
-        setLoading(false);
-        setStep("idle");
-      }
-    },
-    [walletClient, address]
-  );
-
-  return { submit, loading, error, txHash, step };
 }
 
 // ---------------------------------------------------------------------------

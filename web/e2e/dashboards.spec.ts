@@ -81,14 +81,14 @@ test.describe("Signal creation", () => {
 });
 
 test.describe("Track Record", () => {
-  test("renders Track Record Proof heading", async ({ page }) => {
+  test("renders Track Record heading", async ({ page }) => {
     await page.goto("/genius/track-record");
     await expect(
-      page.getByRole("heading", { name: "Track Record Proof" })
+      page.getByRole("heading", { name: "Track Record" })
     ).toBeVisible();
   });
 
-  test("shows wallet prompt or track record form", async ({ page }) => {
+  test("shows wallet prompt or track record content", async ({ page }) => {
     await page.goto("/genius/track-record");
     const hasConnectPrompt = await page
       .getByText(/connect your wallet/i)
@@ -98,7 +98,7 @@ test.describe("Track Record", () => {
       await expect(page.getByText(/connect your wallet/i)).toBeVisible();
     } else {
       await expect(
-        page.getByRole("heading", { name: "Track Record Proof" })
+        page.getByRole("heading", { name: "Track Record" })
       ).toBeVisible();
     }
   });

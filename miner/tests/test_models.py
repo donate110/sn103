@@ -8,6 +8,8 @@ from pydantic import ValidationError
 from djinn_miner.api.models import (
     CandidateLine,
     CheckRequest,
+    CheckResponse,
+    LineResult,
     ProofRequest,
 )
 
@@ -143,6 +145,47 @@ class TestMarketValidation:
                 index=1, sport="basketball_nba", event_id="ev-1",
                 home_team="A", away_team="B", market="", side="A",
             )
+
+
+class TestCheckResponseQueryId:
+    """Tests for CheckResponse.query_id field."""
+
+    def test_query_id_default_none(self) -> None:
+        resp = CheckResponse(
+            results=[], available_indices=[], response_time_ms=1.0
+        )
+        assert resp.query_id is None
+
+    def test_query_id_set(self) -> None:
+        resp = CheckResponse(
+            results=[], available_indices=[], response_time_ms=1.0,
+            query_id="basketball_nba:h2h:abc12345",
+        )
+        assert resp.query_id == "basketball_nba:h2h:abc12345"
+
+    def test_query_id_too_long(self) -> None:
+        with pytest.raises(ValidationError):
+            CheckResponse(
+                results=[], available_indices=[], response_time_ms=1.0,
+                query_id="x" * 300,
+            )
+
+    def test_query_id_in_json(self) -> None:
+        resp = CheckResponse(
+            results=[LineResult(index=1, available=True, bookmakers=[])],
+            available_indices=[1],
+            response_time_ms=5.0,
+            query_id="test-q",
+        )
+        data = resp.model_dump()
+        assert data["query_id"] == "test-q"
+
+    def test_query_id_absent_in_json(self) -> None:
+        resp = CheckResponse(
+            results=[], available_indices=[], response_time_ms=1.0,
+        )
+        data = resp.model_dump()
+        assert data["query_id"] is None
 
 
 class TestStringLengthLimits:

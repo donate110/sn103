@@ -70,6 +70,11 @@ class CheckResponse(BaseModel):
         description="Indices of lines that are available at 1+ sportsbooks",
     )
     response_time_ms: float = Field(description="Time taken to process the request in ms")
+    query_id: str | None = Field(
+        default=None,
+        max_length=256,
+        description="Opaque ID for requesting a TLSNotary proof of this check via /v1/proof",
+    )
 
 
 class ProofRequest(BaseModel):

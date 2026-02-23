@@ -324,7 +324,7 @@ test.describe("Genius connected flow", () => {
     await expect(page.getByText("Outcome")).toBeVisible();
   });
 
-  test("genius dashboard shows track record section", async ({ page }) => {
+  test("genius dashboard shows settlement history section", async ({ page }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/genius`);
     await bypassBetaGate(page);
@@ -334,7 +334,7 @@ test.describe("Genius connected flow", () => {
     await waitForWalletConnected(page);
 
     await expect(
-      page.getByRole("heading", { name: /verified track records/i }),
+      page.getByRole("heading", { name: /settlement history/i }),
     ).toBeVisible({ timeout: 15_000 });
   });
 

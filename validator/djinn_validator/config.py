@@ -124,10 +124,11 @@ class Config:
         if self.api_port < 1 or self.api_port > 65535:
             raise ValueError(f"API_PORT must be 1-65535, got {self.api_port}")
         is_production = self.bt_network in ("finney", "mainnet")
-        if not self.sports_api_key:
-            if is_production:
-                raise ValueError("SPORTS_API_KEY must be set in production — outcome resolution requires it")
-            warnings.append("SPORTS_API_KEY not set — outcome resolution will fail")
+        if self.sports_api_key:
+            warnings.append(
+                "SPORTS_API_KEY is set but no longer used — "
+                "validator now uses ESPN's free public API for scores"
+            )
         contract_names = ("escrow_address", "signal_commitment_address", "account_address", "collateral_address", "outcome_voting_address")
         if is_production:
             for name in contract_names:

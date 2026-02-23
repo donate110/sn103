@@ -1,6 +1,6 @@
-"""Outcome attestation — queries sports APIs and builds consensus.
+"""Outcome attestation — queries ESPN and builds consensus.
 
-Validators independently query official sports data sources, then
+Validators independently query ESPN's free public scoreboard API, then
 reach 2/3+ consensus before writing outcomes on-chain.
 
 Outcome determination logic:
@@ -14,15 +14,16 @@ from __future__ import annotations
 
 import asyncio
 import math
-import random
 import re
 import time
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import httpx
 import structlog
+
+if TYPE_CHECKING:
+    from djinn_validator.core.espn import ESPNClient
 
 log = structlog.get_logger()
 
@@ -68,16 +69,23 @@ class ParsedPick:
 
 @dataclass
 class SignalMetadata:
-    """Metadata for a purchased signal, used for outcome resolution."""
+    """Metadata for a purchased signal, used for blind outcome resolution.
+
+    Stores ALL 10 decoy lines (already public on-chain).  The validator
+    resolves every line against game results, producing 10 outcomes.
+    The real outcome is selected later by batch MPC at the audit-set level,
+    so no individual signal outcome is ever revealed.
+    """
 
     signal_id: str
     sport: str  # The Odds API sport key, e.g., "basketball_nba"
     event_id: str  # The Odds API event ID
     home_team: str
     away_team: str
-    pick: ParsedPick
+    lines: list[ParsedPick]  # All 10 public decoy lines
     purchased_at: float = field(default_factory=time.time)
     resolved: bool = False
+    outcomes: list[Outcome] | None = None  # 10 outcomes once game resolves
 
 
 @dataclass
@@ -97,8 +105,12 @@ class OutcomeAttestation:
 
 _SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_\-:.]{1,256}$")
 
-# Supported sport keys from The Odds API.
-# Prevents arbitrary path injection into the API URL.
+# Supported sport keys — must have an ESPN mapping.
+# Import lazily to avoid circular imports at module level.
+def _get_supported_sports() -> frozenset[str]:
+    from djinn_validator.core.espn import SUPPORTED_SPORTS as _ESPN_SPORTS
+    return _ESPN_SPORTS
+
 SUPPORTED_SPORTS: frozenset[str] = frozenset(
     {
         "americanfootball_nfl",
@@ -109,16 +121,6 @@ SUPPORTED_SPORTS: frozenset[str] = frozenset(
         "icehockey_nhl",
         "soccer_epl",
         "soccer_usa_mls",
-        "soccer_spain_la_liga",
-        "soccer_germany_bundesliga",
-        "soccer_italy_serie_a",
-        "soccer_france_ligue_one",
-        "soccer_uefa_champs_league",
-        "mma_mixed_martial_arts",
-        "tennis_atp_aus_open",
-        "tennis_atp_us_open",
-        "tennis_atp_wimbledon",
-        "tennis_atp_french_open",
     }
 )
 
@@ -207,6 +209,23 @@ def determine_outcome(
         return _determine_h2h(pick, home, away, home_team, away_team)
 
     return Outcome.PENDING
+
+
+def determine_all_outcomes(
+    lines: list[ParsedPick],
+    result: EventResult,
+    home_team: str,
+    away_team: str,
+) -> list[Outcome]:
+    """Determine outcomes for ALL decoy lines against a single game result.
+
+    Returns a list of outcomes, one per line.  The real outcome is at the
+    secret index, but no single party knows which index that is.
+    """
+    return [
+        determine_outcome(line, result, home_team, away_team)
+        for line in lines
+    ]
 
 
 def _determine_spread(
@@ -313,18 +332,23 @@ class OutcomeAttestor:
 
     MAX_PENDING_SIGNALS = 10_000
     MAX_ATTESTATIONS_PER_SIGNAL = 100
-    CIRCUIT_BREAKER_THRESHOLD = 5  # Open circuit after this many consecutive failures
-    CIRCUIT_BREAKER_RESET_SECONDS = 60.0  # Wait this long before retrying after circuit opens
 
-    def __init__(self, sports_api_key: str = "") -> None:
-        self._api_key = sports_api_key
-        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
-        self._client = httpx.AsyncClient(timeout=30.0, limits=limits)
+    def __init__(
+        self,
+        espn_client: ESPNClient | None = None,
+        sports_api_key: str = "",  # Deprecated, kept for backwards compat
+    ) -> None:
+        if espn_client is not None:
+            self._espn = espn_client
+        else:
+            from djinn_validator.core.espn import ESPNClient as _ESPNClient
+            self._espn = _ESPNClient()
+        if sports_api_key:
+            log.warning("sports_api_key_deprecated",
+                        msg="SPORTS_API_KEY is no longer used — validator uses ESPN for scores")
         self._attestations: dict[str, list[OutcomeAttestation]] = {}
         self._pending_signals: dict[str, SignalMetadata] = {}
         self._lock = asyncio.Lock()
-        self._consecutive_api_failures = 0
-        self._circuit_opened_at: float | None = None  # monotonic timestamp
 
     def register_signal(self, metadata: SignalMetadata) -> None:
         """Register a purchased signal for outcome tracking."""
@@ -346,167 +370,103 @@ class OutcomeAttestor:
             signal_id=metadata.signal_id,
             sport=metadata.sport,
             event_id=metadata.event_id,
-            market=metadata.pick.market,
+            lines_count=len(metadata.lines),
         )
+
+    def get_signal(self, signal_id: str) -> SignalMetadata | None:
+        """Look up a signal by ID (pending or resolved)."""
+        return self._pending_signals.get(signal_id)
 
     def get_pending_signals(self) -> list[SignalMetadata]:
         """Return all unresolved signals."""
         return [s for s in self._pending_signals.values() if not s.resolved]
 
-    def _is_circuit_open(self) -> bool:
-        """Check if the circuit breaker is open (API calls should be skipped)."""
-        if self._consecutive_api_failures < self.CIRCUIT_BREAKER_THRESHOLD:
-            return False
-        if self._circuit_opened_at is None:
-            return False
-        elapsed = time.monotonic() - self._circuit_opened_at
-        if elapsed >= self.CIRCUIT_BREAKER_RESET_SECONDS:
-            # Half-open: allow one attempt to see if API recovered
-            return False
-        return True
+    async def fetch_event_result(
+        self,
+        event_id: str,
+        sport: str = "basketball_nba",
+        home_team: str = "",
+        away_team: str = "",
+    ) -> EventResult:
+        """Fetch event result from ESPN's public scoreboard API.
 
-    def _record_api_success(self) -> None:
-        """Reset circuit breaker on successful API call."""
-        self._consecutive_api_failures = 0
-        self._circuit_opened_at = None
-
-    def _record_api_failure(self) -> None:
-        """Track API failure and open circuit if threshold reached."""
-        self._consecutive_api_failures += 1
-        if self._consecutive_api_failures >= self.CIRCUIT_BREAKER_THRESHOLD:
-            if self._circuit_opened_at is None:
-                self._circuit_opened_at = time.monotonic()
-                log.warning(
-                    "sports_api_circuit_opened",
-                    consecutive_failures=self._consecutive_api_failures,
-                    reset_after_s=self.CIRCUIT_BREAKER_RESET_SECONDS,
-                )
-
-    async def fetch_event_result(self, event_id: str, sport: str = "basketball_nba") -> EventResult:
-        """Fetch event result from The Odds API scores endpoint."""
+        Matches games by team names + date (ESPN IDs differ from Odds API IDs).
+        The event_id is preserved for tracking but not used for ESPN lookup.
+        """
         if not _SAFE_ID_RE.match(event_id):
             log.warning("invalid_event_id", event_id=event_id[:50])
             return EventResult(event_id=event_id, status="error")
         if sport not in SUPPORTED_SPORTS:
             log.warning("unsupported_sport_key", sport=sport[:50])
             return EventResult(event_id=event_id, status="error")
-        if not self._api_key:
-            log.warning("no_sports_api_key", event_id=event_id)
+
+        if not home_team or not away_team:
+            log.warning("missing_team_names", event_id=event_id)
             return EventResult(event_id=event_id, status="pending")
-
-        # Circuit breaker: skip API call if too many recent failures
-        if self._is_circuit_open():
-            log.debug("sports_api_circuit_open", event_id=event_id)
-            return EventResult(event_id=event_id, status="pending")
-
-        url = f"https://api.the-odds-api.com/v4/sports/{sport}/scores"
-        params = {
-            "apiKey": self._api_key,
-            "eventIds": event_id,
-        }
-
-        last_error: Exception = Exception("all retries exhausted")
-        for attempt in range(3):
-            try:
-                resp = await self._client.get(url, params=params)
-                if resp.status_code >= 500:
-                    log.warning(
-                        "sports_api_server_error",
-                        event_id=event_id,
-                        status=resp.status_code,
-                        attempt=attempt + 1,
-                    )
-                    if attempt < 2:
-                        base = 1.0 * (attempt + 1)
-                        await asyncio.sleep(base * (0.5 + random.random()))
-                        continue
-                    self._record_api_failure()
-                    return EventResult(event_id=event_id, status="error")
-                if resp.status_code >= 400:
-                    log.error(
-                        "sports_api_client_error",
-                        event_id=event_id,
-                        status=resp.status_code,
-                    )
-                    # 4xx errors don't count as infrastructure failure
-                    return EventResult(event_id=event_id, status="error")
-                data = resp.json()
-                self._record_api_success()
-                break
-            except httpx.HTTPError as e:
-                last_error = e
-                log.warning(
-                    "sports_api_network_error",
-                    event_id=event_id,
-                    error_type=type(e).__name__,
-                    error=str(e),
-                    attempt=attempt + 1,
-                )
-                if attempt < 2:
-                    base = 1.0 * (attempt + 1)
-                    await asyncio.sleep(base * (0.5 + random.random()))
-                    continue
-                self._record_api_failure()
-                return EventResult(event_id=event_id, status="error")
-        else:
-            log.error("sports_api_exhausted_retries", event_id=event_id, error=str(last_error))
-            self._record_api_failure()
-            return EventResult(event_id=event_id, status="error")
 
         try:
-            if not data:
-                return EventResult(event_id=event_id, status="pending")
-
-            event = data[0]
-            home_team = event.get("home_team", "")
-            away_team = event.get("away_team", "")
-
-            if not event.get("completed"):
-                return EventResult(
-                    event_id=event_id,
-                    home_team=home_team,
-                    away_team=away_team,
-                    status="pending",
-                    raw_data=event,
-                )
-
-            scores = event.get("scores", [])
-            home_score = None
-            away_score = None
-            for s in scores:
-                try:
-                    score_val = int(s.get("score", ""))
-                except (ValueError, TypeError):
-                    continue
-                if s.get("name") == home_team:
-                    home_score = score_val
-                elif s.get("name") == away_team:
-                    away_score = score_val
-
-            return EventResult(
-                event_id=event_id,
+            game = await self._espn.get_game_by_teams(
+                sport=sport,
                 home_team=home_team,
                 away_team=away_team,
-                home_score=home_score,
-                away_score=away_score,
-                status="final",
-                raw_data=event,
+            )
+        except Exception as e:
+            log.warning("espn_fetch_error", event_id=event_id, error=str(e))
+            return EventResult(event_id=event_id, status="pending")
+
+        if game is None:
+            log.debug("espn_game_not_found", event_id=event_id,
+                       home=home_team, away=away_team)
+            return EventResult(event_id=event_id, status="pending")
+
+        if game.status in ("postponed",):
+            return EventResult(
+                event_id=event_id,
+                home_team=game.home_team,
+                away_team=game.away_team,
+                status="postponed",
+                raw_data=game.raw_data,
+            )
+        if game.status in ("cancelled",):
+            return EventResult(
+                event_id=event_id,
+                home_team=game.home_team,
+                away_team=game.away_team,
+                status="cancelled",
+                raw_data=game.raw_data,
+            )
+        if game.status != "final":
+            return EventResult(
+                event_id=event_id,
+                home_team=game.home_team,
+                away_team=game.away_team,
+                status="pending",
+                raw_data=game.raw_data,
             )
 
-        except (ValueError, KeyError, IndexError) as e:
-            log.error("sports_api_parse_error", event_id=event_id, error=str(e))
-            return EventResult(event_id=event_id, status="error")
+        return EventResult(
+            event_id=event_id,
+            home_team=game.home_team,
+            away_team=game.away_team,
+            home_score=game.home_score,
+            away_score=game.away_score,
+            status="final",
+            raw_data=game.raw_data,
+        )
 
     async def resolve_signal(
         self,
         signal_id: str,
         validator_hotkey: str,
-    ) -> OutcomeAttestation | None:
-        """Fetch scores and determine outcome for a registered signal.
+    ) -> str | None:
+        """Fetch scores and determine all 10 line outcomes for a signal.
 
-        Returns the attestation if the game is complete, None if still pending.
-        Uses a lock to prevent concurrent resolve_signal calls from
-        double-resolving the same signal.
+        Blind resolution: resolves ALL 10 decoy lines against the game result
+        and stores outcomes on the signal metadata.  The real outcome is NOT
+        selected here — that happens later during batch MPC settlement at the
+        audit-set level, so no individual signal outcome is ever revealed.
+
+        Returns the signal_id if newly resolved, or None.
         """
         async with self._lock:
             meta = self._pending_signals.get(signal_id)
@@ -517,34 +477,48 @@ class OutcomeAttestor:
             if meta.resolved:
                 return None
 
-        result = await self.fetch_event_result(meta.event_id, meta.sport)
+        result = await self.fetch_event_result(
+            meta.event_id, meta.sport,
+            home_team=meta.home_team, away_team=meta.away_team,
+        )
 
         if result.status not in ("final", "postponed", "cancelled"):
             return None
 
-        outcome = determine_outcome(
-            meta.pick,
-            result,
-            meta.home_team,
-            meta.away_team,
+        # Blind resolution: resolve ALL lines, not just one
+        all_outcomes = determine_all_outcomes(
+            meta.lines, result, meta.home_team, meta.away_team,
         )
 
-        if outcome == Outcome.PENDING:
+        # If every line is still PENDING, game isn't truly finished
+        if all(o == Outcome.PENDING for o in all_outcomes):
             return None
 
         async with self._lock:
             if meta.resolved:
                 return None  # Another coroutine resolved it while we were fetching
             meta.resolved = True
-            return self.attest(signal_id, validator_hotkey, outcome, result)
+            meta.outcomes = all_outcomes
+            log.info("signal_outcomes_resolved", signal_id=signal_id,
+                     outcomes=[o.name for o in all_outcomes])
+            return signal_id
 
-    async def resolve_all_pending(self, validator_hotkey: str) -> list[OutcomeAttestation]:
-        """Check all pending signals and resolve any with completed games."""
-        resolved = []
+    async def resolve_all_pending(
+        self,
+        validator_hotkey: str,
+    ) -> list[str]:
+        """Check all pending signals and resolve any with completed games.
+
+        Returns a list of signal_ids that were newly resolved (outcomes stored
+        on their metadata).  Settlement happens later at the audit-set level.
+        """
+        resolved: list[str] = []
         for meta in self.get_pending_signals():
-            attestation = await self.resolve_signal(meta.signal_id, validator_hotkey)
-            if attestation is not None:
-                resolved.append(attestation)
+            signal_id = await self.resolve_signal(
+                meta.signal_id, validator_hotkey,
+            )
+            if signal_id is not None:
+                resolved.append(signal_id)
         return resolved
 
     def attest(
@@ -626,45 +600,6 @@ class OutcomeAttestor:
 
         return None
 
-    def compute_quality_score(
-        self,
-        attestations: list[OutcomeAttestation],
-        purchases: list[dict[str, Any]],
-    ) -> int:
-        """Compute the USDC-denominated quality score for a batch of outcomes.
-
-        Matches the Audit.sol computeScore() formula:
-        - Favorable: +notional * (odds - 1e6) / 1e6
-        - Unfavorable: -notional * slaMultiplierBps / 10_000
-        - Void: 0
-
-        Args:
-            attestations: Resolved outcomes for each signal in the cycle
-            purchases: On-chain purchase data dicts (notional, odds, slaMultiplierBps)
-
-        Returns:
-            Quality score in USDC with 6 decimals (can be negative)
-        """
-        # Build signal_id -> outcome map from attestations
-        outcome_map: dict[str, Outcome] = {}
-        for att in attestations:
-            outcome_map[att.signal_id] = att.outcome
-
-        score = 0
-        for p in purchases:
-            signal_id = str(p.get("signalId", ""))
-            outcome = outcome_map.get(signal_id, Outcome.PENDING)
-            notional = p.get("notional", 0)
-            odds = p.get("odds", 1_000_000)
-            sla_bps = p.get("slaMultiplierBps", 10_000)
-
-            if outcome == Outcome.FAVORABLE:
-                score += notional * (odds - 1_000_000) // 1_000_000
-            elif outcome == Outcome.UNFAVORABLE:
-                score -= notional * sla_bps // 10_000
-
-        return score
-
     async def cleanup_resolved(self, max_age_seconds: float = 86400) -> int:
         """Remove resolved signals and old attestations to prevent memory growth.
 
@@ -693,7 +628,7 @@ class OutcomeAttestor:
 
     async def close(self) -> None:
         try:
-            await asyncio.wait_for(self._client.aclose(), timeout=5.0)
+            await asyncio.wait_for(self._espn.close(), timeout=5.0)
         except TimeoutError:
             log.warning("outcome_attestor_close_timeout")
         except Exception as e:

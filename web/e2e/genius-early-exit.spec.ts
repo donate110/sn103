@@ -60,13 +60,13 @@ test.describe("Genius dashboard — audit history", () => {
     ).toBeVisible();
   });
 
-  test("shows verified track records section", async ({
+  test("shows settlement history section", async ({
     authenticatedPage: page,
   }) => {
     await page.goto("/genius");
 
     await expect(
-      page.getByRole("heading", { name: "Verified Track Records" })
+      page.getByRole("heading", { name: "Settlement History" })
     ).toBeVisible();
   });
 });

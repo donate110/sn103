@@ -43,6 +43,11 @@ class LineChecker:
         self._tolerance = line_tolerance
         self._health = health_tracker
 
+    @property
+    def last_query_id(self) -> str | None:
+        """The query_id from the most recent odds fetch, for proof requests."""
+        return self._odds.last_query_id
+
     async def check(self, lines: list[CandidateLine]) -> list[LineResult]:
         """Check availability of all candidate lines.
 

@@ -280,7 +280,7 @@ export default function CreateSignal() {
 
       // Pre-flight: miner executability check — ALL 10 lines must be available.
       // Miners are blind to which line is real. If any line fails, the signal cannot be created.
-      // This prevents Geniuses from creating signals with fake/expired lines to game track records.
+      // This prevents Geniuses from creating signals with fake/expired lines to game results.
       let minerVerified = false;
       const candidateLines = allLines.map((line, i) => toCandidateLine(line, i + 1));
       try {
@@ -464,11 +464,11 @@ export default function CreateSignal() {
         console.warn(`${failed}/10 share stores failed (${succeeded} succeeded)`);
       }
 
-      // Persist private signal data for future track record proof generation
+      // Persist private signal data for wallet recovery and audit tracking
       const newEntry = {
         signalId: signalId.toString(),
         preimage: keyToBigInt(aesKey).toString(),
-        realIndex: realIndex + 1, // 1-indexed as used in ZK circuit
+        realIndex: realIndex + 1, // 1-indexed
         sport: selectedSport.label,
         pick: formatLine(realPick),
         minOdds: minOddsDecimal,
@@ -578,9 +578,8 @@ export default function CreateSignal() {
 
         {signalCount >= MAX_PROOF_SIGNALS && (
           <div className="rounded-lg px-4 py-3 mb-6 text-sm bg-amber-50 text-amber-700 border border-amber-200">
-            You have {signalCount} active signals. Track record proofs support up
-            to {MAX_PROOF_SIGNALS} signals each. You can still create signals, but
-            will need to generate multiple proofs for your full track record.
+            You have {signalCount} active signals. Audit sets settle every 10 signals
+            per buyer. Your track record updates automatically as sets are finalized.
           </div>
         )}
 

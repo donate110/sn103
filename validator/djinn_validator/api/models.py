@@ -108,19 +108,53 @@ class OutcomeResponse(BaseModel):
 
 
 class RegisterSignalRequest(BaseModel):
-    """POST /v1/signal/{id}/register — Register a purchased signal for outcome tracking."""
+    """POST /v1/signal/{id}/register — Register for blind outcome tracking.
 
-    sport: str = Field(max_length=128, pattern=r"^[a-z][a-z0-9_]*$")  # The Odds API sport key, e.g., "basketball_nba"
-    event_id: str = Field(max_length=256, pattern=r"^[a-zA-Z0-9_\-:.]+$")  # The Odds API event ID
+    Accepts all 10 public decoy lines (already committed on-chain).
+    The validator resolves ALL lines against game results, producing 10
+    outcomes.  The real outcome is selected later by batch MPC at the
+    audit-set level, so no individual signal outcome is ever revealed.
+    """
+
+    sport: str = Field(max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
+    event_id: str = Field(max_length=256, pattern=r"^[a-zA-Z0-9_\-:.]+$")
     home_team: str = Field(max_length=256)
     away_team: str = Field(max_length=256)
-    pick: str = Field(max_length=512)  # e.g., "Lakers -3.5 (-110)"
+    lines: list[str] = Field(min_length=10, max_length=10)
+    genius_address: str = Field(default="", max_length=256)
+    idiot_address: str = Field(default="", max_length=256)
+    notional: int = Field(default=0, ge=0)
+    odds: int = Field(default=1_000_000, ge=0)
+    sla_bps: int = Field(default=10_000, ge=0, le=100_000)
+    cycle: int = Field(default=0, ge=0)
+
+    @field_validator("lines")
+    @classmethod
+    def validate_lines(cls, v: list[str]) -> list[str]:
+        for i, line in enumerate(v):
+            if len(line) > 512:
+                raise ValueError(f"Line {i} exceeds 512 characters")
+            if not line.strip():
+                raise ValueError(f"Line {i} is empty")
+        return v
 
 
 class RegisterSignalResponse(BaseModel):
     signal_id: str
     registered: bool
-    market: str = ""
+    lines_count: int = 0
+
+
+class AuditSetStatusResponse(BaseModel):
+    """GET /v1/audit/{genius}/{idiot}/status — Audit set status."""
+
+    genius: str
+    idiot: str
+    cycle: int
+    signals_count: int
+    resolved_count: int
+    ready: bool
+    settled: bool
 
 
 class ResolveResponse(BaseModel):

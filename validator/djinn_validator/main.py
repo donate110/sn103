@@ -28,6 +28,10 @@ from djinn_validator.core.outcomes import OutcomeAttestor
 from djinn_validator.core.purchase import PurchaseOrchestrator
 from djinn_validator.core.burn_ledger import BurnLedger
 from djinn_validator.core.challenges import challenge_miners, challenge_miners_attestation
+from djinn_validator.core.espn import ESPNClient
+from djinn_validator.core.activity import ActivityBuffer, ActivityCategory
+from djinn_validator.core.audit_set import AuditSetStore
+from djinn_validator.core.mpc_audit import batch_settle_audit_set
 from djinn_validator.core.scoring import MinerScorer
 from djinn_validator.core.shares import ShareStore
 
@@ -45,150 +49,14 @@ def _sanitize_url(url: str) -> str:
 log = structlog.get_logger()
 
 
-async def _vote_outcomes(
-    outcome_attestor: OutcomeAttestor,
-    chain_client: ChainClient,
-    resolved: list[object],
-    neuron: DjinnValidator,
-) -> None:
-    """Compute quality scores and submit votes to OutcomeVoting.
-
-    Instead of writing individual outcomes on-chain (which leaks real picks),
-    validators compute an aggregate quality score per Genius-Idiot cycle and
-    vote on it via OutcomeVoting. When 2/3+ validators agree, settlement is
-    triggered automatically on-chain.
-
-    Flow:
-    1. For each resolved signal, find the Genius and all Idiot purchasers
-    2. Group resolved signals by (Genius, Idiot) pair
-    3. For pairs with all cycle signals resolved, compute quality score
-    4. Submit vote to OutcomeVoting contract
-    """
-    from djinn_validator.core.outcomes import OutcomeAttestation
-
-    # Count validators with permits for consensus threshold
-    total_validators = 0
-    try:
-        total_validators = sum(
-            1 for uid in range(neuron.metagraph.n.item())
-            if neuron.metagraph.validator_permit[uid]
-        )
-    except Exception:
-        total_validators = 1
-
-    # Collect resolved attestations that have consensus
-    consensus_attestations: list[OutcomeAttestation] = []
-    for attestation in resolved:
-        if not isinstance(attestation, OutcomeAttestation):
-            continue
-        consensus = outcome_attestor.check_consensus(attestation.signal_id, total_validators)
-        if consensus is not None:
-            consensus_attestations.append(attestation)
-
-    if not consensus_attestations:
-        return
-
-    # Group by (genius, idiot) pairs: for each resolved signal, find the
-    # genius and all buyers, then check if the full cycle is ready for voting
-    from web3 import Web3
-
-    # Track which pairs we've already voted on this round
-    voted_pairs: set[tuple[str, str]] = set()
-
-    for attestation in consensus_attestations:
-        signal_id_int = int.from_bytes(
-            Web3.solidity_keccak(["string"], [attestation.signal_id]), "big"
-        )
-
-        signal_data = await chain_client.get_signal(signal_id_int)
-        genius = signal_data.get("genius", "")
-        if not genius or genius == "0x" + "0" * 40:
-            continue
-
-        purchase_ids = await chain_client.get_purchases_by_signal(signal_id_int)
-        for pid in purchase_ids:
-            purchase = await chain_client.get_purchase(pid)
-            if not purchase:
-                continue
-            idiot = purchase.get("idiot", "")
-            if not idiot or idiot == "0x" + "0" * 40:
-                continue
-
-            pair_key = (genius.lower(), idiot.lower())
-            if pair_key in voted_pairs:
-                continue
-
-            # Check if audit cycle is ready (10 signals)
-            is_ready = await chain_client.is_audit_ready(genius, idiot)
-            if not is_ready:
-                continue
-
-            # Check if already finalized on-chain
-            cycle = await chain_client.get_current_cycle(genius, idiot)
-            is_finalized = await chain_client.is_cycle_finalized(genius, idiot, cycle)
-            if is_finalized:
-                voted_pairs.add(pair_key)
-                continue
-
-            # Get all purchases in this cycle and compute quality score
-            cycle_purchase_ids = await chain_client.get_purchase_ids(genius, idiot)
-            if not cycle_purchase_ids:
-                continue
-
-            # Fetch purchase data and signal data for score computation
-            cycle_purchases = []
-            for cpid in cycle_purchase_ids:
-                p = await chain_client.get_purchase(cpid)
-                if p:
-                    # Look up signal SLA
-                    sig_data = await chain_client.get_signal(p["signalId"])
-                    p["slaMultiplierBps"] = sig_data.get("slaMultiplierBps", 10_000)
-                    cycle_purchases.append(p)
-
-            # Compute quality score using the consensus outcomes
-            score = outcome_attestor.compute_quality_score(
-                consensus_attestations, cycle_purchases,
-            )
-
-            # Submit vote on-chain
-            try:
-                tx_hash = await chain_client.submit_vote(genius, idiot, score)
-                voted_pairs.add(pair_key)
-                log.info(
-                    "vote_submitted",
-                    genius=genius,
-                    idiot=idiot,
-                    cycle=cycle,
-                    quality_score=score,
-                    tx_hash=tx_hash,
-                )
-            except Exception as e:
-                err_str = str(e)
-                if "AlreadyVoted" in err_str:
-                    log.debug("already_voted", genius=genius, idiot=idiot, cycle=cycle)
-                    voted_pairs.add(pair_key)
-                elif "CycleAlreadyFinalized" in err_str:
-                    log.debug("cycle_already_finalized", genius=genius, idiot=idiot, cycle=cycle)
-                    voted_pairs.add(pair_key)
-                else:
-                    log.error(
-                        "vote_submission_failed",
-                        genius=genius,
-                        idiot=idiot,
-                        cycle=cycle,
-                        err=err_str,
-                    )
-
-    if voted_pairs:
-        log.info("votes_submitted", count=len(voted_pairs))
-
-
 async def epoch_loop(
     neuron: DjinnValidator,
     scorer: MinerScorer,
     share_store: ShareStore,
     outcome_attestor: OutcomeAttestor,
     chain_client: ChainClient | None = None,
+    activity: ActivityBuffer | None = None,
+    audit_set_store: AuditSetStore | None = None,
 ) -> None:
     """Main validator epoch loop: sync metagraph, score miners, set weights."""
     log.info(
@@ -239,12 +107,22 @@ async def epoch_loop(
                         responded=responded,
                     )
 
+            if activity:
+                responded = sum(
+                    1 for uid in miner_uids
+                    if scorer.get_or_create(uid, "").health_checks_responded > 0
+                )
+                activity.record(
+                    ActivityCategory.HEALTH_CHECK,
+                    f"{responded}/{len(miner_uids)} miners responded",
+                    responded=responded, total=len(miner_uids),
+                )
+
             # Challenge miners for accuracy scoring (throttled)
             epoch_count += 1
             ATTESTATION_CHALLENGE_INTERVAL = 100  # 100 * 12s = ~20 min
             if epoch_count % CHALLENGE_INTERVAL_EPOCHS == 0:
-                sports_api_key = os.environ.get("SPORTS_API_KEY", "")
-                if sports_api_key and miner_uids:
+                if miner_uids:
                     miner_axons = []
                     for uid in miner_uids:
                         axon = neuron.get_axon_info(uid)
@@ -255,7 +133,13 @@ async def epoch_loop(
                             "port": axon.get("port", 0),
                         })
                     try:
-                        await challenge_miners(scorer, miner_axons, sports_api_key)
+                        challenged = await challenge_miners(scorer, miner_axons, espn_client=espn_client)
+                        if activity and challenged:
+                            activity.record(
+                                ActivityCategory.CHALLENGE_ROUND,
+                                f"Challenged {challenged} miners",
+                                miners_challenged=challenged,
+                            )
                     except Exception as e:
                         log.warning("challenge_miners_error", err=str(e))
 
@@ -271,23 +155,72 @@ async def epoch_loop(
                         "port": axon.get("port", 0),
                     })
                 try:
-                    await challenge_miners_attestation(scorer, miner_axons)
+                    attest_count = await challenge_miners_attestation(scorer, miner_axons)
+                    if activity and attest_count:
+                        activity.record(
+                            ActivityCategory.ATTESTATION_CHALLENGE,
+                            f"Attestation challenge: {attest_count} miners",
+                            miners_challenged=attest_count,
+                        )
                 except Exception as e:
                     log.warning("attest_challenge_error", err=str(e))
 
-            # Resolve any pending signal outcomes
+            # Phase 1: Resolve games — compute all 10 line outcomes per signal
+            # (public ESPN data, no MPC at this stage)
             hotkey = ""
             if neuron.wallet:
                 hotkey = neuron.wallet.hotkey.ss58_address
-            resolved = await outcome_attestor.resolve_all_pending(hotkey)
-            if resolved:
-                log.info("outcomes_resolved", count=len(resolved))
 
-            # Submit voted outcomes on-chain (aggregate quality scores, no individual outcomes)
-            if resolved and chain_client and chain_client.can_write:
-                await _vote_outcomes(
-                    outcome_attestor, chain_client, resolved, neuron,
-                )
+            resolved_ids = await outcome_attestor.resolve_all_pending(hotkey)
+            if resolved_ids:
+                log.info("outcomes_resolved", count=len(resolved_ids))
+                if activity:
+                    activity.record(
+                        ActivityCategory.OUTCOME_RESOLUTION,
+                        f"Resolved {len(resolved_ids)} signal outcomes",
+                        count=len(resolved_ids),
+                    )
+                # Record outcomes on audit set store
+                if audit_set_store:
+                    for signal_id in resolved_ids:
+                        meta = outcome_attestor.get_signal(signal_id)
+                        if meta and meta.outcomes:
+                            audit_set_store.record_outcomes(signal_id, meta.outcomes)
+
+            # Phase 2: Check for ready audit sets → batch MPC → vote aggregates
+            if audit_set_store:
+                ready_sets = audit_set_store.get_ready_sets()
+                for audit_set in ready_sets:
+                    result = batch_settle_audit_set(audit_set, share_store)
+                    if result is None:
+                        continue
+                    # Phase 3: Submit aggregate quality score vote on-chain
+                    if chain_client and chain_client.can_write:
+                        try:
+                            tx_hash = await chain_client.submit_vote(
+                                result.genius, result.idiot, result.quality_score,
+                            )
+                            log.info(
+                                "audit_vote_submitted",
+                                genius=result.genius,
+                                idiot=result.idiot,
+                                cycle=result.cycle,
+                                quality_score=result.quality_score,
+                                wins=result.wins,
+                                losses=result.losses,
+                                voids=result.voids,
+                                tx_hash=tx_hash,
+                            )
+                        except Exception as e:
+                            err_str = str(e)
+                            if "AlreadyVoted" in err_str or "CycleAlreadyFinalized" in err_str:
+                                log.debug("audit_vote_skipped", reason=err_str[:80])
+                            else:
+                                log.error("audit_vote_failed", err=err_str)
+                                continue  # Don't mark settled if vote failed
+                    audit_set_store.mark_settled(
+                        result.genius, result.idiot, result.cycle,
+                    )
 
             # Prune old resolved signals to prevent memory growth
             await outcome_attestor.cleanup_resolved()
@@ -303,6 +236,12 @@ async def epoch_loop(
                     success = neuron.set_weights(weights)
                     if success:
                         neuron.record_weight_set()
+                        if activity:
+                            activity.record(
+                                ActivityCategory.WEIGHT_SET,
+                                f"Set weights for {len(weights)} miners",
+                                n_miners=len(weights), is_active=is_active,
+                            )
                     log.info("weights_updated", n_miners=len(weights), active=is_active, success=success)
                 # Reset per-epoch metrics after weight setting (increments
                 # consecutive_epochs for miners that participated)
@@ -380,8 +319,11 @@ async def async_main() -> None:
     share_store = ShareStore(db_path=str(data_dir / "shares.db"))
     burn_ledger = BurnLedger(db_path=str(data_dir / "burns.db"))
     purchase_orch = PurchaseOrchestrator(share_store, db_path=str(data_dir / "purchases.db"))
-    outcome_attestor = OutcomeAttestor(sports_api_key=config.sports_api_key)
+    espn_client = ESPNClient()
+    outcome_attestor = OutcomeAttestor(espn_client=espn_client)
+    audit_set_store = AuditSetStore()
     scorer = MinerScorer()
+    activity = ActivityBuffer()
 
     chain_client = ChainClient(
         rpc_url=config.base_rpc_url,
@@ -429,6 +371,8 @@ async def async_main() -> None:
         attest_burn_amount=config.attest_burn_amount,
         attest_burn_address=config.attest_burn_address,
         scorer=scorer,
+        activity_buffer=activity,
+        audit_set_store=audit_set_store,
     )
 
     log.info(
@@ -453,7 +397,7 @@ async def async_main() -> None:
     ]
     if bt_ok:
         running_tasks.append(asyncio.create_task(
-            epoch_loop(neuron, scorer, share_store, outcome_attestor, chain_client)
+            epoch_loop(neuron, scorer, share_store, outcome_attestor, chain_client, activity, audit_set_store)
         ))
 
     shutdown_event = asyncio.Event()

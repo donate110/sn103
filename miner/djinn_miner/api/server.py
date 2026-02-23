@@ -152,6 +152,7 @@ def create_app(
             results=results,
             available_indices=available_indices,
             response_time_ms=round(elapsed_ms, 1),
+            query_id=checker.last_query_id,
         )
 
     @app.post("/v1/proof", response_model=ProofResponse)

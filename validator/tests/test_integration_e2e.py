@@ -557,7 +557,12 @@ class TestSignalRegistrationAndOutcome:
                 "event_id": "evt-lakers-celtics",
                 "home_team": "Lakers",
                 "away_team": "Celtics",
-                "pick": "Lakers -3.5",
+                "lines": [
+                    "Lakers -3.5 (-110)", "Celtics +3.5 (-110)", "Over 218.5 (-110)",
+                    "Under 218.5 (-110)", "Lakers ML (-150)", "Celtics ML (+130)",
+                    "Lakers -1.5 (-105)", "Celtics +1.5 (-115)", "Over 215.0 (-110)",
+                    "Under 215.0 (-110)",
+                ],
             })
             assert resp.status_code == 200
             assert resp.json()["registered"] is True

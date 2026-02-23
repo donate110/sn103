@@ -188,6 +188,12 @@ class OddsApiClient:
             failure_threshold=circuit_failure_threshold,
             recovery_timeout=circuit_recovery_timeout,
         )
+        self._last_query_id: str | None = None
+
+    @property
+    def last_query_id(self) -> str | None:
+        """The query_id from the most recent successful get_odds() call."""
+        return self._last_query_id
 
     async def close(self) -> None:
         """Close the HTTP client if we own it."""
@@ -362,11 +368,12 @@ class OddsApiClient:
                 raise
 
             # Capture the raw HTTP session for proof generation
+            query_id = f"{api_sport}:{markets}:{uuid.uuid4().hex[:8]}"
+            self._last_query_id = query_id
             if self._session_capture is not None:
                 from djinn_miner.core.proof import CapturedSession
 
                 safe_url = url  # params are separate, URL itself has no key
-                query_id = f"{api_sport}:{markets}:{uuid.uuid4().hex[:8]}"
                 self._session_capture.record(
                     CapturedSession(
                         query_id=query_id,

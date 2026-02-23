@@ -40,7 +40,7 @@ test.describe("Track record page (unauthenticated)", () => {
   test("renders track record heading", async ({ page }) => {
     await page.goto("/genius/track-record");
     await expect(
-      page.getByRole("heading", { name: "Track Record Proof" })
+      page.getByRole("heading", { name: "Track Record" })
     ).toBeVisible();
   });
 

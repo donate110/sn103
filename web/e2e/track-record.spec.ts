@@ -1,77 +1,58 @@
 import { test, expect } from "./fixtures/setup";
 
-test.describe("Track Record page (authenticated)", () => {
-  test("renders Track Record heading and description", async ({
+test.describe("Track Record page", () => {
+  test("renders Track Record heading", async ({
     authenticatedPage: page,
   }) => {
     await page.goto("/genius/track-record");
 
     await expect(
-      page.getByRole("heading", { name: "Track Record Proof" })
-    ).toBeVisible();
-    await expect(
-      page.getByText(/generate a zero-knowledge proof/i)
+      page.getByRole("heading", { name: "Track Record" })
     ).toBeVisible();
   });
 
-  test("shows 'How It Works' section", async ({
+  test("shows wallet prompt or settlement content", async ({
     authenticatedPage: page,
   }) => {
     await page.goto("/genius/track-record");
 
-    await expect(
-      page.getByRole("heading", { name: "How It Works" })
-    ).toBeVisible();
-    await expect(
-      page.getByText(/private inputs to a ZK circuit/i)
-    ).toBeVisible();
-  });
+    // Wallet may or may not be connected — handle both states
+    const hasConnectPrompt = await page
+      .getByText(/connect your wallet/i)
+      .isVisible({ timeout: 3000 })
+      .catch(() => false);
 
-  test("shows Your Signals section", async ({
-    authenticatedPage: page,
-  }) => {
-    await page.goto("/genius/track-record");
-
-    await expect(
-      page.getByRole("heading", { name: "Your Signals" })
-    ).toBeVisible();
-  });
-
-  test("shows empty state when no signals saved", async ({
-    authenticatedPage: page,
-  }) => {
-    await page.goto("/genius/track-record");
-
-    // Since no signals in mock data, should show the empty/no data state
-    const pageText = await page.locator("body").textContent();
-    expect(
-      pageText?.includes("No saved signal data") ||
-        pageText?.includes("signal") ||
-        pageText?.includes("recovery")
-    ).toBeTruthy();
-  });
-
-  test("has back to dashboard link", async ({
-    authenticatedPage: page,
-  }) => {
-    await page.goto("/genius/track-record");
-
-    const backLink = page.getByText("Back to Dashboard");
-    await expect(backLink).toBeVisible();
-    await backLink.click();
-    await page.waitForURL("**/genius");
-  });
-
-  test("generate proof button is disabled with no selections", async ({
-    authenticatedPage: page,
-  }) => {
-    await page.goto("/genius/track-record");
-
-    const btn = page.getByRole("button", { name: /Generate Proof/i });
-    // Button should exist but be disabled (no signals selected)
-    const isVisible = await btn.isVisible().catch(() => false);
-    if (isVisible) {
-      await expect(btn).toBeDisabled();
+    if (hasConnectPrompt) {
+      await expect(page.getByText(/connect your wallet/i)).toBeVisible();
+    } else {
+      // Connected state shows settlement history
+      await expect(
+        page.getByText(/on-chain settlement history/i)
+      ).toBeVisible();
     }
+  });
+
+  test("has back to dashboard link when connected", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/genius/track-record");
+
+    // Back link is only visible in connected state
+    const backLink = page.getByText("Back to Dashboard");
+    const isVisible = await backLink.isVisible({ timeout: 3000 }).catch(() => false);
+    if (isVisible) {
+      await backLink.click();
+      await page.waitForURL("**/genius");
+    }
+  });
+
+  test("page renders without JS errors", async ({
+    authenticatedPage: page,
+  }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto("/genius/track-record");
+    await page.waitForLoadState("networkidle");
+    expect(errors.length).toBe(0);
   });
 });

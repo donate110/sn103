@@ -65,7 +65,7 @@ test.describe("Genius dashboard (wallet connected)", () => {
     await page.waitForURL("**/genius/track-record");
 
     await expect(
-      page.getByRole("heading", { name: "Track Record Proof" })
+      page.getByRole("heading", { name: "Track Record" })
     ).toBeVisible();
   });
 });

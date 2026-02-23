@@ -36,14 +36,14 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Djinn | Sports Intelligence Marketplace",
     description:
-      "Unbundling information from execution. Encrypted predictions, ZK-verified track records, settled in USDC on Base.",
+      "Unbundling information from execution. Encrypted predictions, verifiable track records, settled in USDC on Base.",
     siteName: "Djinn",
   },
   twitter: {
     card: "summary_large_image",
     title: "Djinn | Sports Intelligence Marketplace",
     description:
-      "Unbundling information from execution. Encrypted predictions, ZK-verified track records, settled in USDC on Base.",
+      "Unbundling information from execution. Encrypted predictions, verifiable track records, settled in USDC on Base.",
   },
 };
 

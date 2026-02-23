@@ -17,6 +17,12 @@ from djinn_validator.api.models import (
 )
 
 VALID_ETH_ADDR = "0x" + "a1" * 20  # Valid 40-hex-char Ethereum address
+SAMPLE_LINES_10 = [
+    "Lakers -3.5 (-110)", "Celtics +3.5 (-110)", "Over 218.5 (-110)",
+    "Under 218.5 (-110)", "Lakers ML (-150)", "Celtics ML (+130)",
+    "Lakers -1.5 (-105)", "Celtics +1.5 (-115)", "Over 215.0 (-110)",
+    "Under 215.0 (-110)",
+]
 
 
 class TestStoreShareRequest:
@@ -171,7 +177,7 @@ class TestEventIdValidation:
                 event_id="<script>alert(1)</script>",
                 home_team="A",
                 away_team="B",
-                pick="Lakers -3.5 (-110)",
+                lines=SAMPLE_LINES_10,
             )
 
 
@@ -228,7 +234,7 @@ class TestRegisterSignalSportValidation:
             event_id="ev-1",
             home_team="A",
             away_team="B",
-            pick="Lakers -3.5",
+            lines=SAMPLE_LINES_10,
         )
         assert req.sport == "basketball_nba"
 
@@ -239,7 +245,7 @@ class TestRegisterSignalSportValidation:
                 event_id="ev-1",
                 home_team="A",
                 away_team="B",
-                pick="Lakers -3.5",
+                lines=SAMPLE_LINES_10,
             )
 
     def test_sport_rejects_special_chars(self) -> None:
@@ -249,7 +255,7 @@ class TestRegisterSignalSportValidation:
                 event_id="ev-1",
                 home_team="A",
                 away_team="B",
-                pick="Lakers -3.5",
+                lines=SAMPLE_LINES_10,
             )
 
     def test_sport_rejects_empty(self) -> None:
@@ -259,7 +265,7 @@ class TestRegisterSignalSportValidation:
                 event_id="ev-1",
                 home_team="A",
                 away_team="B",
-                pick="Lakers -3.5",
+                lines=SAMPLE_LINES_10,
             )
 
 
@@ -293,14 +299,26 @@ class TestStringLengthLimits:
                 validator_hotkey="x" * 300,
             )
 
-    def test_register_pick_too_long(self) -> None:
+    def test_register_line_too_long(self) -> None:
+        long_lines = SAMPLE_LINES_10.copy()
+        long_lines[0] = "x" * 600
         with pytest.raises(ValidationError):
             RegisterSignalRequest(
                 sport="nba",
                 event_id="ev-1",
                 home_team="A",
                 away_team="B",
-                pick="x" * 600,
+                lines=long_lines,
+            )
+
+    def test_register_wrong_line_count(self) -> None:
+        with pytest.raises(ValidationError):
+            RegisterSignalRequest(
+                sport="basketball_nba",
+                event_id="ev-1",
+                home_team="A",
+                away_team="B",
+                lines=["Lakers -3.5 (-110)", "Celtics +3.5 (-110)"],
             )
 
     def test_mpc_d_value_too_long(self) -> None:

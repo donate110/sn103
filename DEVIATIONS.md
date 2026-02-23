@@ -261,3 +261,24 @@ Append-only log. Each entry documents where implementation diverges from `docs/w
 **What we did:** Split `MinerMetrics` into separate sports and attestation tracking. Attestation has its own counters (`attestations_total`, `attestations_valid`, `attestation_latencies`) and its own scoring axes (60% proof validity, 40% speed). Final score blends sports (80%) and attestation (20%) via `W_ATTESTATION_BLEND`. Latencies are normalized independently per challenge type.
 **Why:** Attestation miners burn ~$0.02 per challenge. They need proportional emission share to break even. Conflating 30-90s attestation latencies with <10s sports latencies unfairly penalized attestation speed scores. Separate scoring lets each workload be evaluated on its own terms.
 **Impact:** Miners doing attestation work get fairly scored. The 20% blend weight ensures attestation contributes meaningfully to emission share without dominating sports scoring. Configurable via `attestation_blend` constructor parameter.
+
+## DEV-014: Remove Odds API Dependency from Validator [UPDATES DEV-013]
+
+**Date:** 2026-02-22
+**Whitepaper Section:** Validators and Miners > Scoring, Section 7 — Outcome Resolution
+**Previous behavior:** Validators required a paid Odds API key (`SPORTS_API_KEY`) for two purposes: (1) fetching ground-truth odds to compare against miner responses in challenges, and (2) fetching game scores for outcome resolution. This conflated the validator's role (verify miners, settle outcomes) with the miner's role (check line availability at sportsbooks).
+**What we did:**
+1. **Outcome resolution:** Replaced The Odds API scores endpoint with ESPN's free public scoreboard API (`site.api.espn.com/apis/site/v2/sports/{sport}/{league}/scoreboard`). Games are matched by team names + date using a static normalization table of ~120 teams. ESPN client has its own circuit breaker.
+2. **Miner challenges:** Replaced odds-based ground truth with proof-based verification. Validators build challenges from ESPN live games (just need game existence, not odds), send to miners, and verify via TLSNotary proofs. Miners now return a `query_id` in CheckResponse that the validator uses to request a TLSNotary proof of the check. Old miners without `query_id` are scored on claims only.
+3. **Config:** `SPORTS_API_KEY` is deprecated. The field remains for backwards compatibility but generates a warning if set. Production validators no longer require it.
+**Why:** Validators shouldn't need a paid API key to do their job. Miners are the ones checking line availability — their claims should be verified cryptographically (TLSNotary), not by independently querying the same data source. ESPN's scoreboard is free, has no rate limits, and provides all the score data needed for outcome resolution.
+**Impact:** Validators no longer need an Odds API subscription. Challenge accuracy scoring now depends on TLSNotary proofs rather than API-based ground truth. Outcome resolution uses ESPN instead of Odds API. Backwards compatible — old miners without `query_id` support still get scored.
+
+## DEV-015: ZK Track Record Proofs Unnecessary — On-Chain Aggregates Are Public [UPDATES DEV-011]
+
+**Date:** 2026-02-23
+**Whitepaper Section:** Section 8 — ZK Track Record / Portable Credentials
+**Whitepaper Says:** Geniuses generate ZK proofs of their track record that are cryptographically verifiable and portable.
+**What we did:** With audit-set-level settlement (DEV-043 evolution), validators vote aggregate statistics (quality_score, wins, losses, voids, n) per (genius, idiot, cycle) on-chain via OutcomeVoting. After 2/3+ consensus, Audit.sol finalizes settlement. The genius's track record is a simple sum over all finalized audit set records — publicly readable from the chain. A ZK proof would prove something anyone can already verify by querying on-chain events.
+**Why:** ZK proofs are useful when you need to prove a statement without revealing the underlying data. But the aggregate audit results are already public on-chain. There is no private data to hide — the track record IS the public settlement history.
+**Impact:** The ZK track record circuit (circom) and proof generation flow can be removed. Track records are computed by summing finalized Audit.sol records. Leaderboards read directly from on-chain data. Portable credentials can be implemented as signed attestations referencing on-chain state rather than ZK proofs.

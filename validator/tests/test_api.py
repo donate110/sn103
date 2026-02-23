@@ -743,6 +743,20 @@ class TestMPCResultFlow:
         assert status.json()["available"] is True
 
 
+SAMPLE_LINES_10 = [
+    "Lakers -3.5 (-110)",
+    "Celtics +3.5 (-110)",
+    "Over 218.5 (-110)",
+    "Under 218.5 (-110)",
+    "Lakers ML (-150)",
+    "Celtics ML (+130)",
+    "Lakers -1.5 (-105)",
+    "Celtics +1.5 (-115)",
+    "Over 215.0 (-110)",
+    "Under 215.0 (-110)",
+]
+
+
 class TestRegisterSignal:
     def test_register_valid_signal(self, client: TestClient) -> None:
         resp = client.post("/v1/signal/sig-001/register", json={
@@ -750,12 +764,13 @@ class TestRegisterSignal:
             "event_id": "event-001",
             "home_team": "Los Angeles Lakers",
             "away_team": "Boston Celtics",
-            "pick": "Lakers -3.5 (-110)",
+            "lines": SAMPLE_LINES_10,
         })
         assert resp.status_code == 200
         data = resp.json()
         assert data["signal_id"] == "sig-001"
         assert data["registered"] is True
+        assert data["lines_count"] == 10
 
     def test_register_invalid_signal_id(self, client: TestClient) -> None:
         resp = client.post("/v1/signal/bad%20id/register", json={
@@ -763,13 +778,35 @@ class TestRegisterSignal:
             "event_id": "event-001",
             "home_team": "A",
             "away_team": "B",
-            "pick": "A -3.5",
+            "lines": SAMPLE_LINES_10,
         })
         assert resp.status_code == 400
 
     def test_register_missing_fields(self, client: TestClient) -> None:
         resp = client.post("/v1/signal/sig-001/register", json={
             "sport": "basketball_nba",
+        })
+        assert resp.status_code == 422
+
+    def test_register_wrong_line_count(self, client: TestClient) -> None:
+        resp = client.post("/v1/signal/sig-002/register", json={
+            "sport": "basketball_nba",
+            "event_id": "event-001",
+            "home_team": "A",
+            "away_team": "B",
+            "lines": ["Lakers -3.5 (-110)", "Celtics +3.5 (-110)"],
+        })
+        assert resp.status_code == 422
+
+    def test_register_empty_line_rejected(self, client: TestClient) -> None:
+        lines = SAMPLE_LINES_10.copy()
+        lines[3] = "   "
+        resp = client.post("/v1/signal/sig-003/register", json={
+            "sport": "basketball_nba",
+            "event_id": "event-001",
+            "home_team": "A",
+            "away_team": "B",
+            "lines": lines,
         })
         assert resp.status_code == 422
 

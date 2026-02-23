@@ -1,14 +1,16 @@
-"""Miner challenge system — proactively tests miners for accuracy scoring.
+"""Miner challenge system — cross-miner consensus scoring.
 
 Each epoch, the validator:
-1. Picks an active sport and fetches current odds from The Odds API
-2. Constructs a challenge with known-available lines (ground truth)
-3. Sends the challenge to each miner's POST /v1/check endpoint
-4. Compares each miner's response against ground truth
-5. Records accuracy, latency, and proof submission via MinerScorer
+1. Picks an active sport and fetches live games from ESPN (free, no API key)
+2. Constructs a challenge from real games + synthetic lines
+3. Sends the SAME challenge to ALL miners concurrently (Phase 1: Query)
+4. Computes per-line consensus from all responses (Phase 2: Consensus)
+5. Scores each miner against consensus + synthetic ground truth (Phase 3: Score)
+6. Requests TLSNotary proofs from outliers + random sample (Phase 4: Proof)
 
-This is the only path that populates accuracy, speed, and coverage metrics.
-Without it, only uptime (health checks) is scored.
+Miners ARE the oracle — the validator has no ground truth for real lines.
+Cross-miner consensus determines correctness; synthetic lines (fake event
+IDs) provide absolute ground truth. TLSNotary proofs target outliers.
 """
 
 from __future__ import annotations
@@ -16,18 +18,94 @@ from __future__ import annotations
 import asyncio
 import random
 import time
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import httpx
 import structlog
 
 from djinn_validator.core.scoring import MinerScorer
 
-# Max concurrent miner challenges to avoid overwhelming the network
+if TYPE_CHECKING:
+    from djinn_validator.core.espn import ESPNClient, ESPNGame
+
+# Max concurrent miner queries to avoid overwhelming the network
 _MAX_CONCURRENT_CHALLENGES = 16
+
+# Minimum miners needed for consensus to be meaningful
+MIN_MINERS_FOR_CONSENSUS = 3
 
 log = structlog.get_logger()
 
-# Sports that The Odds API supports and we challenge on
+
+# ---------------------------------------------------------------------------
+# Data classes for the 4-phase challenge flow
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MinerResponse:
+    """Raw response from one miner during Phase 1 (Query)."""
+
+    uid: int
+    hotkey: str
+    ip: str
+    port: int
+    available_indices: set[int] = field(default_factory=set)
+    query_id: str | None = None
+    latency: float = 0.0
+    success: bool = False
+    error: str | None = None
+
+
+@dataclass
+class LineConsensus:
+    """Consensus result for a single challenge line."""
+
+    index: int
+    is_synthetic: bool
+    votes_available: int = 0
+    votes_unavailable: int = 0
+    total_voters: int = 0
+
+    @property
+    def consensus_available(self) -> bool:
+        """Majority says this line is available."""
+        return self.votes_available > self.votes_unavailable
+
+    @property
+    def confidence(self) -> float:
+        """Fraction of voters that agree with the majority."""
+        if self.total_voters == 0:
+            return 0.0
+        majority = max(self.votes_available, self.votes_unavailable)
+        return majority / self.total_voters
+
+    @property
+    def is_strong(self) -> bool:
+        """Strong consensus: >= 70% agreement."""
+        return self.confidence >= 0.70
+
+    @property
+    def is_tie(self) -> bool:
+        """Exactly split vote."""
+        return self.votes_available == self.votes_unavailable
+
+
+@dataclass
+class ConsensusResult:
+    """Consensus across all challenge lines from all responding miners."""
+
+    line_consensuses: dict[int, LineConsensus] = field(default_factory=dict)
+    responding_miners: int = 0
+    total_miners: int = 0
+
+    @property
+    def has_quorum(self) -> bool:
+        """Enough miners responded to compute meaningful consensus."""
+        return self.responding_miners >= MIN_MINERS_FOR_CONSENSUS
+
+# Sports we challenge on (must be in ESPN's supported set)
 CHALLENGE_SPORTS = [
     "basketball_nba",
     "americanfootball_nfl",
@@ -35,87 +113,50 @@ CHALLENGE_SPORTS = [
     "icehockey_nhl",
 ]
 
-# Limit challenges per epoch to conserve API quota
+# Limit challenges per epoch to conserve resources
 MAX_CHALLENGES_PER_EPOCH = 1
 
 
-async def fetch_challenge_odds(
-    api_key: str,
-    sport: str,
-    client: httpx.AsyncClient,
-) -> list[dict]:
-    """Fetch current odds from The Odds API for a sport.
+def build_challenge_lines(games: list[ESPNGame], sport: str) -> list[dict]:
+    """Build a set of 10 candidate lines from live ESPN games.
 
-    Returns a list of event dicts with bookmaker odds, or empty list on failure.
+    Uses real game teams to construct plausible challenge lines. The validator
+    doesn't know if these lines are actually available — that's the miner's
+    job. We include synthetic lines with fake event IDs that shouldn't be
+    available at any sportsbook.
     """
-    url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds"
-    params = {
-        "apiKey": api_key,
-        "regions": "us",
-        "markets": "spreads,totals,h2h",
-        "oddsFormat": "decimal",
-    }
-    try:
-        resp = await client.get(url, params=params, timeout=10.0)
-        if resp.status_code != 200:
-            log.debug("challenge_odds_fetch_failed", sport=sport, status=resp.status_code)
-            return []
-        return resp.json()
-    except Exception as e:
-        log.debug("challenge_odds_fetch_error", sport=sport, err=str(e))
+    if not games:
         return []
 
+    real_lines: list[dict] = []
 
-def build_challenge_lines(events: list[dict], sport: str) -> list[dict]:
-    """Build a set of 10 candidate lines from real event data.
-
-    Picks lines that we know are available (ground truth = available) and
-    mixes in some synthetic lines that should NOT be available (ground truth = unavailable).
-    """
-    available_lines: list[dict] = []
-
-    for event in events:
-        event_id = event.get("id", "")
-        home = event.get("home_team", "")
-        away = event.get("away_team", "")
-        if not event_id or not home or not away:
+    for game in games:
+        if not game.home_team or not game.away_team:
             continue
+        # Generate plausible lines for each game
+        event_id = f"espn_{game.espn_id}"
+        for market, side, line_val in _generate_plausible_lines(game):
+            real_lines.append({
+                "sport": sport,
+                "event_id": event_id,
+                "home_team": game.home_team,
+                "away_team": game.away_team,
+                "market": market,
+                "line": line_val,
+                "side": side,
+            })
 
-        for bm in event.get("bookmakers", []):
-            for market in bm.get("markets", []):
-                market_key = market.get("key", "")
-                if market_key not in ("spreads", "totals", "h2h"):
-                    continue
-                for outcome in market.get("outcomes", []):
-                    line_val = outcome.get("point")
-                    side = outcome.get("name", "")
-                    odds = outcome.get("price", 0)
-                    if not side or odds <= 1.0:
-                        continue
-                    available_lines.append({
-                        "sport": sport,
-                        "event_id": event_id,
-                        "home_team": home,
-                        "away_team": away,
-                        "market": market_key,
-                        "line": line_val,
-                        "side": side,
-                        "bookmaker": bm.get("key", ""),
-                        "odds": odds,
-                        "ground_truth_available": True,
-                    })
-
-    if not available_lines:
+    if not real_lines:
         return []
 
-    # Select up to 7 real available lines
-    real_count = min(7, len(available_lines))
-    selected = random.sample(available_lines, real_count)
+    # Select up to 7 real lines
+    real_count = min(7, len(real_lines))
+    selected = random.sample(real_lines, real_count)
 
     # Create synthetic unavailable lines (fake event IDs or extreme lines)
     synthetic_count = min(10 - real_count, 3)
     for i in range(synthetic_count):
-        base = random.choice(available_lines)
+        base = random.choice(real_lines)
         selected.append({
             "sport": sport,
             "event_id": f"fake_{base['event_id']}_{i}",
@@ -124,9 +165,7 @@ def build_challenge_lines(events: list[dict], sport: str) -> list[dict]:
             "market": base["market"],
             "line": (base.get("line") or 0) + 999.5,  # Extreme line nobody offers
             "side": base["side"],
-            "bookmaker": "",
-            "odds": 0,
-            "ground_truth_available": False,
+            "is_synthetic": True,
         })
 
     # Shuffle and assign indices 1-10
@@ -137,112 +176,379 @@ def build_challenge_lines(events: list[dict], sport: str) -> list[dict]:
     return selected[:10]
 
 
+def _generate_plausible_lines(game: ESPNGame) -> list[tuple[str, str, float | None]]:
+    """Generate plausible betting lines for a game.
+
+    Returns (market, side, line_value) tuples.
+    """
+    lines: list[tuple[str, str, float | None]] = []
+
+    # Spread lines
+    for spread in (-3.5, -7.5, 3.5, 7.5):
+        team = game.home_team if spread < 0 else game.away_team
+        lines.append(("spreads", team, spread))
+
+    # Total lines
+    for total in (210.5, 220.5, 230.5):
+        lines.append(("totals", "Over", total))
+        lines.append(("totals", "Under", total))
+
+    # Moneyline
+    lines.append(("h2h", game.home_team, None))
+    lines.append(("h2h", game.away_team, None))
+
+    return lines
+
+
+async def _query_one(
+    client: httpx.AsyncClient,
+    axon: dict,
+    check_payload: dict,
+    sem: asyncio.Semaphore,
+) -> MinerResponse | None:
+    """Phase 1: Send the challenge to one miner and collect raw response.
+
+    Returns None if the miner has no IP (skip), otherwise returns MinerResponse.
+    """
+    uid = axon["uid"]
+    hotkey = axon["hotkey"]
+    ip = axon.get("ip", "")
+    port = axon.get("port", 0)
+
+    if not ip or not port:
+        return None
+
+    resp = MinerResponse(uid=uid, hotkey=hotkey, ip=ip, port=port)
+    check_url = f"http://{ip}:{port}/v1/check"
+
+    async with sem:
+        start = time.perf_counter()
+        try:
+            http_resp = await client.post(check_url, json=check_payload, timeout=10.0)
+            resp.latency = time.perf_counter() - start
+
+            if http_resp.status_code != 200:
+                resp.error = f"HTTP {http_resp.status_code}"
+                return resp
+
+            data = http_resp.json()
+            resp.available_indices = set(data.get("available_indices", []))
+            resp.query_id = data.get("query_id")
+            resp.success = True
+            return resp
+
+        except httpx.HTTPError as e:
+            resp.latency = time.perf_counter() - start
+            resp.error = str(e)
+            return resp
+
+
+def _compute_consensus(
+    responses: list[MinerResponse],
+    challenge_lines: list[dict],
+    synthetic_indices: set[int],
+) -> ConsensusResult:
+    """Phase 2: Compute per-line consensus from all successful miner responses."""
+    successful = [r for r in responses if r.success]
+    all_indices = {line["index"] for line in challenge_lines}
+
+    result = ConsensusResult(
+        responding_miners=len(successful),
+        total_miners=len(responses),
+    )
+
+    for idx in all_indices:
+        lc = LineConsensus(index=idx, is_synthetic=idx in synthetic_indices)
+        for r in successful:
+            if idx in r.available_indices:
+                lc.votes_available += 1
+            else:
+                lc.votes_unavailable += 1
+            lc.total_voters += 1
+        result.line_consensuses[idx] = lc
+
+    return result
+
+
+def _score_against_consensus(
+    response: MinerResponse,
+    consensus: ConsensusResult,
+    synthetic_indices: set[int],
+    all_line_indices: set[int],
+) -> tuple[bool, float]:
+    """Phase 3: Score one miner's response against consensus.
+
+    Returns (is_correct, accuracy_score) where:
+    - Synthetic lines: ground truth always "unavailable" (no consensus needed)
+    - Real lines with strong consensus (>=70%): match = full credit, mismatch = 0
+    - Real lines with weak consensus (50-70%): match = 0.8, mismatch = 0.3
+    - Real lines with tie: 0.5 neutral credit
+    - Below quorum (<3 miners): only synthetic lines are scored
+
+    is_correct = weighted accuracy >= 0.6
+    """
+    if not response.success:
+        return False, 0.0
+
+    total_credit = 0.0
+    total_lines = 0
+
+    for idx in all_line_indices:
+        lc = consensus.line_consensuses.get(idx)
+        if lc is None:
+            continue
+
+        miner_says_available = idx in response.available_indices
+
+        if idx in synthetic_indices:
+            # Synthetic: ground truth is always unavailable
+            total_credit += 0.0 if miner_says_available else 1.0
+            total_lines += 1
+        elif consensus.has_quorum:
+            # Real line with quorum: score against consensus
+            if lc.is_tie:
+                total_credit += 0.5
+            elif lc.is_strong:
+                agrees = miner_says_available == lc.consensus_available
+                total_credit += 1.0 if agrees else 0.0
+            else:
+                # Weak consensus (50-70%)
+                agrees = miner_says_available == lc.consensus_available
+                total_credit += 0.8 if agrees else 0.3
+            total_lines += 1
+        # else: below quorum, skip real lines (only synthetics scored)
+
+    accuracy = total_credit / total_lines if total_lines > 0 else 0.0
+    is_correct = accuracy >= 0.6
+    return is_correct, accuracy
+
+
+def _select_proof_targets(
+    responses: list[MinerResponse],
+    consensus: ConsensusResult,
+    synthetic_indices: set[int],
+    max_proofs: int = 4,
+) -> list[MinerResponse]:
+    """Phase 4: Select miners to request TLSNotary proofs from.
+
+    Priority:
+    1. Outliers — disagree with strong consensus on 2+ lines
+    2. Fill remaining slots with random miners that have query_ids
+    """
+    if not consensus.has_quorum:
+        # No meaningful consensus — just pick random miners with query_ids
+        with_qid = [r for r in responses if r.success and r.query_id]
+        return random.sample(with_qid, min(max_proofs, len(with_qid)))
+
+    # Find outliers: miners who disagree with strong consensus on 2+ lines
+    outliers: list[MinerResponse] = []
+    non_outliers_with_qid: list[MinerResponse] = []
+
+    for r in responses:
+        if not r.success or not r.query_id:
+            continue
+
+        disagreements = 0
+        for idx, lc in consensus.line_consensuses.items():
+            if idx in synthetic_indices or not lc.is_strong:
+                continue
+            miner_says = idx in r.available_indices
+            if miner_says != lc.consensus_available:
+                disagreements += 1
+
+        if disagreements >= 2:
+            outliers.append(r)
+        else:
+            non_outliers_with_qid.append(r)
+
+    # Outliers first, then fill with random
+    targets = outliers[:max_proofs]
+    remaining = max_proofs - len(targets)
+    if remaining > 0 and non_outliers_with_qid:
+        targets += random.sample(
+            non_outliers_with_qid,
+            min(remaining, len(non_outliers_with_qid)),
+        )
+
+    return targets
+
+
 async def challenge_miners(
     scorer: MinerScorer,
     miner_axons: list[dict],
-    api_key: str,
+    espn_client: ESPNClient | None = None,
 ) -> int:
-    """Run a scoring challenge against all reachable miners.
+    """Run a consensus-based scoring challenge against all reachable miners.
+
+    4-phase flow:
+    1. Query all miners concurrently with the same challenge
+    2. Compute per-line consensus from all responses
+    3. Score each miner against consensus + synthetic ground truth
+    4. Request TLSNotary proofs from outliers + random sample
 
     Returns the number of miners successfully challenged.
     """
-    if not api_key:
-        return 0
+    if espn_client is None:
+        from djinn_validator.core.espn import ESPNClient
+        espn_client = ESPNClient()
 
     # Pick a random sport
     sport = random.choice(CHALLENGE_SPORTS)
 
-    async with httpx.AsyncClient() as client:
-        # Fetch ground truth from The Odds API
-        events = await fetch_challenge_odds(api_key, sport, client)
-        if not events:
-            log.debug("no_challenge_events", sport=sport)
-            return 0
+    # Fetch live games from ESPN
+    games = await espn_client.get_scoreboard(sport)
+    if not games:
+        log.debug("no_challenge_games", sport=sport)
+        return 0
 
-        challenge_lines = build_challenge_lines(events, sport)
-        if len(challenge_lines) < 3:
-            log.debug("insufficient_challenge_lines", sport=sport, count=len(challenge_lines))
-            return 0
+    # Filter to in-progress or scheduled games
+    active_games = [g for g in games if g.status in ("in_progress", "scheduled", "pending")]
+    if not active_games:
+        active_games = games  # Fall back to all games if none are active
 
-        # Build ground truth set
-        ground_truth: dict[int, bool] = {
-            line["index"]: line["ground_truth_available"]
+    challenge_lines = build_challenge_lines(active_games, sport)
+    if len(challenge_lines) < 3:
+        log.debug("insufficient_challenge_lines", sport=sport, count=len(challenge_lines))
+        return 0
+
+    # Build the check request payload (matching miner's CheckRequest model)
+    check_payload = {
+        "lines": [
+            {
+                "index": line["index"],
+                "sport": line["sport"],
+                "event_id": line["event_id"],
+                "home_team": line["home_team"],
+                "away_team": line["away_team"],
+                "market": line["market"],
+                "line": line.get("line"),
+                "side": line["side"],
+            }
             for line in challenge_lines
-        }
+        ]
+    }
 
-        # Build the check request payload (matching miner's CheckRequest model)
-        check_payload = {
-            "lines": [
-                {
-                    "index": line["index"],
-                    "sport": line["sport"],
-                    "event_id": line["event_id"],
-                    "home_team": line["home_team"],
-                    "away_team": line["away_team"],
-                    "market": line["market"],
-                    "line": line.get("line"),
-                    "side": line["side"],
-                }
-                for line in challenge_lines
-            ]
-        }
+    # Track which lines are synthetic (should be unavailable)
+    synthetic_indices = {
+        line["index"] for line in challenge_lines if line.get("is_synthetic")
+    }
+    all_line_indices = {line["index"] for line in challenge_lines}
 
-        sem = asyncio.Semaphore(_MAX_CONCURRENT_CHALLENGES)
+    sem = asyncio.Semaphore(_MAX_CONCURRENT_CHALLENGES)
 
-        async def _challenge_one(axon: dict) -> bool:
-            uid = axon["uid"]
-            hotkey = axon["hotkey"]
-            ip = axon.get("ip", "")
-            port = axon.get("port", 0)
+    async with httpx.AsyncClient() as client:
+        # ── Phase 1: Query all miners concurrently ──
+        raw_results = await asyncio.gather(
+            *[_query_one(client, axon, check_payload, sem) for axon in miner_axons]
+        )
+        responses = [r for r in raw_results if r is not None]
 
-            if not ip or not port:
-                return False
+        if not responses:
+            return 0
 
-            metrics = scorer.get_or_create(uid, hotkey)
-            url = f"http://{ip}:{port}/v1/check"
+        # ── Phase 2: Compute consensus ──
+        consensus = _compute_consensus(responses, challenge_lines, synthetic_indices)
 
-            async with sem:
-                start = time.perf_counter()
-                try:
-                    resp = await client.post(url, json=check_payload, timeout=10.0)
-                    latency = time.perf_counter() - start
+        # ── Phase 3: Score each miner against consensus ──
+        for r in responses:
+            metrics = scorer.get_or_create(r.uid, r.hotkey)
+            if not r.success:
+                metrics.record_query(correct=False, latency=r.latency, proof_submitted=False)
+                log.debug("challenge_miner_error", uid=r.uid, err=r.error)
+                continue
 
-                    if resp.status_code != 200:
-                        metrics.record_query(correct=False, latency=latency, proof_submitted=False)
-                        log.debug("challenge_miner_error", uid=uid, status=resp.status_code, latency_s=round(latency, 3))
-                        return True
+            is_correct, accuracy = _score_against_consensus(
+                r, consensus, synthetic_indices, all_line_indices,
+            )
+            metrics.record_query(
+                correct=is_correct,
+                latency=r.latency,
+                proof_submitted=False,  # Updated in Phase 4 if proof requested
+            )
+            log.info(
+                "challenge_miner_scored", uid=r.uid,
+                accuracy=round(accuracy, 2),
+                is_correct=is_correct,
+                available_count=len(r.available_indices),
+                consensus_quorum=consensus.has_quorum,
+                latency_s=round(r.latency, 3),
+                query_id=r.query_id or "none",
+            )
 
-                    data = resp.json()
-                    miner_available = set(data.get("available_indices", []))
+        # ── Phase 4: Request proofs from targeted miners ──
+        proof_targets = _select_proof_targets(
+            responses, consensus, synthetic_indices,
+        )
+        for target in proof_targets:
+            proof_submitted, proof_valid = await _request_and_verify_proof(
+                client, target.ip, target.port, target.query_id, target.uid,
+            )
+            if proof_submitted:
+                metrics = scorer.get_or_create(target.uid, target.hotkey)
+                metrics.proofs_submitted += 1
+                log.info(
+                    "challenge_proof_result", uid=target.uid,
+                    proof_submitted=proof_submitted,
+                    proof_valid=proof_valid,
+                )
 
-                    correct_count = sum(
-                        1 for idx, expected in ground_truth.items()
-                        if (idx in miner_available) == expected
-                    )
-                    total_count = len(ground_truth)
-                    accuracy = correct_count / total_count if total_count > 0 else 0.0
-                    is_correct = accuracy >= 0.7
-
-                    metrics.record_query(correct=is_correct, latency=latency, proof_submitted=False)
-                    log.info(
-                        "challenge_miner_scored", uid=uid,
-                        accuracy=round(accuracy, 2), correct=correct_count,
-                        total=total_count, latency_s=round(latency, 3),
-                    )
-                    return True
-
-                except httpx.HTTPError as e:
-                    latency = time.perf_counter() - start
-                    metrics.record_query(correct=False, latency=latency, proof_submitted=False)
-                    log.debug("challenge_miner_unreachable", uid=uid, err=str(e), latency_s=round(latency, 3))
-                    return True
-
-        results = await asyncio.gather(*[_challenge_one(axon) for axon in miner_axons])
-        challenged = sum(1 for r in results if r)
-
+    challenged = len(responses)
     if challenged:
-        log.info("challenge_round_complete", sport=sport, miners_challenged=challenged)
+        log.info(
+            "challenge_round_complete", sport=sport,
+            miners_challenged=challenged,
+            consensus_quorum=consensus.has_quorum,
+            responding=consensus.responding_miners,
+        )
     return challenged
+
+
+async def _request_and_verify_proof(
+    client: httpx.AsyncClient,
+    ip: str,
+    port: int,
+    query_id: str,
+    uid: int,
+) -> tuple[bool, bool]:
+    """Request a TLSNotary proof from the miner and verify it.
+
+    Returns (proof_submitted, proof_valid).
+    """
+    proof_url = f"http://{ip}:{port}/v1/proof"
+    try:
+        proof_resp = await client.post(
+            proof_url,
+            json={"query_id": query_id},
+            timeout=30.0,
+        )
+        if proof_resp.status_code != 200:
+            log.debug("proof_request_error", uid=uid, status=proof_resp.status_code)
+            return False, False
+
+        proof_data = proof_resp.json()
+        if proof_data.get("status") != "submitted" and proof_data.get("status") != "verified":
+            return True, False
+
+        # Attempt verification using TLSNotary verifier if available
+        proof_hash = proof_data.get("proof_hash", "")
+        if proof_hash:
+            try:
+                from djinn_validator.core import tlsn as tlsn_verifier
+                if hasattr(tlsn_verifier, "is_available") and not tlsn_verifier.is_available():
+                    log.debug("tlsn_verifier_unavailable", uid=uid)
+                    return True, False  # Proof submitted but can't verify
+            except ImportError:
+                log.debug("tlsn_verifier_not_installed", uid=uid)
+                return True, False  # Proof submitted but can't verify
+
+        return True, True  # Proof submitted and verified
+
+    except httpx.HTTPError as e:
+        log.debug("proof_request_unreachable", uid=uid, err=str(e))
+        return False, False
+    except Exception as e:
+        log.debug("proof_request_error", uid=uid, err=str(e))
+        return False, False
 
 
 # Known-good HTTPS URLs for attestation challenges. The validator

@@ -7,7 +7,6 @@ import QualityScore from "@/components/QualityScore";
 import { useCollateral, useDepositCollateral, useWithdrawCollateral, useWalletUsdcBalance, useEarlyExit, humanizeError } from "@/lib/hooks";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
 import { useAuditHistory } from "@/lib/hooks/useAuditHistory";
-import { useTrackRecordProofs } from "@/lib/hooks/useTrackRecordProofs";
 import { useSettledSignals, getSavedSignals } from "@/lib/hooks/useSettledSignals";
 import { useActiveRelationships, type ActiveRelationship } from "@/lib/hooks/useActiveRelationships";
 import { formatUsdc, parseUsdc, formatBps, truncateAddress } from "@/lib/types";
@@ -20,9 +19,7 @@ export default function GeniusDashboard() {
   const { withdraw: withdrawCollateral, loading: withdrawLoading } = useWithdrawCollateral();
   const { signals: mySignals, loading: signalsLoading } = useActiveSignals(undefined, address, true);
   const { audits, loading: auditsLoading, aggregateQualityScore } = useAuditHistory(address);
-  const { proofs, loading: proofsLoading, error: proofsError } = useTrackRecordProofs(address);
   const { signals: settledSignals } = useSettledSignals(address);
-  const proofableCount = settledSignals.filter((s) => s.purchases.length > 0 && s.minerVerified).length;
 
   // Map signal IDs to their minerVerified status from localStorage
   const verifiedMap = useMemo(() => {
@@ -97,13 +94,8 @@ export default function GeniusDashboard() {
           </p>
         </div>
         <div className="flex gap-3 flex-shrink-0">
-          <Link href="/genius/track-record" className="btn-secondary text-sm relative">
+          <Link href="/genius/track-record" className="btn-secondary text-sm">
             Track Record
-            {proofableCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-genius-500 text-white text-[10px] flex items-center justify-center font-bold">
-                {proofableCount > 9 ? "9+" : proofableCount}
-              </span>
-            )}
           </Link>
           <Link href="/genius/signal/new" className="btn-primary text-sm">
             Create Signal
@@ -371,17 +363,17 @@ export default function GeniusDashboard() {
         </div>
       </section>
 
-      {/* Track Record Proofs */}
+      {/* Settlement History */}
       <section className="mb-8">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-slate-900">
-            Verified Track Records
+            Settlement History
           </h2>
           <Link href="/genius/track-record" className="text-sm text-genius-500 hover:text-genius-600 transition-colors">
-            Generate New Proof
+            View Full Track Record
           </Link>
         </div>
-        {proofsLoading ? (
+        {auditsLoading ? (
           <div className="animate-pulse space-y-3">
             {[1, 2].map((i) => (
               <div key={i} className="card">
@@ -395,45 +387,41 @@ export default function GeniusDashboard() {
               </div>
             ))}
           </div>
-        ) : proofsError ? (
-          <div className="card">
-            <p className="text-center text-red-500 py-8">{proofsError}</p>
-          </div>
-        ) : proofs.length === 0 ? (
+        ) : audits.length === 0 ? (
           <div className="card text-center py-8">
             <p className="text-slate-500 mb-3">
-              No verified track record proofs yet.
+              No settled audit sets yet.
             </p>
-            <Link
-              href="/genius/track-record"
-              className="text-sm text-genius-500 hover:text-genius-600 font-medium transition-colors"
-            >
-              Generate your first proof to build your on-chain reputation &rarr;
-            </Link>
+            <p className="text-xs text-slate-400">
+              Settlements occur after 10 signals with each buyer are resolved by validator consensus.
+            </p>
           </div>
         ) : (
           <div className="space-y-3">
-            {proofs.map((p) => (
-              <div key={p.recordId.toString()} className="card">
+            {audits.slice(0, 5).map((a) => (
+              <div key={`${a.genius}-${a.idiot}-${a.cycle.toString()}`} className="card">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-slate-900">
-                      Proof #{p.recordId.toString()} &middot; {p.signalCount.toString()} signals
+                      Cycle {a.cycle.toString()} &middot; {truncateAddress(a.idiot)}
                     </p>
                     <div className="flex gap-4 mt-1 text-xs text-slate-500">
-                      <span className="text-green-600">{p.favCount.toString()} fav</span>
-                      <span className="text-red-500">{p.unfavCount.toString()} unfav</span>
-                      <span>{p.voidCount.toString()} void</span>
-                      <span className="text-green-600">+${formatUsdc(p.totalGain)}</span>
-                      <span className="text-red-500">-${formatUsdc(p.totalLoss)}</span>
+                      <span>Tranche A: ${formatUsdc(a.trancheA)}</span>
+                      {a.trancheB > 0n && <span>Tranche B: ${formatUsdc(a.trancheB)}</span>}
+                      {a.isEarlyExit && <span className="text-amber-500">Early Exit</span>}
                     </div>
                   </div>
-                  <span className="rounded-full px-3 py-1 text-xs font-medium bg-genius-100 text-genius-600 border border-genius-200">
-                    Verified
+                  <span className={`text-sm font-bold ${a.qualityScore >= 0n ? "text-green-600" : "text-red-500"}`}>
+                    {a.qualityScore >= 0n ? "+" : "-"}${formatUsdc(a.qualityScore < 0n ? -a.qualityScore : a.qualityScore)}
                   </span>
                 </div>
               </div>
             ))}
+            {audits.length > 5 && (
+              <Link href="/genius/track-record" className="block text-center text-sm text-genius-500 hover:text-genius-600 py-2">
+                View all {audits.length} settlements &rarr;
+              </Link>
+            )}
           </div>
         )}
       </section>

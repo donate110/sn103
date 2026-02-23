@@ -25,7 +25,7 @@ test.describe("Cross-page navigation flows", () => {
   }) => {
     await page.goto("/genius/track-record");
     await expect(
-      page.getByRole("heading", { name: "Track Record Proof" })
+      page.getByRole("heading", { name: "Track Record" })
     ).toBeVisible();
   });
 

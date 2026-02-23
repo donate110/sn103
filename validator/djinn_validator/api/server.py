@@ -57,6 +57,7 @@ from djinn_validator.api.models import (
     AnalyticsRequest,
     AttestRequest,
     AttestResponse,
+    AuditSetStatusResponse,
     HealthResponse,
     MPCAbortRequest,
     MPCAbortResponse,
@@ -98,6 +99,7 @@ from djinn_validator.core.mpc import (
     MPCResult,
     Round1Message,
 )
+from djinn_validator.core.audit_set import AuditSetStore
 from djinn_validator.core.mpc_coordinator import MPCCoordinator, SessionStatus
 from djinn_validator.core.mpc_orchestrator import MPCOrchestrator
 from djinn_validator.core.outcomes import (
@@ -108,6 +110,7 @@ from djinn_validator.core.outcomes import (
     parse_pick,
 )
 from djinn_validator.core.purchase import PurchaseOrchestrator, PurchaseStatus
+from djinn_validator.core.activity import ActivityBuffer
 from djinn_validator.core.scoring import MinerScorer
 from djinn_validator.core.shares import ShareStore, SignalShareRecord
 from djinn_validator.utils.crypto import BN254_PRIME, Share
@@ -179,6 +182,8 @@ def create_app(
     attest_burn_amount: float = 0.0001,
     attest_burn_address: str = "5GrsjiBeCErhUGj339vu5GubTgyJMyZLGQqUFBJAtKrCziU9",
     scorer: MinerScorer | None = None,
+    activity_buffer: ActivityBuffer | None = None,
+    audit_set_store: AuditSetStore | None = None,
 ) -> FastAPI:
     """Create the FastAPI application with injected dependencies."""
     bt_network = os.environ.get("BT_NETWORK", "")
@@ -562,52 +567,99 @@ def create_app(
 
     @app.post("/v1/signal/{signal_id}/register", response_model=RegisterSignalResponse)
     async def register_signal(signal_id: str, req: RegisterSignalRequest) -> RegisterSignalResponse:
-        """Register a purchased signal for automatic outcome tracking."""
+        """Register a purchased signal for blind outcome tracking.
+
+        Accepts all 10 public decoy lines (already committed on-chain).
+        The validator resolves every line, producing 10 outcomes.  The real
+        outcome is selected later by batch MPC at the audit-set level.
+        """
         _validate_signal_id_path(signal_id)
         if req.sport not in SUPPORTED_SPORTS:
             raise HTTPException(status_code=400, detail="Unsupported sport key")
-        pick = parse_pick(req.pick)
+        parsed_lines = [parse_pick(line) for line in req.lines]
         metadata = SignalMetadata(
             signal_id=signal_id,
             sport=req.sport,
             event_id=req.event_id,
             home_team=req.home_team,
             away_team=req.away_team,
-            pick=pick,
+            lines=parsed_lines,
         )
         outcome_attestor.register_signal(metadata)
+
+        # Add to audit set if genius/idiot addresses are provided
+        if audit_set_store and req.genius_address and req.idiot_address:
+            audit_set_store.add_signal(
+                genius=req.genius_address,
+                idiot=req.idiot_address,
+                cycle=req.cycle,
+                signal_id=signal_id,
+                notional=req.notional,
+                odds=req.odds,
+                sla_bps=req.sla_bps,
+            )
+
         return RegisterSignalResponse(
             signal_id=signal_id,
             registered=True,
-            market=pick.market,
+            lines_count=len(parsed_lines),
         )
 
     @app.post("/v1/signals/resolve", response_model=ResolveResponse)
     async def resolve_signals() -> ResolveResponse:
-        """Check all pending signals and resolve any with completed games."""
+        """Check all pending signals and resolve any with completed games.
+
+        Resolution stores 10 line outcomes on each signal's metadata.
+        Settlement happens later at the audit-set level via batch MPC.
+        """
         hotkey = ""
         if neuron:
             hotkey = neuron.wallet.hotkey.ss58_address if neuron.wallet else ""
 
         try:
-            attestations = await asyncio.wait_for(
+            resolved_ids = await asyncio.wait_for(
                 outcome_attestor.resolve_all_pending(hotkey),
                 timeout=30.0,
             )
         except TimeoutError:
             log.error("resolve_all_pending_timeout")
             raise HTTPException(status_code=504, detail="Signal resolution timed out")
-        results = [
-            {
-                "signal_id": a.signal_id,
-                "outcome": a.outcome.name,
-                "event_id": a.event_result.event_id,
-                "home_score": a.event_result.home_score,
-                "away_score": a.event_result.away_score,
-            }
-            for a in attestations
-        ]
-        return ResolveResponse(resolved_count=len(attestations), results=results)
+
+        # Record outcomes on audit set store
+        results = []
+        for signal_id in resolved_ids:
+            meta = outcome_attestor.get_signal(signal_id)
+            if meta and meta.outcomes:
+                if audit_set_store:
+                    audit_set_store.record_outcomes(
+                        signal_id, meta.outcomes,
+                    )
+                results.append({
+                    "signal_id": signal_id,
+                    "outcomes_count": len(meta.outcomes),
+                })
+        return ResolveResponse(resolved_count=len(resolved_ids), results=results)
+
+    @app.get("/v1/audit/{genius}/{idiot}/status", response_model=AuditSetStatusResponse)
+    async def audit_set_status(genius: str, idiot: str, cycle: int = 0) -> AuditSetStatusResponse:
+        """Check the status of an audit set for a genius-idiot pair."""
+        if audit_set_store is None:
+            raise HTTPException(status_code=503, detail="Audit set store not configured")
+        audit_set = audit_set_store.get_set(genius, idiot, cycle)
+        if audit_set is None:
+            raise HTTPException(status_code=404, detail="Audit set not found")
+        resolved_count = sum(
+            1 for s in audit_set.signals.values() if s.outcomes is not None
+        )
+        return AuditSetStatusResponse(
+            genius=audit_set.genius_address,
+            idiot=audit_set.idiot_address,
+            cycle=audit_set.cycle,
+            signals_count=len(audit_set.signals),
+            resolved_count=resolved_count,
+            ready=audit_set.ready_for_settlement,
+            settled=audit_set.settled,
+        )
 
     @app.post("/v1/signal/{signal_id}/outcome", response_model=OutcomeResponse)
     async def attest_outcome(signal_id: str, req: OutcomeRequest) -> OutcomeResponse:
@@ -989,6 +1041,22 @@ def create_app(
 
         ready = all(checks.values())
         return ReadinessResponse(ready=ready, checks=checks)
+
+    # ------------------------------------------------------------------
+    # Activity log
+    # ------------------------------------------------------------------
+
+    @app.get("/v1/activity")
+    async def get_activity(
+        limit: int = 100,
+        category: str | None = None,
+    ) -> dict:
+        """Return recent validator activity events for admin dashboard."""
+        if activity_buffer is None:
+            return {"events": [], "total": 0}
+        safe_limit = max(1, min(500, limit))
+        events = activity_buffer.recent(limit=safe_limit, category=category)
+        return {"events": events, "total": len(events)}
 
     # ------------------------------------------------------------------
     # Shared HTTP client for attestation dispatch (connection reuse)

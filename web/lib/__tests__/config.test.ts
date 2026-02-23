@@ -7,7 +7,6 @@ const nextConfig = require("../../next.config.js");
 describe("next.config.js", () => {
   it("exports a valid config object", () => {
     expect(nextConfig).toBeDefined();
-    expect(typeof nextConfig.webpack).toBe("function");
     expect(typeof nextConfig.headers).toBe("function");
   });
 
@@ -55,10 +54,8 @@ describe("next.config.js", () => {
     expect(csp.value).toContain("frame-ancestors 'none'");
   });
 
-  it("disables Node.js polyfills for browser", () => {
-    const mockConfig = { resolve: { fallback: {} } };
-    const result = nextConfig.webpack(mockConfig);
-    expect(result.resolve.fallback.fs).toBe(false);
-    expect(result.resolve.fallback.crypto).toBe(false);
+  it("does not configure webpack overrides", () => {
+    // Webpack polyfills were removed with ZK/snarkjs dependencies
+    expect(nextConfig.webpack).toBeUndefined();
   });
 });

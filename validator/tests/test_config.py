@@ -41,26 +41,41 @@ class TestConfigValidation:
     def test_valid_config_no_warnings(self) -> None:
         config = _config(
             bt_network="local",
-            sports_api_key="test-key",
+            sports_api_key="",
             base_validator_private_key="0x" + "ab" * 32,
         )
         warnings = config.validate()
         assert len(warnings) == 0
 
-    def test_missing_sports_api_key_warns_in_dev(self) -> None:
+    def test_sports_api_key_set_warns_deprecated(self) -> None:
+        config = _config(bt_network="local", sports_api_key="old-key")
+        warnings = config.validate()
+        assert any("no longer used" in w for w in warnings)
+
+    def test_no_sports_api_key_no_warning(self) -> None:
         config = _config(bt_network="local", sports_api_key="")
         warnings = config.validate()
-        assert any("SPORTS_API_KEY" in w for w in warnings)
+        assert not any("SPORTS_API_KEY" in w for w in warnings)
 
-    def test_missing_sports_api_key_raises_in_prod(self) -> None:
-        config = _config(bt_network="finney", sports_api_key="")
-        with pytest.raises(ValueError, match="SPORTS_API_KEY must be set in production"):
-            config.validate()
+    def test_production_no_sports_api_key_ok(self) -> None:
+        """Production no longer requires SPORTS_API_KEY."""
+        config = _config(
+            bt_network="finney",
+            sports_api_key="",
+            escrow_address="0x1234567890abcdef1234567890abcdef12345678",
+            signal_commitment_address="0x1234567890abcdef1234567890abcdef12345678",
+            account_address="0x1234567890abcdef1234567890abcdef12345678",
+            collateral_address="0x1234567890abcdef1234567890abcdef12345678",
+            outcome_voting_address="0x1234567890abcdef1234567890abcdef12345678",
+            base_validator_private_key="0x" + "ab" * 32,
+        )
+        warnings = config.validate()
+        assert not any("SPORTS_API_KEY" in w for w in warnings)
 
     def test_mainnet_missing_addresses_raises(self) -> None:
         config = _config(
             bt_network="finney",
-            sports_api_key="key",
+            sports_api_key="",
             escrow_address="",
             signal_commitment_address="",
             account_address="",
@@ -72,7 +87,7 @@ class TestConfigValidation:
     def test_local_network_no_address_warnings(self) -> None:
         config = _config(
             bt_network="local",
-            sports_api_key="key",
+            sports_api_key="",
             escrow_address="",
             base_validator_private_key="0x" + "ab" * 32,
         )
@@ -92,7 +107,7 @@ class TestConfigValidation:
 
 class TestConfigNetworkWarning:
     def test_known_network_no_warning(self) -> None:
-        config = _config(bt_network="finney", sports_api_key="key",
+        config = _config(bt_network="finney", sports_api_key="",
                          escrow_address="0x1234567890abcdef1234567890abcdef12345678",
                          signal_commitment_address="0x1234567890abcdef1234567890abcdef12345678",
                          account_address="0x1234567890abcdef1234567890abcdef12345678",
@@ -103,7 +118,7 @@ class TestConfigNetworkWarning:
         assert not any("BT_NETWORK" in w for w in warnings)
 
     def test_unknown_network_warns(self) -> None:
-        config = _config(bt_network="devnet-42", sports_api_key="key")
+        config = _config(bt_network="devnet-42", sports_api_key="")
         warnings = config.validate()
         assert any("BT_NETWORK" in w for w in warnings)
 
@@ -115,7 +130,7 @@ class TestConfigStrictAutoDetect:
         """Warnings become errors on finney when strict is unset."""
         config = _config(
             bt_network="finney",
-            sports_api_key="key",
+            sports_api_key="",
             escrow_address="0x1234567890abcdef1234567890abcdef12345678",
             signal_commitment_address="0x1234567890abcdef1234567890abcdef12345678",
             account_address="0x1234567890abcdef1234567890abcdef12345678",
@@ -131,7 +146,7 @@ class TestConfigStrictAutoDetect:
         """Warnings are returned (not raised) on local network."""
         config = _config(
             bt_network="local",
-            sports_api_key="key",
+            sports_api_key="",
             base_chain_id=99999,
         )
         warnings = config.validate()  # strict=None → auto-detects local → lenient
@@ -141,7 +156,7 @@ class TestConfigStrictAutoDetect:
         """Explicit strict=False overrides auto-detect even on finney."""
         config = _config(
             bt_network="finney",
-            sports_api_key="key",
+            sports_api_key="",
             escrow_address="0x1234567890abcdef1234567890abcdef12345678",
             signal_commitment_address="0x1234567890abcdef1234567890abcdef12345678",
             account_address="0x1234567890abcdef1234567890abcdef12345678",
@@ -164,46 +179,46 @@ class TestConfigTimeouts:
         assert config.rpc_timeout == 30
 
     def test_http_timeout_zero_raises(self) -> None:
-        config = _config(bt_network="local", sports_api_key="key", http_timeout=0)
+        config = _config(bt_network="local", sports_api_key="", http_timeout=0)
         with pytest.raises(ValueError, match="HTTP_TIMEOUT"):
             config.validate()
 
     def test_rpc_timeout_zero_raises(self) -> None:
-        config = _config(bt_network="local", sports_api_key="key", rpc_timeout=0)
+        config = _config(bt_network="local", sports_api_key="", rpc_timeout=0)
         with pytest.raises(ValueError, match="RPC_TIMEOUT"):
             config.validate()
 
 
 class TestConfigNetuidValidation:
     def test_netuid_zero_raises(self) -> None:
-        config = _config(bt_netuid=0, bt_network="local", sports_api_key="key")
+        config = _config(bt_netuid=0, bt_network="local", sports_api_key="")
         with pytest.raises(ValueError, match="BT_NETUID"):
             config.validate()
 
     def test_netuid_too_high_raises(self) -> None:
-        config = _config(bt_netuid=70000, bt_network="local", sports_api_key="key")
+        config = _config(bt_netuid=70000, bt_network="local", sports_api_key="")
         with pytest.raises(ValueError, match="BT_NETUID"):
             config.validate()
 
     def test_netuid_valid(self) -> None:
-        config = _config(bt_netuid=103, bt_network="local", sports_api_key="key")
+        config = _config(bt_netuid=103, bt_network="local", sports_api_key="")
         warnings = config.validate()
         assert not any("BT_NETUID" in w for w in warnings)
 
 
 class TestConfigChainId:
     def test_standard_chain_id_no_warning(self) -> None:
-        config = _config(bt_network="local", sports_api_key="key", base_chain_id=8453)
+        config = _config(bt_network="local", sports_api_key="", base_chain_id=8453)
         warnings = config.validate()
         assert not any("BASE_CHAIN_ID" in w for w in warnings)
 
     def test_localhost_chain_id_no_warning(self) -> None:
-        config = _config(bt_network="local", sports_api_key="key", base_chain_id=31337)
+        config = _config(bt_network="local", sports_api_key="", base_chain_id=31337)
         warnings = config.validate()
         assert not any("BASE_CHAIN_ID" in w for w in warnings)
 
     def test_nonstandard_chain_id_warns(self) -> None:
-        config = _config(bt_network="local", sports_api_key="key", base_chain_id=999)
+        config = _config(bt_network="local", sports_api_key="", base_chain_id=999)
         warnings = config.validate()
         assert any("BASE_CHAIN_ID" in w for w in warnings)
 
@@ -215,12 +230,12 @@ class TestConfigRateLimits:
         assert config.rate_limit_rate == 10
 
     def test_rate_limit_capacity_zero_raises(self) -> None:
-        config = _config(bt_network="local", sports_api_key="key", rate_limit_capacity=0)
+        config = _config(bt_network="local", sports_api_key="", rate_limit_capacity=0)
         with pytest.raises(ValueError, match="RATE_LIMIT_CAPACITY"):
             config.validate()
 
     def test_rate_limit_rate_zero_raises(self) -> None:
-        config = _config(bt_network="local", sports_api_key="key", rate_limit_rate=0)
+        config = _config(bt_network="local", sports_api_key="", rate_limit_rate=0)
         with pytest.raises(ValueError, match="RATE_LIMIT_RATE"):
             config.validate()
 
@@ -231,18 +246,18 @@ class TestConfigMPCPeerTimeout:
         assert config.mpc_peer_timeout == 10.0
 
     def test_mpc_peer_timeout_too_low_raises(self) -> None:
-        config = _config(bt_network="local", sports_api_key="key", mpc_peer_timeout=0.5)
+        config = _config(bt_network="local", sports_api_key="", mpc_peer_timeout=0.5)
         with pytest.raises(ValueError, match="MPC_PEER_TIMEOUT"):
             config.validate()
 
     def test_mpc_peer_timeout_too_high_raises(self) -> None:
-        config = _config(bt_network="local", sports_api_key="key", mpc_peer_timeout=120.0)
+        config = _config(bt_network="local", sports_api_key="", mpc_peer_timeout=120.0)
         with pytest.raises(ValueError, match="MPC_PEER_TIMEOUT"):
             config.validate()
 
     def test_rate_limit_capacity_below_rate_warns(self) -> None:
         config = _config(
-            bt_network="local", sports_api_key="key",
+            bt_network="local", sports_api_key="",
             rate_limit_capacity=5, rate_limit_rate=10,
         )
         warnings = config.validate()
@@ -253,7 +268,7 @@ class TestConfigAddressValidation:
     def test_valid_address_accepted(self) -> None:
         config = _config(
             bt_network="finney",
-            sports_api_key="key",
+            sports_api_key="",
             escrow_address="0x1234567890abcdef1234567890abcdef12345678",
             signal_commitment_address="0x1234567890abcdef1234567890abcdef12345678",
             account_address="0x1234567890abcdef1234567890abcdef12345678",
@@ -267,7 +282,7 @@ class TestConfigAddressValidation:
     def test_invalid_address_format_raises(self) -> None:
         config = _config(
             bt_network="finney",
-            sports_api_key="key",
+            sports_api_key="",
             escrow_address="not-an-address",
             signal_commitment_address="0x1234567890abcdef1234567890abcdef12345678",
             account_address="0x1234567890abcdef1234567890abcdef12345678",
@@ -279,7 +294,7 @@ class TestConfigAddressValidation:
     def test_short_address_raises(self) -> None:
         config = _config(
             bt_network="finney",
-            sports_api_key="key",
+            sports_api_key="",
             escrow_address="0x1234",
             signal_commitment_address="0x1234567890abcdef1234567890abcdef12345678",
             account_address="0x1234567890abcdef1234567890abcdef12345678",
@@ -291,7 +306,7 @@ class TestConfigAddressValidation:
     def test_invalid_address_in_dev_mode_raises(self) -> None:
         config = _config(
             bt_network="local",
-            sports_api_key="key",
+            sports_api_key="",
             escrow_address="not-an-address",
         )
         with pytest.raises(ValueError, match="not a valid Ethereum address"):
@@ -322,17 +337,17 @@ class TestMpcAvailabilityTimeout:
         assert config.mpc_availability_timeout == 15.0
 
     def test_too_low_raises(self) -> None:
-        config = _config(sports_api_key="key", bt_network="local", mpc_availability_timeout=2.0)
+        config = _config(sports_api_key="", bt_network="local", mpc_availability_timeout=2.0)
         with pytest.raises(ValueError, match="MPC_AVAILABILITY_TIMEOUT"):
             config.validate()
 
     def test_too_high_raises(self) -> None:
-        config = _config(sports_api_key="key", bt_network="local", mpc_availability_timeout=200.0)
+        config = _config(sports_api_key="", bt_network="local", mpc_availability_timeout=200.0)
         with pytest.raises(ValueError, match="MPC_AVAILABILITY_TIMEOUT"):
             config.validate()
 
     def test_valid_range_accepted(self) -> None:
-        config = _config(sports_api_key="key", bt_network="local", mpc_availability_timeout=30.0)
+        config = _config(sports_api_key="", bt_network="local", mpc_availability_timeout=30.0)
         config.validate()
 
 
@@ -342,7 +357,7 @@ class TestShamirThresholdProduction:
     def _prod_config(self, **overrides: object) -> Config:
         defaults = dict(
             bt_network="finney",
-            sports_api_key="key",
+            sports_api_key="",
             escrow_address="0x1234567890abcdef1234567890abcdef12345678",
             signal_commitment_address="0x1234567890abcdef1234567890abcdef12345678",
             account_address="0x1234567890abcdef1234567890abcdef12345678",
@@ -374,7 +389,7 @@ class TestShamirThresholdProduction:
         assert not any("SHAMIR_THRESHOLD" in w for w in warnings)
 
     def test_threshold_1_allowed_in_dev(self) -> None:
-        config = _config(bt_network="local", sports_api_key="key", shares_threshold=1)
+        config = _config(bt_network="local", sports_api_key="", shares_threshold=1)
         warnings = config.validate()
         assert not any("SHAMIR_THRESHOLD" in w for w in warnings)
 

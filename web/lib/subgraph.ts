@@ -231,3 +231,143 @@ export async function fetchProtocolStats(): Promise<SubgraphProtocolStats | null
 
   return result?.protocolStats ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// Admin activity queries — recent on-chain events for the Protocol tab
+// ---------------------------------------------------------------------------
+
+export interface SubgraphRecentSignal {
+  id: string;
+  genius: { id: string };
+  sport: string;
+  status: string;
+  maxPriceBps: string;
+  createdAt: string;
+  createdAtTx: string;
+}
+
+export interface SubgraphRecentPurchase {
+  id: string;
+  signal: { id: string; sport: string };
+  idiot: { id: string };
+  genius: { id: string };
+  notional: string;
+  feePaid: string;
+  outcome: string;
+  purchasedAt: string;
+  purchasedAtTx: string;
+}
+
+export interface SubgraphRecentAudit {
+  id: string;
+  genius: { id: string };
+  idiot: { id: string };
+  cycle: string;
+  qualityScore: string;
+  trancheA: string;
+  trancheB: string;
+  protocolFee: string;
+  isEarlyExit: boolean;
+  settledAt: string;
+  settledAtTx: string;
+}
+
+export interface SubgraphRecentTrackRecord {
+  id: string;
+  genius: { id: string };
+  signalCount: string;
+  totalGain: string;
+  totalLoss: string;
+  favCount: string;
+  unfavCount: string;
+  voidCount: string;
+  submittedAt: string;
+  submittedAtTx: string;
+}
+
+/** Fetch recent signals across all geniuses (newest first) */
+export async function fetchRecentSignals(
+  limit = 50,
+): Promise<SubgraphRecentSignal[]> {
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const result = await querySubgraph<{ signals: SubgraphRecentSignal[] }>(`{
+    signals(first: ${safeLimit}, orderBy: createdAt, orderDirection: desc) {
+      id
+      genius { id }
+      sport
+      status
+      maxPriceBps
+      createdAt
+      createdAtTx
+    }
+  }`);
+  return result?.signals ?? [];
+}
+
+/** Fetch recent purchases across all idiots (newest first) */
+export async function fetchRecentPurchases(
+  limit = 50,
+): Promise<SubgraphRecentPurchase[]> {
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const result = await querySubgraph<{ purchases: SubgraphRecentPurchase[] }>(`{
+    purchases(first: ${safeLimit}, orderBy: purchasedAt, orderDirection: desc) {
+      id
+      signal { id sport }
+      idiot { id }
+      genius { id }
+      notional
+      feePaid
+      outcome
+      purchasedAt
+      purchasedAtTx
+    }
+  }`);
+  return result?.purchases ?? [];
+}
+
+/** Fetch recent audit settlements (newest first) */
+export async function fetchRecentAudits(
+  limit = 50,
+): Promise<SubgraphRecentAudit[]> {
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const result = await querySubgraph<{ auditResults: SubgraphRecentAudit[] }>(`{
+    auditResults(first: ${safeLimit}, orderBy: settledAt, orderDirection: desc) {
+      id
+      genius { id }
+      idiot { id }
+      cycle
+      qualityScore
+      trancheA
+      trancheB
+      protocolFee
+      isEarlyExit
+      settledAt
+      settledAtTx
+    }
+  }`);
+  return result?.auditResults ?? [];
+}
+
+/** Fetch recent track record proof submissions (newest first) */
+export async function fetchRecentTrackRecordProofs(
+  limit = 50,
+): Promise<SubgraphRecentTrackRecord[]> {
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const result = await querySubgraph<{
+    trackRecordProofs: SubgraphRecentTrackRecord[];
+  }>(`{
+    trackRecordProofs(first: ${safeLimit}, orderBy: submittedAt, orderDirection: desc) {
+      id
+      genius { id }
+      signalCount
+      totalGain
+      totalLoss
+      favCount
+      unfavCount
+      voidCount
+      submittedAt
+      submittedAtTx
+    }
+  }`);
+  return result?.trackRecordProofs ?? [];
+}

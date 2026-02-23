@@ -5,11 +5,11 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "About | Djinn",
   description:
-    "Learn how Djinn unbundles information from execution. Encrypted predictions, ZK-verified track records, and USDC settlement on Base.",
+    "Learn how Djinn unbundles information from execution. Encrypted predictions, on-chain verified track records, and USDC settlement on Base.",
   openGraph: {
     title: "About Djinn",
     description:
-      "Encrypted predictions, ZK-verified track records, and USDC settlement on Base.",
+      "Encrypted predictions, on-chain verified track records, and USDC settlement on Base.",
   },
 };
 
@@ -52,7 +52,7 @@ export default function About() {
           <svg className="w-4 h-4 text-idiot-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
           </svg>
-          ZK-Verified Track Records
+          On-Chain Track Records
         </span>
         <span className="flex items-center gap-2">
           <svg className="w-4 h-4 text-idiot-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -129,7 +129,7 @@ export default function About() {
                 <svg className="w-5 h-5 text-genius-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
-                Build a ZK-verified track record that proves your accuracy
+                Build an on-chain track record that proves your accuracy
               </li>
               <li className="flex items-start gap-3">
                 <svg className="w-5 h-5 text-genius-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -217,8 +217,8 @@ export default function About() {
           <div className="card">
             <h3 className="font-semibold text-slate-900 mb-2">Track records can&apos;t be faked</h3>
             <p className="text-sm text-slate-500">
-              Quality Scores are computed inside a Groth16 ZK circuit. The proof is
-              verified on-chain. No one can manipulate a Genius&apos;s record.
+              Quality Scores are computed by validator consensus and settled on-chain.
+              Results are publicly verifiable and immutable.
             </p>
           </div>
           <div className="card">
