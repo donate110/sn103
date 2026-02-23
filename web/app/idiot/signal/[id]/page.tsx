@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAccount, useWalletClient } from "wagmi";
-import { useSignal, usePurchaseSignal, useSignalNotionalFilled, useEscrowBalance } from "@/lib/hooks";
+import { useSignal, usePurchaseSignal, useSignalNotionalFilled, useEscrowBalance, useDepositEscrow, useWalletUsdcBalance, humanizeError } from "@/lib/hooks";
 import { discoverValidatorClients, getMinerClient } from "@/lib/api";
 import { decrypt, fromHex, bigIntToKey, reconstructSecret } from "@/lib/crypto";
 import type { ShamirShare } from "@/lib/crypto";
@@ -15,6 +15,7 @@ import {
   signalStatusLabel,
   formatBps,
   formatUsdc,
+  parseUsdc,
   truncateAddress,
 } from "@/lib/types";
 import type { CandidateLine, BookmakerAvailability, CheckResponse } from "@/lib/api";
@@ -47,7 +48,11 @@ export default function PurchaseSignal() {
   const { purchase, loading: purchaseLoading, error: purchaseError, txHash } =
     usePurchaseSignal();
   const { filled: notionalFilled } = useSignalNotionalFilled(signalId?.toString());
-  const { balance: escrowBalance } = useEscrowBalance(address);
+  const { balance: escrowBalance, refresh: refreshEscrow } = useEscrowBalance(address);
+  const { deposit: depositEscrow, loading: depositLoading } = useDepositEscrow();
+  const { balance: walletUsdc } = useWalletUsdcBalance(address);
+  const [depositAmt, setDepositAmt] = useState("");
+  const [depositMsg, setDepositMsg] = useState<string | null>(null);
 
   // Fetch genius stats for sidebar
   const geniusAddress = signal?.genius;
@@ -305,7 +310,7 @@ export default function PurchaseSignal() {
         const needed = Number(feeBig) / 1e6;
         const have = Number(escrowBalance) / 1e6;
         setStepError(
-          `Insufficient escrow balance: you have $${have.toFixed(2)} but need $${needed.toFixed(2)}. Deposit USDC on the Idiot Dashboard first.`,
+          `Insufficient escrow balance: you have $${have.toFixed(2)} but need $${needed.toFixed(2)}. Use the deposit form above.`,
         );
         setStep("idle");
         return;
@@ -637,14 +642,47 @@ export default function PurchaseSignal() {
                 <div className="flex items-center justify-between">
                   <p className="text-xs text-slate-500">Your Escrow Balance</p>
                   <p className="text-sm font-medium text-slate-900">
-                    ${(Number(escrowBalance) / 1e6).toFixed(2)}
+                    ${formatUsdc(escrowBalance)}
                   </p>
                 </div>
-                {escrowBalance === 0n && (
-                  <p className="text-xs text-amber-600 mt-1">
-                    Deposit USDC on the <a href="/idiot" className="underline font-medium">Idiot Dashboard</a> to purchase signals.
-                  </p>
+                {depositMsg && (
+                  <p className="text-xs text-green-600 mt-1">{depositMsg}</p>
                 )}
+                <div className="flex gap-2 mt-2">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    placeholder="Amount"
+                    className="input flex-1 text-xs py-1.5"
+                    value={depositAmt}
+                    onChange={(e) => setDepositAmt(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn-primary text-xs py-1.5 px-3 whitespace-nowrap"
+                    disabled={depositLoading || !depositAmt}
+                    onClick={async () => {
+                      setDepositMsg(null);
+                      try {
+                        const result = await depositEscrow(parseUsdc(depositAmt));
+                        if (result === "approved") {
+                          setDepositMsg("USDC approved! Click Deposit again.");
+                          return;
+                        }
+                        setDepositAmt("");
+                        setDepositMsg(`Deposited $${depositAmt}`);
+                        refreshEscrow();
+                      } catch (err) {
+                        setDepositMsg(humanizeError(err, "Deposit failed"));
+                      }
+                    }}
+                  >
+                    {depositLoading ? "..." : "Deposit"}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Wallet: ${formatUsdc(walletUsdc)} USDC
+                </p>
               </div>
             )}
 
