@@ -71,11 +71,13 @@ async def epoch_loop(
 
     while True:
         try:
-            # Sync metagraph
-            neuron.sync_metagraph()
+            # Sync metagraph (with 30s timeout to prevent hanging)
+            neuron.sync_metagraph(timeout=30.0)
 
             # Health-check all miners by pinging their axon /health endpoint
             miner_uids = neuron.get_miner_uids()
+            if epoch_count % 50 == 0:
+                log.info("epoch_tick", epoch=epoch_count, miners=len(miner_uids))
 
             # Prune deregistered miner UIDs from scorer
             scorer.prune_absent(set(miner_uids))

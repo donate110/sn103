@@ -135,10 +135,22 @@ class DjinnValidator:
             return int(tensor_or_val.item())
         return int(tensor_or_val)
 
-    def sync_metagraph(self) -> None:
-        """Re-sync the metagraph to pick up new registrations/deregistrations."""
+    def sync_metagraph(self, timeout: float = 30.0) -> None:
+        """Re-sync the metagraph to pick up new registrations/deregistrations.
+
+        Uses a thread with a timeout to prevent the epoch loop from hanging
+        if the subtensor WebSocket connection is unresponsive.
+        """
         if self.subtensor and self.metagraph:
-            self.metagraph.sync(subtensor=self.subtensor)
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(self.metagraph.sync, subtensor=self.subtensor)
+                try:
+                    future.result(timeout=timeout)
+                except concurrent.futures.TimeoutError:
+                    log.warning("metagraph_sync_timeout", timeout_s=timeout)
+                    return
             log.debug("metagraph_synced", n=self._safe_item(self.metagraph.n))
 
     def set_weights(self, weights: dict[int, float]) -> bool:
