@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAccount, useWalletClient } from "wagmi";
 import { useSignal, usePurchaseSignal, useSignalNotionalFilled } from "@/lib/hooks";
-import { getValidatorClient, getValidatorClients, getMinerClient } from "@/lib/api";
+import { getValidatorClients, getMinerClient } from "@/lib/api";
 import { decrypt, fromHex, bigIntToKey, reconstructSecret } from "@/lib/crypto";
 import type { ShamirShare } from "@/lib/crypto";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
@@ -17,9 +17,9 @@ import {
   formatUsdc,
   truncateAddress,
 } from "@/lib/types";
-import type { CandidateLine } from "@/lib/api";
+import type { CandidateLine, BookmakerAvailability, CheckResponse } from "@/lib/api";
 import { decoyLineToCandidateLine, parseLine, formatLine } from "@/lib/odds";
-import { getSportsbookPrefs, setSportsbookPrefs, savePurchasedSignal } from "@/lib/preferences";
+import { savePurchasedSignal } from "@/lib/preferences";
 
 type PurchaseStep =
   | "idle"
@@ -58,7 +58,6 @@ export default function PurchaseSignal() {
     useAuditHistory(geniusAddress);
 
   const [notional, setNotional] = useState("");
-  const [selectedSportsbook, setSelectedSportsbook] = useState("");
   const [step, setStep] = useState<PurchaseStep>("idle");
   const [stepError, setStepError] = useState<string | null>(null);
   const [decryptedPick, setDecryptedPick] = useState<{
@@ -67,9 +66,11 @@ export default function PurchaseSignal() {
   } | null>(null);
   const [availableIndices, setAvailableIndices] = useState<number[]>([]);
   const [marketOdds, setMarketOdds] = useState<number | null>(null);
+  const [bestBookmaker, setBestBookmaker] = useState<BookmakerAvailability | null>(null);
   const purchaseInFlight = useRef(false);
   const purchaseBtnRef = useRef<HTMLButtonElement>(null);
   const [purchaseBtnVisible, setPurchaseBtnVisible] = useState(false);
+  const checkResultRef = useRef<CheckResponse | null>(null);
 
   // Hide sticky mobile bar when the form submit button scrolls into view
   useEffect(() => {
@@ -82,63 +83,6 @@ export default function PurchaseSignal() {
     observer.observe(el);
     return () => observer.disconnect();
   }, [step]);
-
-  // Sportsbook preferences
-  const [savedPrefs, setSavedPrefs] = useState<string[]>([]);
-  const [editingPrefs, setEditingPrefs] = useState(false);
-  const [pendingPrefs, setPendingPrefs] = useState<string[]>([]);
-
-  // Load sportsbook prefs from localStorage
-  const sportsbooks = signal?.availableSportsbooks;
-  useEffect(() => {
-    const prefs = getSportsbookPrefs(address);
-    setSavedPrefs(prefs);
-  }, [address]);
-
-  // Auto-select sportsbook from prefs or first available
-  useEffect(() => {
-    if (!sportsbooks || sportsbooks.length === 0) return;
-    if (selectedSportsbook) return;
-
-    // Try saved prefs first (in order)
-    for (const pref of savedPrefs) {
-      if (sportsbooks.includes(pref)) {
-        setSelectedSportsbook(pref);
-        return;
-      }
-    }
-    // Fall back to first available
-    setSelectedSportsbook(sportsbooks[0]);
-  }, [sportsbooks, selectedSportsbook, savedPrefs]);
-
-  const togglePendingPref = (book: string) => {
-    setPendingPrefs((prev) =>
-      prev.includes(book)
-        ? prev.filter((b) => b !== book)
-        : [...prev, book],
-    );
-  };
-
-  const savePendingPrefs = () => {
-    if (address) setSportsbookPrefs(address, pendingPrefs);
-    setSavedPrefs(pendingPrefs);
-    setEditingPrefs(false);
-    // Auto-select first preferred that's available
-    if (sportsbooks) {
-      for (const pref of pendingPrefs) {
-        if (sportsbooks.includes(pref)) {
-          setSelectedSportsbook(pref);
-          setMarketOdds(null);
-          break;
-        }
-      }
-    }
-  };
-
-  const startEditingPrefs = () => {
-    setPendingPrefs(savedPrefs.length > 0 ? [...savedPrefs] : []);
-    setEditingPrefs(true);
-  };
 
   if (!isConnected) {
     return (
@@ -187,20 +131,9 @@ export default function PurchaseSignal() {
   const isExpired = expiresDate < new Date();
   const isActive = signal.status === SignalStatus.Active && !isExpired;
 
-  // Build ordered list of sportsbooks to try: selected first, then remaining prefs
-  const getSportsbooksToTry = (): string[] => {
-    const toTry: string[] = [selectedSportsbook];
-    for (const pref of savedPrefs) {
-      if (pref !== selectedSportsbook && signal.availableSportsbooks.includes(pref)) {
-        toTry.push(pref);
-      }
-    }
-    return toTry;
-  };
-
   const handlePurchase = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!signalId || !selectedSportsbook) return;
+    if (!signalId) return;
     if (purchaseInFlight.current) return;
     purchaseInFlight.current = true;
 
@@ -215,7 +148,7 @@ export default function PurchaseSignal() {
     setStepError(null);
 
     try {
-      // Step 1: Check line availability with miner — auto-retry with preferred sportsbooks
+      // Step 1: Check line availability with miner (any sportsbook)
       setStep("checking_lines");
 
       const miner = getMinerClient();
@@ -229,57 +162,36 @@ export default function PurchaseSignal() {
           ),
       );
 
-      const sportsbooksToTry = getSportsbooksToTry();
-      let checkResult: Awaited<ReturnType<typeof miner.checkLines>> | null = null;
-      let usedSportsbook = selectedSportsbook;
-
-      for (const book of sportsbooksToTry) {
-        try {
-          const result = await miner.checkLines({ lines: candidateLines });
-          if (result.available_indices.length > 0) {
-            // At least some lines are available — validators will MPC-check
-            // whether the real pick is among them without revealing which is real.
-            // Stale decoys don't block the purchase; only a stale real pick does.
-            checkResult = result;
-            usedSportsbook = book;
-            break;
-          }
-        } catch {
-          // Try next sportsbook
-          continue;
+      let checkResult: CheckResponse | null = null;
+      try {
+        const result = await miner.checkLines({ lines: candidateLines });
+        if (result.available_indices.length > 0) {
+          checkResult = result;
         }
+      } catch {
+        // Miner check failed
       }
 
       if (!checkResult || checkResult.available_indices.length === 0) {
         setStepError(
-          savedPrefs.length > 1
-            ? `No lines available at any of your preferred sportsbooks (${sportsbooksToTry.join(", ")}). The signal may have gone stale.`
-            : "No lines are currently available at this sportsbook. The signal may have gone stale — try another sportsbook or check back later.",
+          "No lines are currently available at any sportsbook. The signal may have gone stale — check back later.",
         );
         setStep("idle");
         return;
       }
 
-      // Update selected sportsbook if we fell through to a different one
-      if (usedSportsbook !== selectedSportsbook) {
-        setSelectedSportsbook(usedSportsbook);
-      }
+      // Store full check results so we can find best bookmaker after decryption
+      checkResultRef.current = checkResult;
       setAvailableIndices(checkResult.available_indices);
 
-      // Extract best odds from miner response for the used sportsbook
+      // Extract best odds across all bookmakers for any available line
       let bestOdds = 1.91; // fallback
       for (const lineResult of checkResult.results) {
         if (lineResult.available && lineResult.bookmakers) {
-          const match = lineResult.bookmakers.find(
-            (b) => b.bookmaker.toLowerCase() === usedSportsbook.toLowerCase(),
-          );
-          if (match && match.odds > 0) {
-            bestOdds = match.odds;
-            break;
-          }
-          // If no exact sportsbook match, use any available odds
-          if (lineResult.bookmakers.length > 0 && lineResult.bookmakers[0].odds > 0) {
-            bestOdds = lineResult.bookmakers[0].odds;
+          for (const bm of lineResult.bookmakers) {
+            if (bm.odds > bestOdds) {
+              bestOdds = bm.odds;
+            }
           }
         }
       }
@@ -291,7 +203,7 @@ export default function PurchaseSignal() {
       const validators = getValidatorClients();
       const purchaseReq = {
         buyer_address: buyerAddress,
-        sportsbook: usedSportsbook,
+        sportsbook: "",
         available_indices: checkResult.available_indices,
       };
 
@@ -314,7 +226,7 @@ export default function PurchaseSignal() {
           .map((r) => r.reason?.message || "unknown")
           .join("; ");
         setStepError(
-          failedMsg || "Signal not available at this sportsbook. Try selecting a different sportsbook.",
+          failedMsg || "Signal not currently available. The pick may have gone stale — check back later.",
         );
         setStep("idle");
         return;
@@ -427,13 +339,30 @@ export default function PurchaseSignal() {
           }
           setDecryptedPick(parsed);
 
+          // Find best bookmaker for the real pick from miner check results
+          const storedCheck = checkResultRef.current;
+          if (storedCheck) {
+            const realLineResult = storedCheck.results.find(
+              (r) => r.index === parsed.realIndex,
+            );
+            if (realLineResult?.bookmakers?.length) {
+              const sorted = [...realLineResult.bookmakers].sort(
+                (a, b) => b.odds - a.odds,
+              );
+              setBestBookmaker(sorted[0]);
+            }
+          }
+
           // Persist purchased signal data for recovery
           if (buyerAddress) {
+            const bestBook = checkResultRef.current?.results
+              .find((r) => r.index === parsed.realIndex)
+              ?.bookmakers?.sort((a, b) => b.odds - a.odds)?.[0];
             savePurchasedSignal(buyerAddress, {
               signalId: signalId.toString(),
               realIndex: parsed.realIndex,
               pick: parsed.pick,
-              sportsbook: usedSportsbook,
+              sportsbook: bestBook?.bookmaker ?? "",
               notional: notional,
               purchasedAt: Math.floor(Date.now() / 1000),
             });
@@ -510,6 +439,11 @@ export default function PurchaseSignal() {
               <p className="text-lg font-bold text-green-800">
                 {decryptedPick.pick}
               </p>
+              {bestBookmaker && (
+                <p className="text-sm text-green-700 mt-2">
+                  Best odds: {bestBookmaker.odds.toFixed(2)} at {bestBookmaker.bookmaker}
+                </p>
+              )}
             </div>
             <CompletionDecoyLines
               decoyLines={signal.decoyLines}
@@ -636,120 +570,6 @@ export default function PurchaseSignal() {
             </p>
           </div>
 
-          {signal.availableSportsbooks.length > 0 && (
-            <div className="card">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-xs text-slate-500 uppercase tracking-wide">
-                  {editingPrefs ? "Set Sportsbook Preferences" : "Sportsbook"}
-                </p>
-                {!editingPrefs && savedPrefs.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={startEditingPrefs}
-                    className="text-xs text-idiot-500 hover:text-idiot-600 transition-colors"
-                  >
-                    Change
-                  </button>
-                )}
-              </div>
-
-              {editingPrefs ? (
-                <div>
-                  <p className="text-xs text-slate-400 mb-2">
-                    Select your preferred sportsbooks in order. On purchase, Djinn will auto-try the next if a line check fails.
-                  </p>
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {signal.availableSportsbooks.map((book) => {
-                      const idx = pendingPrefs.indexOf(book);
-                      const isSelected = idx !== -1;
-                      return (
-                        <button
-                          key={book}
-                          type="button"
-                          onClick={() => togglePendingPref(book)}
-                          className={`rounded-lg px-3 py-1.5 text-sm transition-colors relative ${
-                            isSelected
-                              ? "bg-idiot-500 text-white"
-                              : "bg-slate-200 text-slate-600 hover:bg-slate-300"
-                          }`}
-                        >
-                          {isSelected && (
-                            <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-slate-900 text-white text-[10px] flex items-center justify-center">
-                              {idx + 1}
-                            </span>
-                          )}
-                          {book}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={savePendingPrefs}
-                      disabled={pendingPrefs.length === 0}
-                      className="btn-primary text-xs px-3 py-1.5"
-                    >
-                      Save Preferences
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditingPrefs(false)}
-                      className="btn-secondary text-xs px-3 py-1.5"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : savedPrefs.length === 0 && signal.availableSportsbooks.length > 1 ? (
-                <div>
-                  <p className="text-xs text-slate-400 mb-2">
-                    No sportsbook preferences saved. Select your preferred sportsbooks for faster purchasing.
-                  </p>
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {signal.availableSportsbooks.map((book) => (
-                      <button
-                        key={book}
-                        type="button"
-                        onClick={() => { setSelectedSportsbook(book); setMarketOdds(null); setAvailableIndices([]); }}
-                        className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
-                          selectedSportsbook === book
-                            ? "bg-idiot-500 text-white"
-                            : "bg-slate-200 text-slate-600 hover:bg-slate-300"
-                        }`}
-                      >
-                        {book}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={startEditingPrefs}
-                    className="text-xs text-idiot-500 hover:text-idiot-600 transition-colors"
-                  >
-                    Set preferences for auto-retry
-                  </button>
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {signal.availableSportsbooks.map((book) => (
-                    <button
-                      key={book}
-                      type="button"
-                      onClick={() => { setSelectedSportsbook(book); setMarketOdds(null); setAvailableIndices([]); }}
-                      className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
-                        selectedSportsbook === book
-                          ? "bg-idiot-500 text-white"
-                          : "bg-slate-200 text-slate-600 hover:bg-slate-300"
-                      }`}
-                    >
-                      {book}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Purchase Panel */}
@@ -817,7 +637,7 @@ export default function PurchaseSignal() {
                     <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Market Odds</p>
                     <p className="text-lg font-bold text-slate-900">{marketOdds.toFixed(2)}</p>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      Live odds from {selectedSportsbook || "sportsbook"} via miner network
+                      Best available odds via miner network
                     </p>
                   </div>
                 )}
@@ -874,7 +694,7 @@ export default function PurchaseSignal() {
                   ref={purchaseBtnRef}
                   type="submit"
                   disabled={
-                    isProcessing || purchaseLoading || !selectedSportsbook
+                    isProcessing || purchaseLoading
                   }
                   className="btn-primary w-full py-3"
                 >
