@@ -184,6 +184,7 @@ export interface SignalEvent {
   minNotional: bigint;
   expiresAt: bigint;
   blockNumber: number;
+  cancelled?: boolean;
 }
 
 function parseSignalEvents(
@@ -294,7 +295,21 @@ export async function getSignalsByGenius(
     signalCache.set(cacheKey, all, getMaxBlock(parsed, effectiveFrom));
   }
 
-  if (includeAll) return all;
+  if (includeAll) {
+    // Mark cancelled signals by fetching SignalCancelled events
+    const cancelFilter = contract.filters.SignalCancelled(null, geniusAddress);
+    const cancelEvents = await queryFilterChunked(contract, cancelFilter, effectiveFrom).catch(() => []);
+    const cancelledIds = new Set<string>();
+    for (const e of cancelEvents) {
+      if (e instanceof ethers.EventLog) {
+        cancelledIds.add(e.args[0].toString());
+      }
+    }
+    for (const s of all) {
+      if (cancelledIds.has(s.signalId)) s.cancelled = true;
+    }
+    return all;
+  }
   const now = BigInt(Math.floor(Date.now() / 1000));
   const notExpired = all.filter((s) => s.expiresAt > now);
 

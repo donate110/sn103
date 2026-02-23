@@ -60,31 +60,36 @@ export default function GeniusDashboard() {
 
   const handleCancelAll = async () => {
     const now = BigInt(Math.floor(Date.now() / 1000));
-    const active = mySignals.filter((s) => s.expiresAt > now);
+    const active = mySignals.filter((s) => s.expiresAt > now && !s.cancelled);
     if (active.length === 0) return;
     setCancellingAll(true);
     setTxError(null);
     setTxSuccess(null);
     let cancelled = 0;
-    for (const signal of active) {
+    let skipped = 0;
+    for (let i = 0; i < active.length; i++) {
+      const signal = active[i];
+      setCancelProgress(`Cancelling ${i + 1} of ${active.length}...`);
       try {
-        setCancelProgress(`Cancelling ${cancelled + 1} of ${active.length}...`);
         await cancelSignal(BigInt(signal.signalId));
         cancelled++;
         // Brief delay between txs — Coinbase Smart Wallet (ERC-4337)
         // needs time to update its internal nonce after each UserOperation
-        if (cancelled < active.length) {
+        if (i < active.length - 1) {
           await new Promise((r) => setTimeout(r, 2000));
         }
-      } catch (err) {
-        setTxError(humanizeError(err, `Failed to cancel signal ${signal.signalId.slice(0, 8)}...`));
-        break;
+      } catch {
+        // Signal may already be cancelled — skip and continue
+        skipped++;
       }
     }
     setCancellingAll(false);
     setCancelProgress("");
-    if (cancelled > 0) {
-      setTxSuccess(`Cancelled ${cancelled} signal${cancelled !== 1 ? "s" : ""}`);
+    if (cancelled > 0 || skipped > 0) {
+      const parts = [];
+      if (cancelled > 0) parts.push(`Cancelled ${cancelled}`);
+      if (skipped > 0) parts.push(`${skipped} already cancelled`);
+      setTxSuccess(parts.join(", "));
     }
   };
 
@@ -197,8 +202,9 @@ export default function GeniusDashboard() {
       <section className="mb-8">
         {(() => {
           const now = BigInt(Math.floor(Date.now() / 1000));
-          const activeSignals = mySignals.filter((s) => s.expiresAt > now);
-          const expiredSignals = mySignals.filter((s) => s.expiresAt <= now);
+          const notCancelled = mySignals.filter((s) => !s.cancelled);
+          const activeSignals = notCancelled.filter((s) => s.expiresAt > now);
+          const expiredSignals = notCancelled.filter((s) => s.expiresAt <= now);
           const displayedSignals = showExpired
             ? [...mySignals].sort((a, b) => Number(b.expiresAt) - Number(a.expiresAt))
             : [...activeSignals].sort((a, b) => Number(b.expiresAt) - Number(a.expiresAt));
