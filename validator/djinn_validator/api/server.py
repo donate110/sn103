@@ -815,6 +815,13 @@ def create_app(
             if burn_ledger is not None:
                 burn_ledger.refund_credit(req.burn_tx_hash)
             log.warning("attest_miner_unreachable", miner_uid=selected["uid"], err=str(e))
+            if burn_ledger is not None:
+                burn_ledger.log_attestation(
+                    tx_hash=req.burn_tx_hash, coldkey=sender, url=req.url,
+                    request_id=req.request_id, success=False, verified=False,
+                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
+                    error=f"Miner unreachable: {e}",
+                )
             return AttestResponse(
                 request_id=req.request_id,
                 url=req.url,
@@ -948,6 +955,20 @@ def create_app(
             elapsed_s=round(elapsed, 1),
         )
 
+        if burn_ledger is not None:
+            burn_ledger.log_attestation(
+                tx_hash=req.burn_tx_hash,
+                coldkey=sender,
+                url=req.url,
+                request_id=req.request_id,
+                success=True,
+                verified=verify_result.verified,
+                server_name=verify_result.server_name,
+                miner_uid=selected["uid"],
+                elapsed_s=round(elapsed, 2),
+                error=verify_result.error if not verify_result.verified else None,
+            )
+
         return AttestResponse(
             request_id=req.request_id,
             url=req.url,
@@ -966,6 +987,20 @@ def create_app(
             return {"burn_tx_hash": burn_tx_hash, "remaining": 999, "total": 999}
         remaining = burn_ledger.remaining_credits(burn_tx_hash)
         return {"burn_tx_hash": burn_tx_hash, "remaining": remaining}
+
+    @app.get("/v1/admin/attestations")
+    async def admin_attestations(limit: int = 50) -> dict:
+        """Recent attestation requests with full details."""
+        if burn_ledger is None:
+            return {"attestations": []}
+        return {"attestations": burn_ledger.recent_attestations(min(limit, 200))}
+
+    @app.get("/v1/admin/burn-stats")
+    async def admin_burn_stats(days: int = 7) -> dict:
+        """Hourly burn collection stats."""
+        if burn_ledger is None:
+            return {"stats": []}
+        return {"stats": burn_ledger.hourly_burn_stats(min(days, 30))}
 
     @app.post("/v1/analytics/attempt")
     async def analytics(req: AnalyticsRequest) -> dict:

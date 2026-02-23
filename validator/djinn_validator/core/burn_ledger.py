@@ -49,6 +49,22 @@ class BurnLedger:
                 created_at     INTEGER NOT NULL
             )
         """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS attestation_log (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                tx_hash       TEXT NOT NULL,
+                coldkey       TEXT NOT NULL,
+                url           TEXT NOT NULL,
+                request_id    TEXT NOT NULL,
+                success       INTEGER NOT NULL DEFAULT 0,
+                verified      INTEGER NOT NULL DEFAULT 0,
+                server_name   TEXT,
+                miner_uid     INTEGER,
+                elapsed_s     REAL,
+                error         TEXT,
+                created_at    INTEGER NOT NULL
+            )
+        """)
         # Migrate old schema: add total_credits/used_credits if missing
         cols = {
             row[1]
@@ -163,6 +179,79 @@ class BurnLedger:
             self._conn.commit()
             log.info("burn_credit_refunded", tx_hash=tx_hash[:16] + "...")
             return True
+
+    def log_attestation(
+        self,
+        *,
+        tx_hash: str,
+        coldkey: str,
+        url: str,
+        request_id: str,
+        success: bool,
+        verified: bool,
+        server_name: str | None = None,
+        miner_uid: int | None = None,
+        elapsed_s: float | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Log a completed attestation request for admin dashboard."""
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO attestation_log "
+                "(tx_hash, coldkey, url, request_id, success, verified, "
+                "server_name, miner_uid, elapsed_s, error, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    tx_hash, coldkey, url, request_id,
+                    int(success), int(verified),
+                    server_name, miner_uid, elapsed_s, error,
+                    int(time.time()),
+                ),
+            )
+            self._conn.commit()
+
+    def recent_attestations(self, limit: int = 50) -> list[dict]:
+        """Return recent attestation requests, newest first."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, tx_hash, coldkey, url, request_id, success, verified, "
+                "server_name, miner_uid, elapsed_s, error, created_at "
+                "FROM attestation_log ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "tx_hash": r[1],
+                "coldkey": r[2],
+                "url": r[3],
+                "request_id": r[4],
+                "success": bool(r[5]),
+                "verified": bool(r[6]),
+                "server_name": r[7],
+                "miner_uid": r[8],
+                "elapsed_s": r[9],
+                "error": r[10],
+                "created_at": r[11],
+            }
+            for r in rows
+        ]
+
+    def hourly_burn_stats(self, days: int = 7) -> list[dict]:
+        """Aggregate burn collections by hour for the last N days."""
+        cutoff = int(time.time()) - days * 86400
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT (created_at / 3600) * 3600 AS hour, "
+                "COUNT(*) AS count, SUM(amount) AS total_amount "
+                "FROM consumed_burns WHERE created_at >= ? "
+                "GROUP BY hour ORDER BY hour DESC",
+                (cutoff,),
+            ).fetchall()
+        return [
+            {"hour": r[0], "count": r[1], "amount": round(r[2] or 0, 10)}
+            for r in rows
+        ]
 
     def close(self) -> None:
         """Close the database connection."""

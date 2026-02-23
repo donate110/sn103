@@ -135,3 +135,77 @@ class TestRefundCredit:
         ledger.record_burn("0xzero", "5Key", 0.0001)
         ledger.refund_credit("0xzero")  # used goes to 0
         assert ledger.refund_credit("0xzero") is False  # Can't go below 0
+
+
+class TestAttestationLog:
+    """Tests for attestation request logging."""
+
+    def test_log_and_retrieve(self, ledger: BurnLedger) -> None:
+        ledger.log_attestation(
+            tx_hash="0xabc", coldkey="5Key", url="https://example.com",
+            request_id="req-1", success=True, verified=True,
+            server_name="example.com", miner_uid=5, elapsed_s=1.23,
+        )
+        rows = ledger.recent_attestations(limit=10)
+        assert len(rows) == 1
+        assert rows[0]["tx_hash"] == "0xabc"
+        assert rows[0]["url"] == "https://example.com"
+        assert rows[0]["success"] is True
+        assert rows[0]["verified"] is True
+        assert rows[0]["miner_uid"] == 5
+        assert rows[0]["elapsed_s"] == 1.23
+
+    def test_recent_ordering(self, ledger: BurnLedger) -> None:
+        """Newest attestations come first."""
+        import time
+        ledger.log_attestation(
+            tx_hash="0x1", coldkey="5K", url="https://a.com",
+            request_id="r1", success=True, verified=True,
+        )
+        time.sleep(0.01)
+        ledger.log_attestation(
+            tx_hash="0x2", coldkey="5K", url="https://b.com",
+            request_id="r2", success=False, verified=False, error="timeout",
+        )
+        rows = ledger.recent_attestations(limit=10)
+        assert len(rows) == 2
+        assert rows[0]["tx_hash"] == "0x2"
+        assert rows[1]["tx_hash"] == "0x1"
+
+    def test_limit_respected(self, ledger: BurnLedger) -> None:
+        for i in range(10):
+            ledger.log_attestation(
+                tx_hash=f"0x{i}", coldkey="5K", url=f"https://{i}.com",
+                request_id=f"r{i}", success=True, verified=True,
+            )
+        rows = ledger.recent_attestations(limit=3)
+        assert len(rows) == 3
+
+    def test_failed_attestation(self, ledger: BurnLedger) -> None:
+        ledger.log_attestation(
+            tx_hash="0xfail", coldkey="5K", url="https://fail.com",
+            request_id="rf", success=False, verified=False,
+            error="Miner unreachable",
+        )
+        rows = ledger.recent_attestations()
+        assert rows[0]["success"] is False
+        assert rows[0]["error"] == "Miner unreachable"
+
+
+class TestHourlyBurnStats:
+    """Tests for hourly burn aggregation."""
+
+    def test_empty(self, ledger: BurnLedger) -> None:
+        assert ledger.hourly_burn_stats() == []
+
+    def test_aggregation(self, ledger: BurnLedger) -> None:
+        """Burns in the same hour are grouped together."""
+        import time
+        now = int(time.time())
+        # Insert 3 burns with current timestamp (same hour)
+        for i in range(3):
+            ledger.record_burn(f"0xh{i}", "5K", 0.0001)
+        stats = ledger.hourly_burn_stats(days=1)
+        assert len(stats) == 1
+        assert stats[0]["count"] == 3
+        assert abs(stats[0]["amount"] - 0.0003) < 1e-9
