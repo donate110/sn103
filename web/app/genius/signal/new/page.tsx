@@ -1388,6 +1388,11 @@ export default function CreateSignal() {
           <p className="text-xs text-slate-400">
             {step === "committing" ? "Typically 10\u201330 seconds" : "A few seconds"}
           </p>
+          {step === "committing" && (
+            <p className="text-xs text-slate-400 mt-2">
+              Your wallet will ask you to sign a message. This is free (no gas cost) and just derives your encryption key. It does not send any funds.
+            </p>
+          )}
         </SecretModal>
 
         {/* Collateral check — genius needs enough to cover SLA */}
