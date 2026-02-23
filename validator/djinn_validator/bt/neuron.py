@@ -144,13 +144,16 @@ class DjinnValidator:
         if self.subtensor and self.metagraph:
             import concurrent.futures
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(self.metagraph.sync, subtensor=self.subtensor)
-                try:
-                    future.result(timeout=timeout)
-                except concurrent.futures.TimeoutError:
-                    log.warning("metagraph_sync_timeout", timeout_s=timeout)
-                    return
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = pool.submit(self.metagraph.sync, subtensor=self.subtensor)
+            try:
+                future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                log.warning("metagraph_sync_timeout", timeout_s=timeout)
+                # Don't wait for the thread — let it dangle and die
+                pool.shutdown(wait=False, cancel_futures=True)
+                return
+            pool.shutdown(wait=False)
             log.debug("metagraph_synced", n=self._safe_item(self.metagraph.n))
 
     def set_weights(self, weights: dict[int, float]) -> bool:
