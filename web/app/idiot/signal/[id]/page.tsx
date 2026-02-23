@@ -740,6 +740,7 @@ export default function PurchaseSignal() {
                     const remaining = signal.maxNotional > 0n ? Number(signal.maxNotional - notionalFilled) / 1e6 : 0;
                     const maxVal = signal.maxNotional > 0n ? remaining : undefined;
                     const hasRange = maxVal !== undefined && maxVal > minVal;
+                    const isFull = signal.maxNotional > 0n && notionalFilled >= signal.maxNotional;
                     return (
                       <>
                         {hasRange && (
@@ -752,18 +753,54 @@ export default function PurchaseSignal() {
                               value={notional || minVal}
                               onChange={(e) => setNotional(e.target.value)}
                               className="w-full h-2 bg-slate-200 rounded-full appearance-none cursor-pointer accent-idiot-500"
-                              disabled={signal.maxNotional > 0n && notionalFilled >= signal.maxNotional}
+                              disabled={isFull}
                             />
-                            <div className="flex justify-between text-[11px] text-slate-400 mt-1">
-                              <button type="button" className="hover:text-idiot-500 transition-colors" onClick={() => setNotional(String(minVal))}>
-                                ${minVal.toFixed(2)}
-                              </button>
-                              <button type="button" className="hover:text-idiot-500 transition-colors" onClick={() => setNotional(String(maxVal))}>
-                                ${maxVal.toFixed(2)}
-                              </button>
-                            </div>
                           </div>
                         )}
+                        <div className="flex gap-2 mb-2">
+                          {minVal > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setNotional(String(minVal))}
+                              disabled={isFull}
+                              className={`flex-1 rounded-lg border py-1.5 text-xs font-medium transition-colors ${
+                                notional === String(minVal)
+                                  ? "border-idiot-300 bg-idiot-50 text-idiot-700"
+                                  : "border-slate-200 text-slate-500 hover:border-idiot-300 hover:text-idiot-600"
+                              }`}
+                            >
+                              Min ${minVal.toFixed(2)}
+                            </button>
+                          )}
+                          {maxVal !== undefined && maxVal !== minVal && (
+                            <button
+                              type="button"
+                              onClick={() => setNotional(String(maxVal))}
+                              disabled={isFull}
+                              className={`flex-1 rounded-lg border py-1.5 text-xs font-medium transition-colors ${
+                                notional === String(maxVal)
+                                  ? "border-idiot-300 bg-idiot-50 text-idiot-700"
+                                  : "border-slate-200 text-slate-500 hover:border-idiot-300 hover:text-idiot-600"
+                              }`}
+                            >
+                              Max ${maxVal.toFixed(2)}
+                            </button>
+                          )}
+                          {maxVal !== undefined && maxVal === minVal && (
+                            <button
+                              type="button"
+                              onClick={() => setNotional(String(maxVal))}
+                              disabled={isFull}
+                              className={`flex-1 rounded-lg border py-1.5 text-xs font-medium transition-colors ${
+                                notional === String(maxVal)
+                                  ? "border-idiot-300 bg-idiot-50 text-idiot-700"
+                                  : "border-slate-200 text-slate-500 hover:border-idiot-300 hover:text-idiot-600"
+                              }`}
+                            >
+                              ${maxVal.toFixed(2)} (fixed)
+                            </button>
+                          )}
+                        </div>
                         <input
                           id="notional"
                           type="number"
@@ -775,7 +812,7 @@ export default function PurchaseSignal() {
                           max={maxVal}
                           className="input"
                           required
-                          disabled={signal.maxNotional > 0n && notionalFilled >= signal.maxNotional}
+                          disabled={isFull}
                         />
                         <p className="text-xs text-slate-500 mt-1">
                           Your notional amount. This determines the signal fee and the Genius&apos;s collateral commitment.
