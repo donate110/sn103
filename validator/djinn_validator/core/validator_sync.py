@@ -21,6 +21,10 @@ log = structlog.get_logger()
 # Timeout for querying a peer's /v1/identity endpoint
 _IDENTITY_TIMEOUT = 5.0
 
+# Minimum alpha stake to be considered a real validator (filters noise from
+# neurons that happen to have validator permits but aren't running Djinn)
+_MIN_STAKE_ALPHA = 1000
+
 
 class ValidatorSetSyncer:
     """Discovers peer validators and proposes on-chain set changes."""
@@ -103,6 +107,10 @@ class ValidatorSetSyncer:
                     permit.item() if hasattr(permit, "item") else permit
                 )
                 if not is_validator:
+                    continue
+
+                stake = DjinnValidator._safe_item(metagraph.S[uid])
+                if stake < _MIN_STAKE_ALPHA:
                     continue
 
                 axon = metagraph.axons[uid]
