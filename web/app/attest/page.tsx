@@ -269,6 +269,7 @@ export default function AttestPage() {
             <span>
               <strong>Burn alpha tokens.</strong> Transfer <strong>{COST_PER_ATTEST} TAO</strong> per page to the burn address below from your Bittensor wallet.
               For multiple pages, send a single larger transfer (e.g., 0.0013 TAO for 13 pages).
+              <strong className="text-amber-600"> Burns must be recent — within the last 300 blocks (~50 minutes).</strong>
             </span>
           </li>
           <li className="flex gap-3">

@@ -259,7 +259,7 @@ export default function GeniusSignalDetail() {
         ) : (
           <div className="space-y-2">
             {signal.decoyLines.map((raw, i) => {
-              const isReal = savedData?.realIndex === i;
+              const isReal = savedData?.realIndex === i + 1;
               const structured = parseLine(raw);
               return (
                 <div
