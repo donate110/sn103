@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
 import QualityScore from "@/components/QualityScore";
-import { useCollateral, useDepositCollateral, useWithdrawCollateral, useWalletUsdcBalance, useEarlyExit, humanizeError } from "@/lib/hooks";
+import { useCollateral, useDepositCollateral, useWithdrawCollateral, useWalletUsdcBalance, useEarlyExit, useCancelSignal, humanizeError } from "@/lib/hooks";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
 import { useAuditHistory } from "@/lib/hooks/useAuditHistory";
 import { useSettledSignals, getSavedSignals } from "@/lib/hooks/useSettledSignals";
@@ -29,6 +29,10 @@ export default function GeniusDashboard() {
     return map;
   }, [address]);
 
+  const { cancelSignal, loading: cancelLoading } = useCancelSignal();
+  const [cancellingAll, setCancellingAll] = useState(false);
+  const [cancelProgress, setCancelProgress] = useState("");
+
   const [showExpired, setShowExpired] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
@@ -51,6 +55,31 @@ export default function GeniusDashboard() {
       refreshWalletUsdc();
     } catch (err) {
       setTxError(humanizeError(err, "Deposit failed"));
+    }
+  };
+
+  const handleCancelAll = async () => {
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    const active = mySignals.filter((s) => s.expiresAt > now);
+    if (active.length === 0) return;
+    setCancellingAll(true);
+    setTxError(null);
+    setTxSuccess(null);
+    let cancelled = 0;
+    for (const signal of active) {
+      try {
+        setCancelProgress(`Cancelling ${cancelled + 1} of ${active.length}...`);
+        await cancelSignal(BigInt(signal.signalId));
+        cancelled++;
+      } catch (err) {
+        setTxError(humanizeError(err, `Failed to cancel signal ${signal.signalId.slice(0, 8)}...`));
+        break;
+      }
+    }
+    setCancellingAll(false);
+    setCancelProgress("");
+    if (cancelled > 0) {
+      setTxSuccess(`Cancelled ${cancelled} signal${cancelled !== 1 ? "s" : ""}`);
     }
   };
 
@@ -177,6 +206,16 @@ export default function GeniusDashboard() {
                 </h2>
                 {!signalsLoading && mySignals.length > 0 && (
                   <div className="flex items-center gap-3">
+                    {activeSignals.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleCancelAll}
+                        disabled={cancellingAll || cancelLoading}
+                        className="text-xs text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
+                      >
+                        {cancellingAll ? cancelProgress : "Cancel All"}
+                      </button>
+                    )}
                     <span className="text-xs text-slate-500">
                       {activeSignals.length} active
                       {expiredSignals.length > 0 && (
