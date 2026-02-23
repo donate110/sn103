@@ -644,6 +644,7 @@ export default function IdiotDashboard() {
         ) : (
           <div className="space-y-3">
             {sortedSignals.map((s) => {
+              const isExclusive = s.minNotional > 0n && s.minNotional === s.maxNotional;
               const feePerHundred = ((100 * Number(s.maxPriceBps)) / 10_000).toFixed(2);
               const slaPercent = formatBps(s.slaMultiplierBps);
               const expires = new Date(Number(s.expiresAt) * 1000);
@@ -670,6 +671,11 @@ export default function IdiotDashboard() {
                         <span className="text-xs text-slate-400">
                           by {truncateAddress(s.genius)}
                         </span>
+                        {isExclusive && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                            Exclusive
+                          </span>
+                        )}
                         {hasOpenAuditSet && (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-idiot-100 text-idiot-700">
                             Open audit set
