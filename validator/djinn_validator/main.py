@@ -110,7 +110,7 @@ async def epoch_loop(
                         responded=responded,
                     )
 
-            if activity:
+            if activity is not None:
                 responded = sum(
                     1 for uid in miner_uids
                     if scorer.get_or_create(uid, "").health_checks_responded > 0
@@ -177,7 +177,7 @@ async def epoch_loop(
             resolved_ids = await outcome_attestor.resolve_all_pending(hotkey)
             if resolved_ids:
                 log.info("outcomes_resolved", count=len(resolved_ids))
-                if activity:
+                if activity is not None:
                     activity.record(
                         ActivityCategory.OUTCOME_RESOLUTION,
                         f"Resolved {len(resolved_ids)} signal outcomes",
@@ -239,7 +239,7 @@ async def epoch_loop(
                     success = neuron.set_weights(weights)
                     if success:
                         neuron.record_weight_set()
-                        if activity:
+                        if activity is not None:
                             activity.record(
                                 ActivityCategory.WEIGHT_SET,
                                 f"Set weights for {len(weights)} miners",
