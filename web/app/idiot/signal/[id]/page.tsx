@@ -221,13 +221,15 @@ export default function PurchaseSignal() {
       );
 
       if (!anyAvailable) {
-        const failedMsg = availabilityResults
+        const errors = availabilityResults
           .filter((r): r is PromiseRejectedResult => r.status === "rejected")
-          .map((r) => r.reason?.message || "unknown")
-          .join("; ");
-        setStepError(
-          failedMsg || "Signal not currently available. The pick may have gone stale — check back later.",
-        );
+          .map((r) => r.reason?.message || "unknown");
+        // Parse common validator errors into friendly messages
+        const allNotFound = errors.length > 0 && errors.every((e) => e.includes("not found"));
+        const friendlyMsg = allNotFound
+          ? "This signal's encryption keys are not held by any active validator. It may have been created during a network reset and cannot be purchased."
+          : "Signal not currently available. The pick may have gone stale — check back later.";
+        setStepError(friendlyMsg);
         setStep("idle");
         return;
       }
