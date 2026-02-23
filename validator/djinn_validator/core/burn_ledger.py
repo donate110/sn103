@@ -49,6 +49,19 @@ class BurnLedger:
                 created_at     INTEGER NOT NULL
             )
         """)
+        # Migrate old schema: add total_credits/used_credits if missing
+        cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(consumed_burns)")
+        }
+        if "total_credits" not in cols:
+            self._conn.execute(
+                "ALTER TABLE consumed_burns ADD COLUMN total_credits INTEGER NOT NULL DEFAULT 1"
+            )
+        if "used_credits" not in cols:
+            self._conn.execute(
+                "ALTER TABLE consumed_burns ADD COLUMN used_credits INTEGER NOT NULL DEFAULT 0"
+            )
         self._conn.commit()
 
     def is_consumed(self, tx_hash: str) -> bool:
