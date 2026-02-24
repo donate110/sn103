@@ -35,6 +35,7 @@ from djinn_validator.core.mpc_audit import batch_settle_audit_set
 from djinn_validator.core.scoring import MinerScorer
 from djinn_validator.core.shares import ShareStore
 from djinn_validator.core.validator_sync import ValidatorSetSyncer
+from djinn_validator.utils.watchtower import watch_loop as watchtower_loop
 
 
 def _sanitize_url(url: str) -> str:
@@ -416,10 +417,11 @@ async def async_main() -> None:
         log_format=os.getenv("LOG_FORMAT", "console"),
     )
 
-    # Run API server, epoch loop, MPC cleanup, and validator sync concurrently
+    # Run API server, epoch loop, MPC cleanup, watchtower, and validator sync concurrently
     running_tasks = [
         asyncio.create_task(run_server(app, config.api_host, config.api_port)),
         asyncio.create_task(mpc_cleanup_loop(mpc_coordinator)),
+        asyncio.create_task(watchtower_loop(package_dir=Path(__file__).resolve().parent.parent)),
     ]
     if bt_ok:
         running_tasks.append(asyncio.create_task(

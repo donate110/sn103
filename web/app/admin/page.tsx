@@ -32,18 +32,21 @@ interface ValidatorNode {
   uid: number;
   ip: string;
   port: number;
+  hotkey?: string;
 }
 
 interface MinerNode {
   uid: number;
   ip: string;
   port: number;
+  hotkey?: string;
 }
 
 interface ValidatorHealth {
   uid: number;
   ip: string;
   port: number;
+  hotkey?: string;
   status: string;
   version: string;
   shares_held: number;
@@ -56,12 +59,20 @@ interface MinerHealth {
   uid: number;
   ip: string;
   port: number;
+  hotkey?: string;
   status: string;
   version: string;
   odds_api_connected: boolean;
   bt_connected: boolean;
   uptime_seconds: number;
   error?: string;
+}
+
+function truncateHotkey(hotkey?: string): string {
+  if (!hotkey) return "-";
+  const h = hotkey.startsWith("0x") ? hotkey.slice(2) : hotkey;
+  if (h.length <= 12) return `0x${h}`;
+  return `0x${h.slice(0, 6)}...${h.slice(-6)}`;
 }
 
 interface NetworkEvent {
@@ -390,6 +401,7 @@ export default function AdminDashboard() {
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">UID</th>
+                    <th className="px-4 py-3 text-left font-medium">Hotkey</th>
                     <th className="px-4 py-3 text-left font-medium">IP</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Version</th>
@@ -401,7 +413,7 @@ export default function AdminDashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {validators.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
                         No validators discovered
                       </td>
                     </tr>
@@ -409,6 +421,7 @@ export default function AdminDashboard() {
                   {validators.map((v) => (
                     <tr key={v.uid} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-mono text-slate-700">{v.uid}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-400" title={v.hotkey || ""}>{truncateHotkey(v.hotkey)}</td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{v.ip}:{v.port}</td>
                       <td className="px-4 py-3">
                         {v.error ? (
@@ -460,6 +473,7 @@ export default function AdminDashboard() {
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">UID</th>
+                    <th className="px-4 py-3 text-left font-medium">Hotkey</th>
                     <th className="px-4 py-3 text-left font-medium">IP</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Version</th>
@@ -471,7 +485,7 @@ export default function AdminDashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {miners.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
                         No miners discovered
                       </td>
                     </tr>
@@ -479,6 +493,7 @@ export default function AdminDashboard() {
                   {miners.map((m) => (
                     <tr key={m.uid} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-mono text-slate-700">{m.uid}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-400" title={m.hotkey || ""}>{truncateHotkey(m.hotkey)}</td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.ip}:{m.port}</td>
                       <td className="px-4 py-3">
                         {m.error ? (
@@ -1404,14 +1419,14 @@ async function fetchValidatorHealth(): Promise<ValidatorHealth[]> {
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
-        return { ...data, uid: v.uid, ip: v.ip, port: v.port } as ValidatorHealth;
+        return { ...data, uid: v.uid, ip: v.ip, port: v.port, hotkey: v.hotkey } as ValidatorHealth;
       }),
     );
 
     return results.map((r, i) =>
       r.status === "fulfilled"
         ? r.value
-        : { uid: validators[i].uid, ip: validators[i].ip, port: validators[i].port, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, error: String((r as PromiseRejectedResult).reason) },
+        : { uid: validators[i].uid, ip: validators[i].ip, port: validators[i].port, hotkey: validators[i].hotkey, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, error: String((r as PromiseRejectedResult).reason) },
     );
   } catch {
     return [];
@@ -1531,14 +1546,14 @@ async function fetchMinerHealth(): Promise<MinerHealth[]> {
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
-        return { ...data, uid: m.uid, ip: m.ip, port: m.port } as MinerHealth;
+        return { ...data, uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey } as MinerHealth;
       }),
     );
 
     return results.map((r, i) =>
       r.status === "fulfilled"
         ? r.value
-        : { uid: miners[i].uid, ip: miners[i].ip, port: miners[i].port, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
+        : { uid: miners[i].uid, ip: miners[i].ip, port: miners[i].port, hotkey: miners[i].hotkey, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
     );
   } catch {
     return [];

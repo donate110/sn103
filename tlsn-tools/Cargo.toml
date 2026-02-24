@@ -13,6 +13,10 @@ path = "src/bin/prover.rs"
 name = "djinn-tlsn-verifier"
 path = "src/bin/verifier.rs"
 
+[[bin]]
+name = "djinn-tlsn-notary"
+path = "src/bin/notary.rs"
+
 [dependencies]
 tlsn = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.14" }
 tlsn-formats = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.14" }
@@ -33,3 +37,4 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "
 tokio-util = { version = "0.7", features = ["compat"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+webpki-root-certs = "1"

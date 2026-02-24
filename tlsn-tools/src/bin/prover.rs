@@ -39,6 +39,7 @@ use tlsn::{
     connection::{HandshakeData, ServerName},
     prover::ProverOutput,
     transcript::TranscriptCommitConfig,
+    webpki::{CertificateDer, RootCertStore},
     Session,
 };
 use tlsn_formats::http::{DefaultHttpCommitter, HttpCommit, HttpTranscript};
@@ -126,10 +127,17 @@ async fn main() -> Result<()> {
     // Open TCP connection to the target server.
     let client_socket = tokio::net::TcpStream::connect((host.as_str(), port)).await?;
 
+    // Load Mozilla's root CA bundle for verifying the target server's certificate.
+    let roots: Vec<CertificateDer> = webpki_root_certs::TLS_SERVER_ROOT_CERTS
+        .iter()
+        .map(|cert| CertificateDer(cert.as_ref().to_vec()))
+        .collect();
+
     // Bind prover to the server connection.
     let (tls_connection, prover_fut) = prover.connect(
         TlsClientConfig::builder()
             .server_name(ServerName::Dns(host.clone().try_into()?))
+            .root_store(RootCertStore { roots })
             .build()?,
         client_socket.compat(),
     ).await?;

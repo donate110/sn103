@@ -27,6 +27,7 @@ from djinn_miner.core.checker import LineChecker
 from djinn_miner.core.health import HealthTracker
 from djinn_miner.core.proof import ProofGenerator, SessionCapture
 from djinn_miner.data.odds_api import OddsApiClient
+from djinn_miner.utils.watchtower import watch_loop as watchtower_loop
 
 log = structlog.get_logger()
 
@@ -166,8 +167,12 @@ async def async_main() -> None:
         log_format=os.getenv("LOG_FORMAT", "console"),
     )
 
-    # Run API server and BT sync loop concurrently
-    running_tasks = [asyncio.create_task(run_server(app, config.api_host, config.api_port))]
+    # Run API server, BT sync loop, and watchtower concurrently
+    from pathlib import Path
+    running_tasks = [
+        asyncio.create_task(run_server(app, config.api_host, config.api_port)),
+        asyncio.create_task(watchtower_loop(package_dir=Path(__file__).resolve().parent.parent)),
+    ]
     if bt_ok:
         running_tasks.append(asyncio.create_task(bt_sync_loop(neuron, health_tracker)))
 

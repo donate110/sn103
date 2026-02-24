@@ -562,19 +562,43 @@ async def _request_and_verify_proof(
         if proof_data.get("status") != "submitted" and proof_data.get("status") != "verified":
             return True, False
 
-        # Attempt verification using TLSNotary verifier if available
-        proof_hash = proof_data.get("proof_hash", "")
-        if proof_hash:
+        # Extract and verify the TLSNotary presentation bytes if present
+        proof_bytes = None
+        message = proof_data.get("message", "")
+        if message:
             try:
-                from djinn_validator.core import tlsn as tlsn_verifier
-                if hasattr(tlsn_verifier, "is_available") and not tlsn_verifier.is_available():
-                    log.debug("tlsn_verifier_unavailable", uid=uid)
-                    return True, False  # Proof submitted but can't verify
-            except ImportError:
-                log.debug("tlsn_verifier_not_installed", uid=uid)
-                return True, False  # Proof submitted but can't verify
+                meta = json.loads(message)
+                if meta.get("type") == "tlsnotary" and meta.get("presentation"):
+                    import base64
+                    proof_bytes = base64.b64decode(meta["presentation"])
+            except (json.JSONDecodeError, ValueError):
+                pass
 
-        return True, True  # Proof submitted and verified
+        if proof_bytes is None:
+            # No TLSNotary presentation — proof submitted but not verifiable
+            return True, False
+
+        try:
+            from djinn_validator.core import tlsn as tlsn_verifier
+            if not tlsn_verifier.is_available():
+                log.debug("tlsn_verifier_unavailable", uid=uid)
+                return True, False
+            verify_result = await asyncio.wait_for(
+                tlsn_verifier.verify_proof(proof_bytes),
+                timeout=30.0,
+            )
+            if not verify_result.verified:
+                log.debug("proof_verification_failed", uid=uid, error=verify_result.error)
+            return True, verify_result.verified
+        except ImportError:
+            log.debug("tlsn_verifier_not_installed", uid=uid)
+            return True, False
+        except TimeoutError:
+            log.debug("proof_verification_timeout", uid=uid)
+            return True, False
+        except Exception as e:
+            log.debug("proof_verification_error", uid=uid, err=str(e))
+            return True, False
 
     except httpx.HTTPError as e:
         log.debug("proof_request_unreachable", uid=uid, err=str(e))
