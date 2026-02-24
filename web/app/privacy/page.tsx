@@ -38,9 +38,9 @@ export default function Privacy() {
           purchases to any wager placed at any sportsbook.
         </li>
         <li>
-          <strong>Individual signal outcomes:</strong> Audit settlements use zero-knowledge
-          proofs. The smart contracts verify aggregate Quality Scores without learning
-          which signals were favorable or unfavorable.
+          <strong>Individual signal outcomes:</strong> Audit settlements verify aggregate
+          Quality Scores on-chain without revealing which individual signals were
+          favorable or unfavorable.
         </li>
       </ul>
 
@@ -58,7 +58,7 @@ export default function Privacy() {
         <li>Signal metadata (sport, pricing parameters, expiration, decoy lines)</li>
         <li>USDC deposit and withdrawal transactions</li>
         <li>Audit results and Quality Scores</li>
-        <li>ZK proof verification records</li>
+        <li>Audit results and settlement transactions</li>
       </ul>
       <p>
         This data is inherent to blockchain-based protocols and cannot be deleted.

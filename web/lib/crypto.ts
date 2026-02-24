@@ -8,7 +8,7 @@
  */
 
 // ---------------------------------------------------------------------------
-// BN254 scalar field prime (same as circom + validator)
+// BN254 scalar field prime (same as validator Shamir implementation)
 // ---------------------------------------------------------------------------
 
 export const BN254_PRIME =
@@ -344,7 +344,7 @@ export async function deriveMasterSeedTyped(
 /**
  * Derive a per-signal AES key from the master seed.
  * Pure function — no wallet interaction needed.
- * Returns a 32-byte key in the BN254 field (safe for Shamir + ZK circuits).
+ * Returns a 32-byte key in the BN254 field (safe for Shamir secret sharing).
  */
 export async function deriveSignalKey(
   masterSeed: Uint8Array,

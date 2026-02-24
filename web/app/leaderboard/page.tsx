@@ -251,8 +251,8 @@ export default function Leaderboard() {
             </li>
           </ul>
           <p>
-            After every 10 signals between a Genius-Idiot pair, a ZK audit
-            verifies the Quality Score on-chain. If the score is negative, the
+            After every 10 signals between a Genius-Idiot pair, a validator
+            audit verifies the Quality Score on-chain. If the score is negative, the
             Genius&apos;s collateral is slashed: the Idiot receives a USDC refund
             (up to fees paid) plus Djinn Credits for excess damages.
           </p>

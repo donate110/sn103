@@ -100,7 +100,7 @@ export default function About() {
             </div>
             <h3 className="font-semibold text-slate-900 mb-2">Audit & Settle</h3>
             <p className="text-sm text-slate-500">
-              After 10 signals, a ZK audit computes the Quality Score. Positive =
+              After 10 signals, a validator audit computes the Quality Score. Positive =
               Genius keeps fees. Negative = collateral slashed, credits issued.
             </p>
           </div>
@@ -164,7 +164,7 @@ export default function About() {
                 <svg className="w-5 h-5 text-idiot-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
-                Quality Scores are ZK-proven &mdash; no one can fake their record
+                Quality Scores are validator-audited &mdash; no one can fake their record
               </li>
             </ul>
           </div>
@@ -187,7 +187,7 @@ export default function About() {
             { step: "Reveal", desc: "Shamir key shares released to buyer" },
             { step: "Attest", desc: "Validators independently verify game outcomes" },
             { step: "Consensus", desc: "2/3+ validator agreement required" },
-            { step: "ZK Audit", desc: "Quality Score proven in zero knowledge" },
+            { step: "Audit", desc: "Validator consensus on Quality Score" },
             { step: "Settle", desc: "USDC distributed based on performance" },
           ].map(({ step, desc }) => (
             <div key={step} className="card !p-4">
