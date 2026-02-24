@@ -151,6 +151,7 @@ async def async_main() -> None:
         health_tracker=health_tracker,
         rate_limit_capacity=config.rate_limit_capacity,
         rate_limit_rate=config.rate_limit_rate,
+        neuron=neuron if bt_ok else None,
     )
 
     log.info(

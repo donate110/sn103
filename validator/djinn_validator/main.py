@@ -137,7 +137,7 @@ async def epoch_loop(
                             "port": axon.get("port", 0),
                         })
                     try:
-                        challenged = await challenge_miners(scorer, miner_axons, espn_client=espn_client)
+                        challenged = await challenge_miners(scorer, miner_axons, espn_client=espn_client, wallet=neuron.wallet)
                         if activity and challenged:
                             activity.record(
                                 ActivityCategory.CHALLENGE_ROUND,
@@ -159,7 +159,7 @@ async def epoch_loop(
                         "port": axon.get("port", 0),
                     })
                 try:
-                    attest_count = await challenge_miners_attestation(scorer, miner_axons)
+                    attest_count = await challenge_miners_attestation(scorer, miner_axons, wallet=neuron.wallet)
                     if activity and attest_count:
                         activity.record(
                             ActivityCategory.ATTESTATION_CHALLENGE,

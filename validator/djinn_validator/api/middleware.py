@@ -366,6 +366,42 @@ async def validate_signed_request(
     return hotkey
 
 
+def create_signed_headers(
+    endpoint: str,
+    body: bytes,
+    wallet: object,
+) -> dict[str, str]:
+    """Create signed authentication headers for outbound requests to miners.
+
+    Uses the validator's hotkey to sign the request so miners can verify
+    the caller is a registered validator.
+
+    Args:
+        endpoint: The URL path (e.g. "/v1/check")
+        body: The raw request body bytes
+        wallet: A bittensor Wallet object with a hotkey keypair
+
+    Returns:
+        Dict of headers: X-Hotkey, X-Signature, X-Timestamp, X-Nonce
+    """
+    import uuid
+
+    timestamp = int(time.time())
+    nonce = uuid.uuid4().hex
+    body_hash = hashlib.sha256(body).hexdigest()
+    message = create_signature_message(endpoint, body_hash, timestamp, nonce)
+
+    hotkey_ss58 = wallet.hotkey.ss58_address
+    signature = wallet.hotkey.sign(message).hex()
+
+    return {
+        "X-Hotkey": hotkey_ss58,
+        "X-Signature": signature,
+        "X-Timestamp": str(timestamp),
+        "X-Nonce": nonce,
+    }
+
+
 def get_cors_origins(env_value: str = "", bt_network: str = "") -> list[str]:
     """Parse CORS origins from environment variable.
 

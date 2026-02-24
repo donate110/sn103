@@ -24,6 +24,7 @@ from djinn_miner.api.middleware import (
     RateLimiter,
     RateLimitMiddleware,
     RequestIdMiddleware,
+    ValidatorAuthMiddleware,
     get_cors_origins,
 )
 from djinn_miner.api.models import (
@@ -38,6 +39,7 @@ from djinn_miner.api.models import (
 )
 
 if TYPE_CHECKING:
+    from djinn_miner.bt.neuron import DjinnMiner
     from djinn_miner.core.checker import LineChecker
     from djinn_miner.core.health import HealthTracker
     from djinn_miner.core.proof import ProofGenerator
@@ -51,6 +53,7 @@ def create_app(
     health_tracker: HealthTracker,
     rate_limit_capacity: int = 30,
     rate_limit_rate: int = 5,
+    neuron: DjinnMiner | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with all routes wired."""
 
@@ -103,6 +106,9 @@ def create_app(
         return await call_next(request)
 
     app.add_middleware(RateLimitMiddleware, limiter=RateLimiter(capacity=rate_limit_capacity, rate=rate_limit_rate))
+
+    # Validator authentication (runs after rate limiting, before route handlers)
+    app.add_middleware(ValidatorAuthMiddleware, neuron=neuron)
 
     # Request ID tracing (outermost — must be added last)
     app.add_middleware(RequestIdMiddleware)

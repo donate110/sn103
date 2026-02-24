@@ -16,10 +16,11 @@ IDs) provide absolute ground truth. TLSNotary proofs target outliers.
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
@@ -200,11 +201,31 @@ def _generate_plausible_lines(game: ESPNGame) -> list[tuple[str, str, float | No
     return lines
 
 
+def _sign_miner_request(
+    endpoint: str,
+    body: bytes,
+    wallet: Any | None,
+) -> dict[str, str]:
+    """Create signed auth headers for an outbound request to a miner.
+
+    Returns empty dict if wallet is unavailable (dev mode).
+    """
+    if wallet is None:
+        return {}
+    try:
+        from djinn_validator.api.middleware import create_signed_headers
+        return create_signed_headers(endpoint, body, wallet)
+    except Exception as e:
+        log.warning("sign_miner_request_failed", error=str(e))
+        return {}
+
+
 async def _query_one(
     client: httpx.AsyncClient,
     axon: dict,
     check_payload: dict,
     sem: asyncio.Semaphore,
+    wallet: Any | None = None,
 ) -> MinerResponse | None:
     """Phase 1: Send the challenge to one miner and collect raw response.
 
@@ -224,7 +245,13 @@ async def _query_one(
     async with sem:
         start = time.perf_counter()
         try:
-            http_resp = await client.post(check_url, json=check_payload, timeout=10.0)
+            body = json.dumps(check_payload).encode()
+            auth_headers = _sign_miner_request("/v1/check", body, wallet)
+            http_resp = await client.post(
+                check_url, content=body,
+                headers={"Content-Type": "application/json", **auth_headers},
+                timeout=10.0,
+            )
             resp.latency = time.perf_counter() - start
 
             if http_resp.status_code != 200:
@@ -377,6 +404,7 @@ async def challenge_miners(
     scorer: MinerScorer,
     miner_axons: list[dict],
     espn_client: ESPNClient | None = None,
+    wallet: Any | None = None,
 ) -> int:
     """Run a consensus-based scoring challenge against all reachable miners.
 
@@ -439,7 +467,7 @@ async def challenge_miners(
     async with httpx.AsyncClient() as client:
         # ── Phase 1: Query all miners concurrently ──
         raw_results = await asyncio.gather(
-            *[_query_one(client, axon, check_payload, sem) for axon in miner_axons]
+            *[_query_one(client, axon, check_payload, sem, wallet=wallet) for axon in miner_axons]
         )
         responses = [r for r in raw_results if r is not None]
 
@@ -482,6 +510,7 @@ async def challenge_miners(
         for target in proof_targets:
             proof_submitted, proof_valid = await _request_and_verify_proof(
                 client, target.ip, target.port, target.query_id, target.uid,
+                wallet=wallet,
             )
             if proof_submitted:
                 metrics = scorer.get_or_create(target.uid, target.hotkey)
@@ -509,6 +538,7 @@ async def _request_and_verify_proof(
     port: int,
     query_id: str,
     uid: int,
+    wallet: Any | None = None,
 ) -> tuple[bool, bool]:
     """Request a TLSNotary proof from the miner and verify it.
 
@@ -516,9 +546,12 @@ async def _request_and_verify_proof(
     """
     proof_url = f"http://{ip}:{port}/v1/proof"
     try:
+        body = json.dumps({"query_id": query_id}).encode()
+        auth_headers = _sign_miner_request("/v1/proof", body, wallet)
         proof_resp = await client.post(
             proof_url,
-            json={"query_id": query_id},
+            content=body,
+            headers={"Content-Type": "application/json", **auth_headers},
             timeout=30.0,
         )
         if proof_resp.status_code != 200:
@@ -563,6 +596,7 @@ _ATTESTATION_CHALLENGE_URLS = [
 async def challenge_miners_attestation(
     scorer: MinerScorer,
     miner_axons: list[dict],
+    wallet: Any | None = None,
 ) -> int:
     """Run a TLSNotary attestation challenge against all reachable miners.
 
@@ -596,9 +630,12 @@ async def challenge_miners_attestation(
             async with sem:
                 start = time.perf_counter()
                 try:
+                    body = json.dumps({"url": url, "request_id": request_id}).encode()
+                    auth_headers = _sign_miner_request("/v1/attest", body, wallet)
                     resp = await client.post(
                         miner_url,
-                        json={"url": url, "request_id": request_id},
+                        content=body,
+                        headers={"Content-Type": "application/json", **auth_headers},
                         timeout=120.0,
                     )
                     latency = time.perf_counter() - start

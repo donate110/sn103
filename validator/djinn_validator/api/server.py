@@ -800,11 +800,18 @@ def create_app(
             miner_uid=selected["uid"],
         )
 
-        # Dispatch to miner (shared client for connection reuse)
+        # Dispatch to miner (shared client for connection reuse, signed request)
         try:
+            import json as _json
+            _body = _json.dumps({"url": req.url, "request_id": req.request_id}).encode()
+            _auth_hdrs: dict[str, str] = {}
+            if neuron and neuron.wallet:
+                from djinn_validator.api.middleware import create_signed_headers
+                _auth_hdrs = create_signed_headers("/v1/attest", _body, neuron.wallet)
             resp = await _attest_client.post(
                 miner_url,
-                json={"url": req.url, "request_id": req.request_id},
+                content=_body,
+                headers={"Content-Type": "application/json", **_auth_hdrs},
                 timeout=120.0,
             )
         except httpx.HTTPError as e:
