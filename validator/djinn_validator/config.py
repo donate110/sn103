@@ -89,6 +89,9 @@ class Config:
     mpc_peer_timeout: float = _float_env("MPC_PEER_TIMEOUT", "10.0")
     mpc_availability_timeout: float = _float_env("MPC_AVAILABILITY_TIMEOUT", "15.0")
 
+    # Fallback miner URL for attestation when no miners on metagraph
+    fallback_miner_url: str = os.getenv("FALLBACK_MINER_URL", "")
+
     # Data directory for SQLite databases (shares, attestations, purchases)
     data_dir: str = os.getenv("DATA_DIR", "data")
 

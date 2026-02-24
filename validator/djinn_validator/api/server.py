@@ -179,6 +179,7 @@ def create_app(
     mpc_availability_timeout: float = 15.0,
     shares_threshold: int = 7,
     attestation_log: AttestationLog | None = None,
+    fallback_miner_url: str | None = None,
     scorer: MinerScorer | None = None,
     activity_buffer: ActivityBuffer | None = None,
     audit_set_store: AuditSetStore | None = None,
@@ -737,6 +738,14 @@ def create_app(
                 except (IndexError, KeyError, AttributeError) as exc:
                     log.warning("attest_axon_lookup_failed", uid=uid, error=str(exc))
 
+        # Fallback: if no miners on the metagraph, use configured miner URL
+        if not miner_axons and fallback_miner_url:
+            miner_axons.append({
+                "uid": -1, "ip": "", "port": 0,
+                "hotkey": "fallback",
+                "_url": fallback_miner_url.rstrip("/") + "/v1/attest",
+            })
+
         if not miner_axons:
             if attestation_log is not None:
                 attestation_log.log_attestation(
@@ -756,7 +765,7 @@ def create_app(
         _attest_miner_idx[0] = idx + 1
         selected = miner_axons[idx]
 
-        miner_url = f"http://{selected['ip']}:{selected['port']}/v1/attest"
+        miner_url = selected.get("_url") or f"http://{selected['ip']}:{selected['port']}/v1/attest"
         log.info(
             "attest_dispatching",
             url=req.url,

@@ -395,6 +395,7 @@ async def async_main() -> None:
         mpc_availability_timeout=config.mpc_availability_timeout,
         shares_threshold=config.shares_threshold,
         attestation_log=attestation_log,
+        fallback_miner_url=config.fallback_miner_url or None,
         scorer=scorer,
         activity_buffer=activity,
         audit_set_store=audit_set_store,
