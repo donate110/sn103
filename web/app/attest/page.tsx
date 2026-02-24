@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface AttestResult {
   request_id: string;
@@ -14,16 +14,7 @@ interface AttestResult {
   error: string | null;
 }
 
-type Status = "idle" | "submitting" | "proving" | "done" | "error";
-
-interface BatchItem {
-  url: string;
-  status: Status;
-  result: AttestResult | null;
-  error: string | null;
-  startedAt?: number;
-  elapsed?: number;
-}
+type Status = "idle" | "proving" | "done" | "error";
 
 function useElapsedTimer(running: boolean) {
   const [elapsed, setElapsed] = useState(0);
@@ -44,40 +35,14 @@ function useElapsedTimer(running: boolean) {
 }
 
 export default function AttestPage() {
-  const [mode, setMode] = useState<"single" | "batch">("single");
   const [url, setUrl] = useState("");
-  const [batchUrls, setBatchUrls] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<AttestResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
-  const [batchRunning, setBatchRunning] = useState(false);
   const [showApi, setShowApi] = useState(false);
   const elapsed = useElapsedTimer(status === "proving");
 
-  const attestSingle = useCallback(
-    async (targetUrl: string): Promise<AttestResult | null> => {
-      const requestId = `attest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const resp = await fetch("/api/attest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: targetUrl,
-          request_id: requestId,
-        }),
-      });
-
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({ detail: "Request failed" }));
-        throw new Error(data.detail || data.error || `Request failed (${resp.status})`);
-      }
-
-      return await resp.json();
-    },
-    [],
-  );
-
-  const handleSingleSubmit = useCallback(
+  const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
       if (!url.startsWith("https://")) {
@@ -90,7 +55,19 @@ export default function AttestPage() {
       setErrorMsg(null);
 
       try {
-        const data = await attestSingle(url);
+        const requestId = `attest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const resp = await fetch("/api/attest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url, request_id: requestId }),
+        });
+
+        if (!resp.ok) {
+          const data = await resp.json().catch(() => ({ detail: "Request failed" }));
+          throw new Error(data.detail || data.error || `Request failed (${resp.status})`);
+        }
+
+        const data = await resp.json();
         setResult(data);
         setStatus("done");
         if (data && !data.success) {
@@ -101,60 +78,7 @@ export default function AttestPage() {
         setStatus("error");
       }
     },
-    [url, attestSingle],
-  );
-
-  const handleBatchSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-
-      const urls = batchUrls
-        .split("\n")
-        .map((u) => u.trim())
-        .filter((u) => u.length > 0);
-
-      if (urls.length === 0) {
-        setErrorMsg("Enter at least one URL");
-        return;
-      }
-
-      const invalid = urls.filter((u) => !u.startsWith("https://"));
-      if (invalid.length > 0) {
-        setErrorMsg(`All URLs must start with https://. Invalid: ${invalid[0]}`);
-        return;
-      }
-
-      setErrorMsg(null);
-      setBatchRunning(true);
-
-      const items: BatchItem[] = urls.map((u) => ({
-        url: u,
-        status: "idle",
-        result: null,
-        error: null,
-      }));
-      setBatchItems([...items]);
-
-      for (let i = 0; i < items.length; i++) {
-        items[i].status = "proving";
-        setBatchItems([...items]);
-
-        try {
-          const data = await attestSingle(items[i].url);
-          items[i].result = data;
-          items[i].status = data?.success ? "done" : "error";
-          items[i].error = data?.success ? null : (data?.error || "Failed");
-        } catch (err) {
-          items[i].status = "error";
-          items[i].error = err instanceof Error ? err.message : "Network error";
-        }
-
-        setBatchItems([...items]);
-      }
-
-      setBatchRunning(false);
-    },
-    [batchUrls, attestSingle],
+    [url],
   );
 
   const handleDownload = useCallback(
@@ -174,10 +98,6 @@ export default function AttestPage() {
     [],
   );
 
-  const parsedBatchCount = batchUrls
-    .split("\n")
-    .filter((u) => u.trim().length > 0).length;
-
   return (
     <div className="max-w-3xl mx-auto">
       <div className="mb-8">
@@ -195,13 +115,13 @@ export default function AttestPage() {
           <li className="flex gap-3">
             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold">1</span>
             <span>
-              <strong>Enter a URL.</strong> Paste any public HTTPS URL you want to prove. For multiple pages, switch to batch mode.
+              <strong>Enter a URL.</strong> Paste any public HTTPS URL you want to prove.
             </span>
           </li>
           <li className="flex gap-3">
             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold">2</span>
             <span>
-              <strong>Wait for the proof.</strong> A miner on Bittensor Subnet 103 generates a TLSNotary proof (30-90 seconds per page). The validator verifies it.
+              <strong>Wait for the proof.</strong> A miner on Bittensor Subnet 103 generates a TLSNotary proof (30-90 seconds). The validator verifies it.
             </span>
           </li>
           <li className="flex gap-3">
@@ -213,91 +133,39 @@ export default function AttestPage() {
         </ol>
       </div>
 
-      {/* Mode toggle */}
-      <div className="flex gap-2 mb-4">
-        <button
-          onClick={() => setMode("single")}
-          className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
-            mode === "single"
-              ? "bg-slate-900 text-white border-slate-900"
-              : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
-          }`}
-        >
-          Single URL
-        </button>
-        <button
-          onClick={() => setMode("batch")}
-          className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
-            mode === "batch"
-              ? "bg-slate-900 text-white border-slate-900"
-              : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
-          }`}
-        >
-          Batch (multiple URLs)
-        </button>
-      </div>
-
       {/* Form */}
       <div className="rounded-lg border border-slate-200 bg-white p-6">
-        <form onSubmit={mode === "single" ? handleSingleSubmit : handleBatchSubmit}>
-          {mode === "single" ? (
-            <>
-              <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="attest-url">
-                URL to attest
-              </label>
-              <input
-                id="attest-url"
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-slate-500 focus:border-slate-500"
-                type="url"
-                placeholder="https://example.com/page"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                required
-                disabled={status === "proving"}
-              />
-              <p className="text-xs text-slate-400 mt-1">Must be an HTTPS URL.</p>
-            </>
-          ) : (
-            <>
-              <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="batch-urls">
-                URLs to attest (one per line)
-              </label>
-              <textarea
-                id="batch-urls"
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-slate-500 focus:border-slate-500"
-                rows={6}
-                placeholder={"https://example.com/page1\nhttps://example.com/page2\nhttps://example.com/page3"}
-                value={batchUrls}
-                onChange={(e) => setBatchUrls(e.target.value)}
-                disabled={batchRunning}
-              />
-              {parsedBatchCount > 0 && (
-                <p className="text-xs text-slate-500 mt-1">
-                  {parsedBatchCount} URL{parsedBatchCount !== 1 ? "s" : ""}
-                </p>
-              )}
-            </>
-          )}
+        <form onSubmit={handleSubmit}>
+          <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="attest-url">
+            URL to attest
+          </label>
+          <input
+            id="attest-url"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-slate-500 focus:border-slate-500"
+            type="url"
+            placeholder="https://example.com/page"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            required
+            disabled={status === "proving"}
+          />
+          <p className="text-xs text-slate-400 mt-1">Must be an HTTPS URL.</p>
 
           <button
             type="submit"
             className="mt-4 w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-6 py-2.5 text-sm font-medium text-white hover:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={
-              status === "proving" ||
-              batchRunning ||
-              (mode === "single" ? !url : parsedBatchCount === 0)
-            }
+            disabled={status === "proving" || !url}
           >
-            {(status === "proving" || batchRunning) ? (
+            {status === "proving" ? (
               <>
                 <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                Generating proof{mode === "batch" ? "s" : ""}... {elapsed > 0 && <span className="tabular-nums">{elapsed}s</span>}
+                Generating proof... {elapsed > 0 && <span className="tabular-nums">{elapsed}s</span>}
               </>
             ) : (
-              <>Attest {mode === "batch" && parsedBatchCount > 0 ? `${parsedBatchCount} URL${parsedBatchCount !== 1 ? "s" : ""}` : ""}</>
+              "Attest"
             )}
           </button>
         </form>
@@ -310,68 +178,9 @@ export default function AttestPage() {
         </div>
       )}
 
-      {/* Single result */}
-      {mode === "single" && result && result.success && (
+      {/* Result */}
+      {result && result.success && (
         <ResultCard result={result} onDownload={handleDownload} />
-      )}
-
-      {/* Batch results */}
-      {mode === "batch" && batchItems.length > 0 && (
-        <div className="mt-6 space-y-3">
-          <h2 className="text-lg font-semibold text-slate-900">
-            Results ({batchItems.filter((i) => i.status === "done").length}/{batchItems.length})
-          </h2>
-          {batchItems.map((item, idx) => (
-            <div
-              key={idx}
-              className={`rounded-lg border p-4 text-sm ${
-                item.status === "done"
-                  ? "border-green-200 bg-green-50"
-                  : item.status === "error"
-                    ? "border-red-200 bg-red-50"
-                    : item.status === "proving"
-                      ? "border-blue-200 bg-blue-50"
-                      : "border-slate-200 bg-white"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                {item.status === "proving" && (
-                  <svg className="animate-spin h-4 w-4 text-blue-600" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                )}
-                {item.status === "done" && (
-                  <span className="text-green-600 font-bold">&#10003;</span>
-                )}
-                {item.status === "error" && (
-                  <span className="text-red-600 font-bold">&#10007;</span>
-                )}
-                {item.status === "idle" && (
-                  <span className="text-slate-400">&#9711;</span>
-                )}
-                <span className="font-mono text-xs break-all flex-1">{item.url}</span>
-                {item.result?.proof_hex && (
-                  <button
-                    onClick={() => handleDownload(item.result!.proof_hex!, item.result!.timestamp)}
-                    className="text-xs text-blue-600 hover:text-blue-800 underline flex-shrink-0"
-                  >
-                    Download
-                  </button>
-                )}
-              </div>
-              {item.error && (
-                <p className="mt-1 text-xs text-red-600 ml-6">{item.error}</p>
-              )}
-              {item.result?.verified && (
-                <p className="mt-1 text-xs text-green-600 ml-6">
-                  Verified &middot; {item.result.server_name} &middot;{" "}
-                  {new Date(item.result.timestamp * 1000).toLocaleString()}
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
       )}
 
       {/* API Documentation (collapsible) */}
@@ -399,16 +208,10 @@ export default function AttestPage() {
   }'`}</pre>
               <p className="text-xs text-slate-400 mt-1">
                 Response includes <code className="bg-slate-100 px-1 rounded">proof_hex</code>,{" "}
+                <code className="bg-slate-100 px-1 rounded">response_body</code>,{" "}
                 <code className="bg-slate-100 px-1 rounded">verified</code>,{" "}
                 <code className="bg-slate-100 px-1 rounded">server_name</code>, and{" "}
                 <code className="bg-slate-100 px-1 rounded">timestamp</code>.
-              </p>
-            </div>
-            <div>
-              <h4 className="font-semibold text-slate-800 mb-1">Batch attestation</h4>
-              <p className="text-slate-500">
-                To attest multiple pages, call <code className="bg-slate-100 px-1 rounded">POST /api/attest</code> once
-                per URL. Each request is processed sequentially by a random miner on Subnet 103.
               </p>
             </div>
           </div>

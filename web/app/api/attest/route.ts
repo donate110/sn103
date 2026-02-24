@@ -93,11 +93,15 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify(sanitizedBody),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
-      const text = await res.text();
-      return new NextResponse(text, {
-        status: res.status,
-        headers: { "Content-Type": "application/json" },
-      });
+      if (res.ok) {
+        const text = await res.text();
+        return new NextResponse(text, {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      // Non-200 = validator can't handle it, try next
+      lastError = `Validator ${i + 1}/${attempts} returned ${res.status}`;
     } catch (err) {
       if (err instanceof DOMException && err.name === "TimeoutError") {
         lastError = `Validator ${i + 1}/${attempts} timed out`;
