@@ -77,6 +77,20 @@ async def generate_proof(
     host = notary_host or NOTARY_HOST
     port = notary_port or NOTARY_PORT
 
+    # Resolve redirects: the prover can't follow them, so we do a HEAD
+    # request first and use the final URL.
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as _rc:
+            head = await _rc.head(url)
+            final_url = str(head.url)
+            if final_url != url:
+                log.info("tlsn_redirect_resolved", original=url, final=final_url)
+                url = final_url
+    except Exception as e:
+        log.debug("tlsn_redirect_check_failed", error=str(e))
+
     # Create output file
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
