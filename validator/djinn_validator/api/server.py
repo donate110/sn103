@@ -982,6 +982,7 @@ def create_app(
             success=True,
             verified=verify_result.verified,
             proof_hex=proof_hex,
+            response_body=verify_result.response_body or None,
             server_name=verify_result.server_name or miner_data.get("server_name"),
             timestamp=miner_data.get("timestamp", 0),
             error=verify_result.error if not verify_result.verified else None,

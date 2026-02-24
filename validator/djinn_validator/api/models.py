@@ -519,6 +519,7 @@ class AttestResponse(BaseModel):
     success: bool
     verified: bool = False
     proof_hex: str | None = Field(default=None, description="TLSNotary presentation bytes (hex)")
+    response_body: str | None = Field(default=None, description="HTTP response body extracted from the verified proof")
     server_name: str | None = None
     timestamp: int = Field(default=0, description="Unix timestamp of attestation")
     error: str | None = None
