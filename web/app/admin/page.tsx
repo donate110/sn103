@@ -160,6 +160,9 @@ export default function AdminDashboard() {
   const [feedback, setFeedback] = useState<FeedbackEntry[]>([]);
   const [feedbackFilter, setFeedbackFilter] = useState<"all" | "open" | "closed">("all");
 
+  // Delegate names: hex hotkey → display name
+  const [delegateNames, setDelegateNames] = useState<Record<string, string>>({});
+
   // Check for existing admin session via server-side cookie verification
   useEffect(() => {
     fetch("/api/admin/auth", { credentials: "same-origin" })
@@ -201,6 +204,7 @@ export default function AdminDashboard() {
       auditsRes,
       attestRes,
       feedbackRes,
+      delegatesRes,
     ] = await Promise.allSettled([
       fetchValidatorHealth(),       // 0
       fetchMinerHealth(),           // 1
@@ -212,6 +216,7 @@ export default function AdminDashboard() {
       fetchRecentAudits(50),        // 7
       fetchAttestationData(),       // 8
       fetchFeedback(feedbackFilter),// 9
+      fetchDelegateNames(),         // 10
     ]);
 
     if (validatorRes.status === "fulfilled") setValidators(validatorRes.value as ValidatorHealth[]);
@@ -239,6 +244,9 @@ export default function AdminDashboard() {
     }
     if (feedbackRes.status === "fulfilled") {
       setFeedback(feedbackRes.value as FeedbackEntry[]);
+    }
+    if (delegatesRes.status === "fulfilled") {
+      setDelegateNames(delegatesRes.value as Record<string, string>);
     }
 
     setLastRefresh(new Date());
@@ -401,7 +409,7 @@ export default function AdminDashboard() {
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">UID</th>
-                    <th className="px-4 py-3 text-left font-medium">Hotkey</th>
+                    <th className="px-4 py-3 text-left font-medium">Name</th>
                     <th className="px-4 py-3 text-left font-medium">IP</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Version</th>
@@ -421,7 +429,13 @@ export default function AdminDashboard() {
                   {validators.map((v) => (
                     <tr key={v.uid} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-mono text-slate-700">{v.uid}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-400" title={v.hotkey || ""}>{truncateHotkey(v.hotkey)}</td>
+                      <td className="px-4 py-3 text-xs" title={v.hotkey || ""}>
+                        {v.hotkey && delegateNames[v.hotkey] ? (
+                          <span className="font-semibold text-slate-700">{delegateNames[v.hotkey]}</span>
+                        ) : (
+                          <span className="font-mono text-slate-400">{truncateHotkey(v.hotkey)}</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{v.ip}:{v.port}</td>
                       <td className="px-4 py-3">
                         {v.error ? (
@@ -473,7 +487,7 @@ export default function AdminDashboard() {
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">UID</th>
-                    <th className="px-4 py-3 text-left font-medium">Hotkey</th>
+                    <th className="px-4 py-3 text-left font-medium">Name</th>
                     <th className="px-4 py-3 text-left font-medium">IP</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Version</th>
@@ -493,7 +507,13 @@ export default function AdminDashboard() {
                   {miners.map((m) => (
                     <tr key={m.uid} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-mono text-slate-700">{m.uid}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-400" title={m.hotkey || ""}>{truncateHotkey(m.hotkey)}</td>
+                      <td className="px-4 py-3 text-xs" title={m.hotkey || ""}>
+                        {m.hotkey && delegateNames[m.hotkey] ? (
+                          <span className="font-semibold text-slate-700">{delegateNames[m.hotkey]}</span>
+                        ) : (
+                          <span className="font-mono text-slate-400">{truncateHotkey(m.hotkey)}</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.ip}:{m.port}</td>
                       <td className="px-4 py-3">
                         {m.error ? (
@@ -1557,5 +1577,15 @@ async function fetchMinerHealth(): Promise<MinerHealth[]> {
     );
   } catch {
     return [];
+  }
+}
+
+async function fetchDelegateNames(): Promise<Record<string, string>> {
+  try {
+    const res = await fetch("/api/delegates", { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return {};
+    return await res.json();
+  } catch {
+    return {};
   }
 }

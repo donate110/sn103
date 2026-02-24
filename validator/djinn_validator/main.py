@@ -35,6 +35,7 @@ from djinn_validator.core.mpc_audit import batch_settle_audit_set
 from djinn_validator.core.scoring import MinerScorer
 from djinn_validator.core.shares import ShareStore
 from djinn_validator.core.validator_sync import ValidatorSetSyncer
+from djinn_validator.core.burn_scanner import burn_scan_loop
 from djinn_validator.utils.watchtower import watch_loop as watchtower_loop
 
 
@@ -426,6 +427,11 @@ async def async_main() -> None:
     if bt_ok:
         running_tasks.append(asyncio.create_task(
             epoch_loop(neuron, scorer, share_store, outcome_attestor, chain_client, activity, audit_set_store, config.bt_burn_fraction)
+        ))
+        # Background burn scanner: pre-register burn transactions so attestation
+        # requests don't need the 300-block on-demand scan
+        running_tasks.append(asyncio.create_task(
+            burn_scan_loop(neuron, burn_ledger, config.attest_burn_address, config.attest_burn_amount)
         ))
         # Validator set sync: discover peers via metagraph, propose on-chain changes
         if chain_client.can_write:

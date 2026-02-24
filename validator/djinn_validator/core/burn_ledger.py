@@ -102,6 +102,15 @@ class BurnLedger:
                 return 0
             return max(0, row[0] - row[1])
 
+    def get_burn_info(self, tx_hash: str) -> tuple[str, float] | None:
+        """Return (coldkey, amount) for a known burn, or None if not found."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT coldkey, amount FROM consumed_burns WHERE tx_hash = ?",
+                (tx_hash,),
+            ).fetchone()
+            return (row[0], row[1]) if row else None
+
     def record_burn(
         self, tx_hash: str, coldkey: str, amount: float, min_amount: float = 0.0001
     ) -> bool:

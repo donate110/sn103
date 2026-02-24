@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import WalletButton from "./WalletButton";
 import ReportErrorModal from "./ReportError";
+import TestnetFaucet from "./TestnetFaucet";
 
 const NAV_LINKS = [
   { href: "/", label: "Home" },
@@ -29,7 +30,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
       {IS_TESTNET && (
         <div className="bg-amber-500 text-white text-center text-xs font-medium py-1.5 px-4">
-          Testnet &mdash; Base Sepolia. Not real money.
+          Testnet &mdash; Base Sepolia. Not real money. <TestnetFaucet />
         </div>
       )}
       <header className="border-b border-slate-200 bg-white/80 backdrop-blur-sm sticky top-0 z-50">

@@ -738,10 +738,16 @@ def create_app(
                     detail="All attestation credits for this burn transaction have been used",
                 )
 
-            # Verify the burn on-chain (only needed on first use of this tx hash)
+            # Verify the burn on-chain (only needed if the background scanner
+            # hasn't pre-registered this tx hash yet)
             actual_amount = attest_burn_amount
             sender = "unknown"
-            if not is_known and neuron:
+            if is_known:
+                # Scanner already verified — retrieve stored sender info
+                burn_info = burn_ledger.get_burn_info(req.burn_tx_hash)
+                if burn_info:
+                    sender, actual_amount = burn_info
+            elif neuron:
                 valid, err_msg, actual_amount, sender = neuron.verify_burn(
                     req.burn_tx_hash, attest_burn_amount, attest_burn_address,
                 )
