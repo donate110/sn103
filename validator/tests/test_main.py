@@ -426,9 +426,6 @@ class TestAsyncMainBtFailure:
         mock_config.rate_limit_rate = 10
         mock_config.mpc_availability_timeout = 15.0
         mock_config.shares_threshold = 7
-        mock_config.attest_burn_amount = 0.0001
-        mock_config.attest_burn_address = "5GrsjiBeCErhUGj339vu5GubTgyJMyZLGQqUFBJAtKrCziU9"
-
         mock_neuron = MagicMock()
         mock_neuron.setup.return_value = False
 

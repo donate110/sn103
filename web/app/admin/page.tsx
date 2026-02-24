@@ -85,8 +85,6 @@ interface NetworkEvent {
 
 interface AttestationEntry {
   id: number;
-  tx_hash: string;
-  coldkey: string;
   url: string;
   request_id: string;
   success: boolean;
@@ -96,12 +94,6 @@ interface AttestationEntry {
   elapsed_s: number | null;
   error: string | null;
   created_at: number;
-}
-
-interface BurnHourStat {
-  hour: number;
-  count: number;
-  amount: number;
 }
 
 interface FeedbackEntry {
@@ -153,8 +145,6 @@ export default function AdminDashboard() {
 
   // Attestations tab data
   const [attestations, setAttestations] = useState<AttestationEntry[]>([]);
-  const [burnStats, setBurnStats] = useState<BurnHourStat[]>([]);
-  const [hideZeroBurns, setHideZeroBurns] = useState(true);
 
   // Feedback tab data
   const [feedback, setFeedback] = useState<FeedbackEntry[]>([]);
@@ -238,9 +228,7 @@ export default function AdminDashboard() {
     if (purchasesRes.status === "fulfilled") setRecentPurchases(purchasesRes.value as SubgraphRecentPurchase[]);
     if (auditsRes.status === "fulfilled") setRecentAudits(auditsRes.value as SubgraphRecentAudit[]);
     if (attestRes.status === "fulfilled") {
-      const ad = attestRes.value as { attestations: AttestationEntry[]; burnStats: BurnHourStat[] };
-      setAttestations(ad.attestations);
-      setBurnStats(ad.burnStats);
+      setAttestations(attestRes.value as AttestationEntry[]);
     }
     if (feedbackRes.status === "fulfilled") {
       setFeedback(feedbackRes.value as FeedbackEntry[]);
@@ -676,9 +664,6 @@ export default function AdminDashboard() {
       {activeTab === "attestations" && (
         <AttestationsTab
           attestations={attestations}
-          burnStats={burnStats}
-          hideZeros={hideZeroBurns}
-          onToggleZeros={() => setHideZeroBurns((h) => !h)}
           loading={loading}
         />
       )}
@@ -898,51 +883,42 @@ function ProtocolActivityTab({
 // Attestations Tab
 // ---------------------------------------------------------------------------
 
-const POLKADOT_EXPLORER = "https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fentrypoint-finney.opentensor.ai%3A443#/explorer/query";
-
 function AttestationsTab({
   attestations,
-  burnStats,
-  hideZeros,
-  onToggleZeros,
   loading,
 }: {
   attestations: AttestationEntry[];
-  burnStats: BurnHourStat[];
-  hideZeros: boolean;
-  onToggleZeros: () => void;
   loading: boolean;
 }) {
   if (loading && attestations.length === 0) {
     return <div className="text-center text-slate-400 py-12">Loading attestation data...</div>;
   }
 
-  const totalTao7d = burnStats.reduce((s, b) => s + b.amount, 0);
-  const totalCount7d = burnStats.reduce((s, b) => s + b.count, 0);
-  const filteredStats = hideZeros ? burnStats.filter((b) => b.count > 0) : burnStats;
+  const successCount = attestations.filter((a) => a.success).length;
+  const verifiedCount = attestations.filter((a) => a.verified).length;
 
   return (
     <div className="space-y-8">
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-4">
-          <div className="text-xs text-cyan-600 font-medium">Total Attestations (7d)</div>
-          <div className="text-2xl font-bold text-cyan-900 mt-1">{totalCount7d}</div>
+          <div className="text-xs text-cyan-600 font-medium">Total Requests</div>
+          <div className="text-2xl font-bold text-cyan-900 mt-1">{attestations.length}</div>
         </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-          <div className="text-xs text-emerald-600 font-medium">TAO Collected (7d)</div>
-          <div className="text-2xl font-bold text-emerald-900 mt-1">{totalTao7d.toFixed(6)}</div>
+          <div className="text-xs text-emerald-600 font-medium">Successful</div>
+          <div className="text-2xl font-bold text-emerald-900 mt-1">{successCount}</div>
         </div>
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-          <div className="text-xs text-blue-600 font-medium">Avg / Day</div>
-          <div className="text-2xl font-bold text-blue-900 mt-1">{(totalCount7d / 7).toFixed(1)}</div>
+          <div className="text-xs text-blue-600 font-medium">Verified</div>
+          <div className="text-2xl font-bold text-blue-900 mt-1">{verifiedCount}</div>
         </div>
         <div className="rounded-xl border border-purple-200 bg-purple-50 p-4">
           <div className="text-xs text-purple-600 font-medium">Success Rate</div>
           <div className="text-2xl font-bold text-purple-900 mt-1">
             {attestations.length > 0
-              ? `${((attestations.filter((a) => a.success).length / attestations.length) * 100).toFixed(0)}%`
-              : "—"}
+              ? `${((successCount / attestations.length) * 100).toFixed(0)}%`
+              : "\u2014"}
           </div>
         </div>
       </div>
@@ -963,12 +939,11 @@ function AttestationsTab({
               <thead>
                 <tr className="bg-slate-50 text-slate-500 text-left">
                   <th className="px-3 py-2 font-medium">Time</th>
-                  <th className="px-3 py-2 font-medium">Sender</th>
                   <th className="px-3 py-2 font-medium">URL</th>
-                  <th className="px-3 py-2 font-medium">Burn TX</th>
                   <th className="px-3 py-2 font-medium">Status</th>
                   <th className="px-3 py-2 font-medium">Verified</th>
                   <th className="px-3 py-2 font-medium">Miner</th>
+                  <th className="px-3 py-2 font-medium">Server</th>
                   <th className="px-3 py-2 font-medium">Latency</th>
                 </tr>
               </thead>
@@ -980,23 +955,9 @@ function AttestationsTab({
                       <td className="px-3 py-2 whitespace-nowrap text-slate-500">
                         {date.toLocaleDateString()} {date.toLocaleTimeString()}
                       </td>
-                      <td className="px-3 py-2 font-mono text-slate-700" title={a.coldkey}>
-                        {a.coldkey.slice(0, 8)}...
-                      </td>
                       <td className="px-3 py-2 max-w-[200px] truncate">
                         <a href={a.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800" title={a.url}>
                           {a.url.replace(/^https?:\/\//, "").slice(0, 40)}
-                        </a>
-                      </td>
-                      <td className="px-3 py-2 font-mono">
-                        <a
-                          href={`${POLKADOT_EXPLORER}/${a.tx_hash}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-500 hover:text-blue-700"
-                          title={a.tx_hash}
-                        >
-                          {a.tx_hash.slice(0, 10)}...
                         </a>
                       </td>
                       <td className="px-3 py-2">
@@ -1014,63 +975,18 @@ function AttestationsTab({
                             <span className="text-red-500" title={a.error || "Not verified"}>&#10007;</span>
                           )
                         ) : (
-                          <span className="text-slate-300">—</span>
+                          <span className="text-slate-300">{"\u2014"}</span>
                         )}
                       </td>
                       <td className="px-3 py-2 text-center text-slate-600">
-                        {a.miner_uid !== null ? `UID ${a.miner_uid}` : "—"}
+                        {a.miner_uid !== null ? `UID ${a.miner_uid}` : "\u2014"}
+                      </td>
+                      <td className="px-3 py-2 text-slate-600">
+                        {a.server_name || "\u2014"}
                       </td>
                       <td className="px-3 py-2 text-right text-slate-600">
-                        {a.elapsed_s !== null ? `${a.elapsed_s}s` : "—"}
+                        {a.elapsed_s !== null ? `${a.elapsed_s}s` : "\u2014"}
                       </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Hourly Burn Stats */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-          <h3 className="text-sm font-medium text-slate-700">
-            Burn Collection (Hourly)
-            <span className="ml-2 text-xs text-slate-400">({filteredStats.length} hours)</span>
-          </h3>
-          <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={hideZeros}
-              onChange={onToggleZeros}
-              className="rounded border-slate-300 text-slate-600 focus:ring-slate-500"
-            />
-            Hide zero hours
-          </label>
-        </div>
-        {filteredStats.length === 0 ? (
-          <div className="px-4 py-8 text-center text-slate-400 text-sm">No burn data</div>
-        ) : (
-          <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-white">
-                <tr className="text-slate-500 text-left">
-                  <th className="px-3 py-2 font-medium">Hour</th>
-                  <th className="px-3 py-2 font-medium text-right">Attestations</th>
-                  <th className="px-3 py-2 font-medium text-right">TAO Collected</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredStats.map((s) => {
-                  const date = new Date(s.hour * 1000);
-                  return (
-                    <tr key={s.hour} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 text-slate-600">
-                        {date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </td>
-                      <td className="px-3 py-2 text-right font-medium text-slate-900">{s.count}</td>
-                      <td className="px-3 py-2 text-right font-mono text-emerald-700">{s.amount.toFixed(6)} TAO</td>
                     </tr>
                   );
                 })}
@@ -1508,34 +1424,22 @@ async function fetchErrorReports(): Promise<{ errors: ErrorReport[]; total: numb
   }
 }
 
-async function fetchAttestationData(): Promise<{ attestations: AttestationEntry[]; burnStats: BurnHourStat[] }> {
+async function fetchAttestationData(): Promise<AttestationEntry[]> {
   try {
     const discoverRes = await fetch("/api/validators/discover");
-    if (!discoverRes.ok) return { attestations: [], burnStats: [] };
+    if (!discoverRes.ok) return [];
     const { validators } = (await discoverRes.json()) as { validators: ValidatorNode[] };
-    if (validators.length === 0) return { attestations: [], burnStats: [] };
+    if (validators.length === 0) return [];
 
     const v = validators[0];
-    const [attRes, statsRes] = await Promise.allSettled([
-      fetch(`/api/validators/${v.uid}/v1/admin/attestations?limit=50`, { signal: AbortSignal.timeout(5000) }),
-      fetch(`/api/validators/${v.uid}/v1/admin/burn-stats?days=7`, { signal: AbortSignal.timeout(5000) }),
-    ]);
-
-    let attestations: AttestationEntry[] = [];
-    let burnStats: BurnHourStat[] = [];
-
-    if (attRes.status === "fulfilled" && attRes.value.ok) {
-      const data = await attRes.value.json();
-      attestations = data.attestations || [];
-    }
-    if (statsRes.status === "fulfilled" && statsRes.value.ok) {
-      const data = await statsRes.value.json();
-      burnStats = data.stats || [];
-    }
-
-    return { attestations, burnStats };
+    const res = await fetch(`/api/validators/${v.uid}/v1/admin/attestations?limit=50`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.attestations || [];
   } catch {
-    return { attestations: [], burnStats: [] };
+    return [];
   }
 }
 

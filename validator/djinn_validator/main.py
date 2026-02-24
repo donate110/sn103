@@ -26,7 +26,7 @@ from djinn_validator.config import Config
 from djinn_validator.core.mpc_coordinator import MPCCoordinator
 from djinn_validator.core.outcomes import OutcomeAttestor
 from djinn_validator.core.purchase import PurchaseOrchestrator
-from djinn_validator.core.burn_ledger import BurnLedger
+from djinn_validator.core.attestation_log import AttestationLog
 from djinn_validator.core.challenges import challenge_miners, challenge_miners_attestation
 from djinn_validator.core.espn import ESPNClient
 from djinn_validator.core.activity import ActivityBuffer, ActivityCategory
@@ -35,7 +35,6 @@ from djinn_validator.core.mpc_audit import batch_settle_audit_set
 from djinn_validator.core.scoring import MinerScorer
 from djinn_validator.core.shares import ShareStore
 from djinn_validator.core.validator_sync import ValidatorSetSyncer
-from djinn_validator.core.burn_scanner import burn_scan_loop
 from djinn_validator.utils.watchtower import watch_loop as watchtower_loop
 
 
@@ -332,13 +331,13 @@ async def async_main() -> None:
     for w in warnings:
         log.warning("config_warning", msg=w)
 
-    # Initialize components — SQLite persistence for key shares and burn ledger
+    # Initialize components — SQLite persistence for key shares and attestation log
     from pathlib import Path
 
     data_dir = Path(config.data_dir).resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
     share_store = ShareStore(db_path=str(data_dir / "shares.db"))
-    burn_ledger = BurnLedger(db_path=str(data_dir / "burns.db"))
+    attestation_log = AttestationLog(db_path=str(data_dir / "attestations.db"))
     purchase_orch = PurchaseOrchestrator(share_store, db_path=str(data_dir / "purchases.db"))
     espn_client = ESPNClient()
     outcome_attestor = OutcomeAttestor(espn_client=espn_client)
@@ -395,9 +394,7 @@ async def async_main() -> None:
         rate_limit_rate=config.rate_limit_rate,
         mpc_availability_timeout=config.mpc_availability_timeout,
         shares_threshold=config.shares_threshold,
-        burn_ledger=burn_ledger,
-        attest_burn_amount=config.attest_burn_amount,
-        attest_burn_address=config.attest_burn_address,
+        attestation_log=attestation_log,
         scorer=scorer,
         activity_buffer=activity,
         audit_set_store=audit_set_store,
@@ -427,11 +424,6 @@ async def async_main() -> None:
     if bt_ok:
         running_tasks.append(asyncio.create_task(
             epoch_loop(neuron, scorer, share_store, outcome_attestor, chain_client, activity, audit_set_store, config.bt_burn_fraction)
-        ))
-        # Background burn scanner: pre-register burn transactions so attestation
-        # requests don't need the 300-block on-demand scan
-        running_tasks.append(asyncio.create_task(
-            burn_scan_loop(neuron, burn_ledger, config.attest_burn_address, config.attest_burn_amount)
         ))
         # Validator set sync: discover peers via metagraph, propose on-chain changes
         if chain_client.can_write:
@@ -482,9 +474,9 @@ async def async_main() -> None:
     except Exception as e:
         log.warning("share_store_close_error", error=str(e))
     try:
-        burn_ledger.close()
+        attestation_log.close()
     except Exception as e:
-        log.warning("burn_ledger_close_error", error=str(e))
+        log.warning("attestation_log_close_error", error=str(e))
     log.info("shutdown_complete")
 
 

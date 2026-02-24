@@ -36,7 +36,6 @@ from djinn_validator.api.metrics import (
     ACTIVE_SHARES,
     ATTESTATION_DISPATCHED,
     ATTESTATION_DURATION,
-    ATTESTATION_GATED,
     ATTESTATION_VERIFIED,
     BT_CONNECTED,
     MPC_ACTIVE_SESSIONS,
@@ -163,7 +162,7 @@ def _signal_id_to_uint256(signal_id: str) -> int:
 if TYPE_CHECKING:
     from djinn_validator.bt.neuron import DjinnValidator
     from djinn_validator.chain.contracts import ChainClient
-    from djinn_validator.core.burn_ledger import BurnLedger
+    from djinn_validator.core.attestation_log import AttestationLog
 
 log = structlog.get_logger()
 
@@ -179,9 +178,7 @@ def create_app(
     rate_limit_rate: int = 10,
     mpc_availability_timeout: float = 15.0,
     shares_threshold: int = 7,
-    burn_ledger: BurnLedger | None = None,
-    attest_burn_amount: float = 0.0001,
-    attest_burn_address: str = "5E9tjcvFc9F9xPzGeCDoSkHoWKWmUvq4T4saydcSGL5ZbxKV",
+    attestation_log: AttestationLog | None = None,
     scorer: MinerScorer | None = None,
     activity_buffer: ActivityBuffer | None = None,
     audit_set_store: AuditSetStore | None = None,
@@ -724,48 +721,6 @@ def create_app(
         start = _t.perf_counter()
         ATTESTATION_DISPATCHED.inc()
 
-        # --- Burn gate: verify alpha burn before dispatching ---
-        if burn_ledger is not None:
-            # Check if this tx hash has been seen before
-            credits_left = burn_ledger.remaining_credits(req.burn_tx_hash)
-            is_known = burn_ledger.is_consumed(req.burn_tx_hash) or credits_left > 0
-
-            if is_known and credits_left == 0:
-                # All credits exhausted
-                ATTESTATION_GATED.labels(reason="already_consumed").inc()
-                raise HTTPException(
-                    status_code=403,
-                    detail="All attestation credits for this burn transaction have been used",
-                )
-
-            # Verify the burn on-chain (only needed if the background scanner
-            # hasn't pre-registered this tx hash yet)
-            actual_amount = attest_burn_amount
-            sender = "unknown"
-            if is_known:
-                # Scanner already verified — retrieve stored sender info
-                burn_info = burn_ledger.get_burn_info(req.burn_tx_hash)
-                if burn_info:
-                    sender, actual_amount = burn_info
-            elif neuron:
-                valid, err_msg, actual_amount, sender = neuron.verify_burn(
-                    req.burn_tx_hash, attest_burn_amount, attest_burn_address,
-                )
-                if not valid:
-                    reason = "insufficient_amount" if "less than" in err_msg else "invalid_tx"
-                    ATTESTATION_GATED.labels(reason=reason).inc()
-                    raise HTTPException(status_code=403, detail=err_msg)
-
-            # Consume one credit (record_burn handles first-use and subsequent uses)
-            if not burn_ledger.record_burn(
-                req.burn_tx_hash, sender, actual_amount, min_amount=attest_burn_amount,
-            ):
-                ATTESTATION_GATED.labels(reason="already_consumed").inc()
-                raise HTTPException(
-                    status_code=403,
-                    detail="All attestation credits for this burn transaction have been used",
-                )
-
         # Get list of reachable miners
         miner_axons: list[dict] = []
         if neuron:
@@ -783,9 +738,12 @@ def create_app(
                     log.warning("attest_axon_lookup_failed", uid=uid, error=str(exc))
 
         if not miner_axons:
-            # Refund the burn credit since no miner can process the request
-            if burn_ledger is not None:
-                burn_ledger.refund_credit(req.burn_tx_hash)
+            if attestation_log is not None:
+                attestation_log.log_attestation(
+                    url=req.url, request_id=req.request_id,
+                    success=False, verified=False,
+                    error="No reachable miners available",
+                )
             return AttestResponse(
                 request_id=req.request_id,
                 url=req.url,
@@ -824,14 +782,11 @@ def create_app(
             elapsed = _t.perf_counter() - start
             ATTESTATION_DURATION.observe(elapsed)
             ATTESTATION_VERIFIED.labels(valid="false").inc()
-            # Refund the burn credit since the miner never processed the request
-            if burn_ledger is not None:
-                burn_ledger.refund_credit(req.burn_tx_hash)
             log.warning("attest_miner_unreachable", miner_uid=selected["uid"], err=str(e))
-            if burn_ledger is not None:
-                burn_ledger.log_attestation(
-                    tx_hash=req.burn_tx_hash, coldkey=sender, url=req.url,
-                    request_id=req.request_id, success=False, verified=False,
+            if attestation_log is not None:
+                attestation_log.log_attestation(
+                    url=req.url, request_id=req.request_id,
+                    success=False, verified=False,
                     miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
                     error=f"Miner unreachable: {e}",
                 )
@@ -842,21 +797,23 @@ def create_app(
                 error=f"Miner unreachable: {e}",
             )
 
-        def _refund() -> None:
-            """Refund the consumed burn credit on miner failure."""
-            if burn_ledger is not None:
-                burn_ledger.refund_credit(req.burn_tx_hash)
-
         if resp.status_code != 200:
             elapsed = _t.perf_counter() - start
             ATTESTATION_DURATION.observe(elapsed)
             ATTESTATION_VERIFIED.labels(valid="false").inc()
-            _refund()
+            error_msg = f"Miner returned status {resp.status_code}"
+            if attestation_log is not None:
+                attestation_log.log_attestation(
+                    url=req.url, request_id=req.request_id,
+                    success=False, verified=False,
+                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
+                    error=error_msg,
+                )
             return AttestResponse(
                 request_id=req.request_id,
                 url=req.url,
                 success=False,
-                error=f"Miner returned status {resp.status_code}",
+                error=error_msg,
             )
 
         try:
@@ -871,7 +828,13 @@ def create_app(
                 response_text=resp.text[:500] if hasattr(resp, "text") else "<no text>",
                 status_code=resp.status_code,
             )
-            _refund()
+            if attestation_log is not None:
+                attestation_log.log_attestation(
+                    url=req.url, request_id=req.request_id,
+                    success=False, verified=False,
+                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
+                    error="Miner returned malformed response",
+                )
             return AttestResponse(
                 request_id=req.request_id,
                 url=req.url,
@@ -886,12 +849,19 @@ def create_app(
             if scorer is not None:
                 m = scorer.get_or_create(selected["uid"], selected.get("hotkey", ""))
                 m.record_attestation(latency=elapsed, proof_valid=False)
-            _refund()
+            error_msg = miner_data.get("error", "Miner attestation failed")
+            if attestation_log is not None:
+                attestation_log.log_attestation(
+                    url=req.url, request_id=req.request_id,
+                    success=False, verified=False,
+                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
+                    error=error_msg,
+                )
             return AttestResponse(
                 request_id=req.request_id,
                 url=req.url,
                 success=False,
-                error=miner_data.get("error", "Miner attestation failed"),
+                error=error_msg,
             )
 
         proof_hex = miner_data.get("proof_hex")
@@ -899,7 +869,13 @@ def create_app(
             elapsed = _t.perf_counter() - start
             ATTESTATION_DURATION.observe(elapsed)
             ATTESTATION_VERIFIED.labels(valid="false").inc()
-            _refund()
+            if attestation_log is not None:
+                attestation_log.log_attestation(
+                    url=req.url, request_id=req.request_id,
+                    success=False, verified=False,
+                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
+                    error="Miner returned no proof data",
+                )
             return AttestResponse(
                 request_id=req.request_id,
                 url=req.url,
@@ -917,7 +893,13 @@ def create_app(
             elapsed = _t.perf_counter() - start
             ATTESTATION_DURATION.observe(elapsed)
             ATTESTATION_VERIFIED.labels(valid="false").inc()
-            _refund()
+            if attestation_log is not None:
+                attestation_log.log_attestation(
+                    url=req.url, request_id=req.request_id,
+                    success=False, verified=False,
+                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
+                    error="Miner returned invalid proof hex",
+                )
             return AttestResponse(
                 request_id=req.request_id,
                 url=req.url,
@@ -935,6 +917,14 @@ def create_app(
             elapsed = _t.perf_counter() - start
             ATTESTATION_DURATION.observe(elapsed)
             ATTESTATION_VERIFIED.labels(valid="false").inc()
+            if attestation_log is not None:
+                attestation_log.log_attestation(
+                    url=req.url, request_id=req.request_id,
+                    success=True, verified=False,
+                    server_name=miner_data.get("server_name"),
+                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
+                    error="Proof verification timed out",
+                )
             return AttestResponse(
                 request_id=req.request_id,
                 url=req.url,
@@ -968,10 +958,8 @@ def create_app(
             elapsed_s=round(elapsed, 1),
         )
 
-        if burn_ledger is not None:
-            burn_ledger.log_attestation(
-                tx_hash=req.burn_tx_hash,
-                coldkey=sender,
+        if attestation_log is not None:
+            attestation_log.log_attestation(
                 url=req.url,
                 request_id=req.request_id,
                 success=True,
@@ -994,27 +982,12 @@ def create_app(
             error=verify_result.error if not verify_result.verified else None,
         )
 
-    @app.get("/v1/attest/credits/{burn_tx_hash}")
-    async def attest_credits(burn_tx_hash: str) -> dict:
-        """Check remaining attestation credits for a burn transaction."""
-        if burn_ledger is None:
-            return {"burn_tx_hash": burn_tx_hash, "remaining": 999, "total": 999}
-        remaining = burn_ledger.remaining_credits(burn_tx_hash)
-        return {"burn_tx_hash": burn_tx_hash, "remaining": remaining}
-
     @app.get("/v1/admin/attestations")
     async def admin_attestations(limit: int = 50) -> dict:
         """Recent attestation requests with full details."""
-        if burn_ledger is None:
+        if attestation_log is None:
             return {"attestations": []}
-        return {"attestations": burn_ledger.recent_attestations(min(limit, 200))}
-
-    @app.get("/v1/admin/burn-stats")
-    async def admin_burn_stats(days: int = 7) -> dict:
-        """Hourly burn collection stats."""
-        if burn_ledger is None:
-            return {"stats": []}
-        return {"stats": burn_ledger.hourly_burn_stats(min(days, 30))}
+        return {"attestations": attestation_log.recent_attestations(min(limit, 200))}
 
     @app.post("/v1/analytics/attempt")
     async def analytics(req: AnalyticsRequest) -> dict:

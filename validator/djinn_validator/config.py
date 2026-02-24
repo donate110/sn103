@@ -89,14 +89,7 @@ class Config:
     mpc_peer_timeout: float = _float_env("MPC_PEER_TIMEOUT", "10.0")
     mpc_availability_timeout: float = _float_env("MPC_AVAILABILITY_TIMEOUT", "15.0")
 
-    # Attestation burn gate
-    attest_burn_amount: float = _float_env("ATTEST_BURN_AMOUNT", "0.0001")
-    attest_burn_address: str = os.getenv(
-        "ATTEST_BURN_ADDRESS",
-        "5E9tjcvFc9F9xPzGeCDoSkHoWKWmUvq4T4saydcSGL5ZbxKV",  # Djinn burn collection wallet (controlled)
-    )
-
-    # Data directory for SQLite databases (shares, burns, purchases)
+    # Data directory for SQLite databases (shares, attestations, purchases)
     data_dir: str = os.getenv("DATA_DIR", "data")
 
     # Protocol constants

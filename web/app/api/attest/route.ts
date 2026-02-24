@@ -1,41 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
-import { discoverValidatorUrl } from "@/lib/bt-metagraph";
+import { discoverValidatorUrls } from "@/lib/bt-metagraph";
 import { getIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
 
-async function getValidatorUrl(): Promise<string> {
+/** Shuffle an array in-place (Fisher-Yates). */
+function shuffle<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/** Get validator URLs — env override or metagraph discovery (shuffled). */
+async function getValidatorUrls(): Promise<string[]> {
   const envUrl = process.env.VALIDATOR_URL || process.env.NEXT_PUBLIC_VALIDATOR_URL;
-  if (envUrl) return envUrl;
+  if (envUrl) return [envUrl];
   try {
-    const discovered = await discoverValidatorUrl();
-    if (discovered) return discovered;
+    const urls = await discoverValidatorUrls();
+    if (urls.length > 0) return shuffle([...urls]);
   } catch {
     // fall through
   }
-  return "http://localhost:8421";
+  return ["http://localhost:8421"];
 }
 
+const MAX_ATTEMPTS = 3;
+const TIMEOUT_MS = 150_000; // 150s per attempt (TLSNotary takes up to 90s)
+
 /**
- * POST /api/attest — Proxy attestation requests to a validator's /v1/attest endpoint.
+ * POST /api/attest — Proxy attestation requests to validators with fallback.
  *
- * Body: { url: string, request_id: string, burn_tx_hash: string }
+ * Tries up to 3 randomly-selected validators sequentially. Each attempt has
+ * a 150s timeout to accommodate TLSNotary proof generation.
+ *
+ * Body: { url: string, request_id: string }
  * Response: AttestResponse from the validator
  */
 export async function POST(request: NextRequest) {
-  // Attest is expensive (calls validator + external URL) — tighter rate limit
-  if (isRateLimited("attest", getIp(request), 10)) {
+  // Tighter rate limit: 5 requests per minute per IP
+  if (isRateLimited("attest", getIp(request), 5)) {
     return rateLimitResponse();
   }
 
-  const target = `${await getValidatorUrl()}/v1/attest`;
-
-  let body: { url?: string; request_id?: string; burn_tx_hash?: string };
+  let body: { url?: string; request_id?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  // Server-side validation — don't trust the client
+  // Server-side validation
   if (!body.url || typeof body.url !== "string" || !body.url.startsWith("https://") || body.url.length > 2048) {
     return NextResponse.json({ error: "URL must start with https:// and be under 2048 chars" }, { status: 400 });
   }
@@ -60,40 +74,39 @@ export async function POST(request: NextRequest) {
   if (!body.request_id || typeof body.request_id !== "string" || body.request_id.length > 256) {
     return NextResponse.json({ error: "request_id is required (max 256 chars)" }, { status: 400 });
   }
-  if (
-    !body.burn_tx_hash ||
-    typeof body.burn_tx_hash !== "string" ||
-    !/^(0x)?[0-9a-fA-F]{1,128}$/.test(body.burn_tx_hash)
-  ) {
-    return NextResponse.json({ error: "burn_tx_hash must be a valid hex string" }, { status: 400 });
-  }
 
-  // Only forward whitelisted fields
   const sanitizedBody = {
     url: body.url,
     request_id: body.request_id,
-    burn_tx_hash: body.burn_tx_hash,
   };
 
-  try {
-    const res = await fetch(target, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(sanitizedBody),
-      signal: AbortSignal.timeout(120_000), // 2 minute timeout
-    });
-    const text = await res.text();
-    return new NextResponse(text, {
-      status: res.status,
-      headers: { "Content-Type": "application/json" },
-    });
-  } catch (err) {
-    if (err instanceof DOMException && err.name === "TimeoutError") {
-      return NextResponse.json({ error: "Attestation timed out" }, { status: 504 });
+  const validators = await getValidatorUrls();
+  const attempts = Math.min(MAX_ATTEMPTS, validators.length);
+  let lastError = "No validators available";
+
+  for (let i = 0; i < attempts; i++) {
+    const target = `${validators[i]}/v1/attest`;
+    try {
+      const res = await fetch(target, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sanitizedBody),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      const text = await res.text();
+      return new NextResponse(text, {
+        status: res.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "TimeoutError") {
+        lastError = `Validator ${i + 1}/${attempts} timed out`;
+      } else {
+        lastError = `Validator ${i + 1}/${attempts} unavailable`;
+      }
+      // Try next validator
     }
-    return NextResponse.json(
-      { error: "Validator unavailable" },
-      { status: 502 },
-    );
   }
+
+  return NextResponse.json({ error: lastError }, { status: 502 });
 }

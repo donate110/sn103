@@ -461,15 +461,11 @@ class OTSharesResponse(BaseModel):
 
 
 _REQUEST_ID_RE = re.compile(r"^[a-zA-Z0-9_\-.:]{1,256}$")
-_BURN_TX_HASH_RE = re.compile(r"^(0x)?[0-9a-fA-F]{1,128}$")
-
-
 class AttestRequest(BaseModel):
     """POST /v1/attest — Request TLSNotary attestation of a web page."""
 
     url: str = Field(max_length=2048, description="HTTPS URL to attest")
     request_id: str = Field(max_length=256, description="Unique request ID for tracking")
-    burn_tx_hash: str = Field(max_length=128, description="Substrate extrinsic hash proving alpha burn")
 
     @field_validator("url")
     @classmethod
@@ -503,12 +499,6 @@ class AttestRequest(BaseModel):
             raise ValueError("request_id must be 1-256 alphanumeric chars, hyphens, underscores, dots, or colons")
         return v
 
-    @field_validator("burn_tx_hash")
-    @classmethod
-    def validate_burn_tx_hash(cls, v: str) -> str:
-        if not _BURN_TX_HASH_RE.match(v):
-            raise ValueError("burn_tx_hash must be a hex string (with optional 0x prefix)")
-        return v
 
 
 class AttestResponse(BaseModel):

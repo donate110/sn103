@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 interface AttestResult {
   request_id: string;
@@ -8,6 +8,7 @@ interface AttestResult {
   success: boolean;
   verified: boolean;
   proof_hex: string | null;
+  response_body: string | null;
   server_name: string | null;
   timestamp: number;
   error: string | null;
@@ -23,9 +24,6 @@ interface BatchItem {
   startedAt?: number;
   elapsed?: number;
 }
-
-const BURN_ADDRESS = "5E9tjcvFc9F9xPzGeCDoSkHoWKWmUvq4T4saydcSGL5ZbxKV";
-const COST_PER_ATTEST = 0.0001;
 
 function useElapsedTimer(running: boolean) {
   const [elapsed, setElapsed] = useState(0);
@@ -49,73 +47,16 @@ export default function AttestPage() {
   const [mode, setMode] = useState<"single" | "batch">("single");
   const [url, setUrl] = useState("");
   const [batchUrls, setBatchUrls] = useState("");
-  const [burnTxHash, setBurnTxHash] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<AttestResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
   const [showApi, setShowApi] = useState(false);
-  const [credits, setCredits] = useState<number | null>(null);
-  const [creditsLoading, setCreditsLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
   const elapsed = useElapsedTimer(status === "proving");
 
-  // Check burn credits when tx hash changes (debounced)
-  useEffect(() => {
-    const hash = burnTxHash.trim();
-    if (!hash || hash.length < 8) {
-      setCredits(null);
-      return;
-    }
-    setCreditsLoading(true);
-    const controller = new AbortController();
-    const timeout = setTimeout(async () => {
-      try {
-        const resp = await fetch("/api/attest/credits", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ burn_tx_hash: hash }),
-          signal: controller.signal,
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          setCredits(data.remaining ?? null);
-        } else {
-          setCredits(null);
-        }
-      } catch {
-        // Ignore fetch errors (abort, network)
-      } finally {
-        setCreditsLoading(false);
-      }
-    }, 600);
-    return () => {
-      clearTimeout(timeout);
-      controller.abort();
-    };
-  }, [burnTxHash]);
-
-  const copyBurnAddress = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(BURN_ADDRESS);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Fallback for older browsers
-      const textarea = document.createElement("textarea");
-      textarea.value = BURN_ADDRESS;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  }, []);
-
   const attestSingle = useCallback(
-    async (targetUrl: string, txHash: string): Promise<AttestResult | null> => {
+    async (targetUrl: string): Promise<AttestResult | null> => {
       const requestId = `attest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const resp = await fetch("/api/attest", {
         method: "POST",
@@ -123,16 +64,12 @@ export default function AttestPage() {
         body: JSON.stringify({
           url: targetUrl,
           request_id: requestId,
-          burn_tx_hash: txHash.trim(),
         }),
       });
 
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({ detail: "Request failed" }));
-        const msg = data.detail || data.error || `Request failed (${resp.status})`;
-        throw new Error(
-          resp.status === 403 ? `Burn verification failed: ${msg}` : msg,
-        );
+        throw new Error(data.detail || data.error || `Request failed (${resp.status})`);
       }
 
       return await resp.json();
@@ -147,17 +84,13 @@ export default function AttestPage() {
         setErrorMsg("URL must start with https://");
         return;
       }
-      if (!burnTxHash.trim()) {
-        setErrorMsg("Burn transaction hash is required");
-        return;
-      }
 
       setStatus("proving");
       setResult(null);
       setErrorMsg(null);
 
       try {
-        const data = await attestSingle(url, burnTxHash);
+        const data = await attestSingle(url);
         setResult(data);
         setStatus("done");
         if (data && !data.success) {
@@ -168,16 +101,12 @@ export default function AttestPage() {
         setStatus("error");
       }
     },
-    [url, burnTxHash, attestSingle],
+    [url, attestSingle],
   );
 
   const handleBatchSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!burnTxHash.trim()) {
-        setErrorMsg("Burn transaction hash is required");
-        return;
-      }
 
       const urls = batchUrls
         .split("\n")
@@ -211,7 +140,7 @@ export default function AttestPage() {
         setBatchItems([...items]);
 
         try {
-          const data = await attestSingle(items[i].url, burnTxHash);
+          const data = await attestSingle(items[i].url);
           items[i].result = data;
           items[i].status = data?.success ? "done" : "error";
           items[i].error = data?.success ? null : (data?.error || "Failed");
@@ -225,7 +154,7 @@ export default function AttestPage() {
 
       setBatchRunning(false);
     },
-    [batchUrls, burnTxHash, attestSingle],
+    [batchUrls, attestSingle],
   );
 
   const handleDownload = useCallback(
@@ -248,7 +177,6 @@ export default function AttestPage() {
   const parsedBatchCount = batchUrls
     .split("\n")
     .filter((u) => u.trim().length > 0).length;
-  const batchCost = (parsedBatchCount * COST_PER_ATTEST).toFixed(4);
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -256,7 +184,7 @@ export default function AttestPage() {
         <h1 className="text-3xl font-bold text-slate-900">Web Attestation</h1>
         <p className="text-slate-500 mt-1">
           Generate cryptographic TLSNotary proofs that websites served specific content at a
-          specific time. Powered by Bittensor Subnet 103.
+          specific time. Free and powered by Bittensor Subnet 103.
         </p>
       </div>
 
@@ -267,57 +195,22 @@ export default function AttestPage() {
           <li className="flex gap-3">
             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold">1</span>
             <span>
-              <strong>Burn alpha tokens.</strong> Transfer <strong>{COST_PER_ATTEST} TAO</strong> per page to the burn address below from your Bittensor wallet.
-              For multiple pages, send a single larger transfer (e.g., 0.0013 TAO for 13 pages).
-              Burns are detected automatically within ~10 minutes. Credits never expire.
+              <strong>Enter a URL.</strong> Paste any public HTTPS URL you want to prove. For multiple pages, switch to batch mode.
             </span>
           </li>
           <li className="flex gap-3">
             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold">2</span>
             <span>
-              <strong>Copy the extrinsic hash.</strong> After your burn transfer confirms, copy the substrate extrinsic hash from your wallet or a block explorer.
+              <strong>Wait for the proof.</strong> A miner on Bittensor Subnet 103 generates a TLSNotary proof (30-90 seconds per page). The validator verifies it.
             </span>
           </li>
           <li className="flex gap-3">
             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold">3</span>
             <span>
-              <strong>Submit your URL(s).</strong> Paste the burn tx hash and the URL(s) you want to attest. A miner will generate a TLSNotary proof (30-90 seconds per page).
-            </span>
-          </li>
-          <li className="flex gap-3">
-            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold">4</span>
-            <span>
-              <strong>Download your proof.</strong> The validator verifies the proof and returns it. Download the cryptographic proof file.
+              <strong>Download your proof.</strong> The cryptographic proof file is tamper-proof and verifiable by anyone.
             </span>
           </li>
         </ol>
-
-        <div className="mt-4 rounded-md bg-slate-50 border border-slate-200 p-3">
-          <p className="text-xs font-medium text-slate-500 mb-1">Burn address (SN103 alpha)</p>
-          <div className="flex items-center gap-2">
-            <p className="font-mono text-xs break-all text-slate-800 flex-1 select-all">{BURN_ADDRESS}</p>
-            <button
-              type="button"
-              onClick={copyBurnAddress}
-              className="flex-shrink-0 rounded-md px-2 py-1 text-xs font-medium border border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors"
-              aria-label="Copy burn address"
-            >
-              {copied ? "Copied!" : "Copy"}
-            </button>
-          </div>
-        </div>
-        <p className="mt-2 text-xs text-slate-400">
-          Don&apos;t have alpha?{" "}
-          <a
-            href="https://docs.bittensor.com/subnets/register-validate-mine"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline hover:text-slate-600"
-          >
-            Stake TAO on Subnet 103
-          </a>{" "}
-          to acquire alpha tokens. The burn is approximately $0.02 per attestation.
-        </p>
       </div>
 
       {/* Mode toggle */}
@@ -347,34 +240,6 @@ export default function AttestPage() {
       {/* Form */}
       <div className="rounded-lg border border-slate-200 bg-white p-6">
         <form onSubmit={mode === "single" ? handleSingleSubmit : handleBatchSubmit}>
-          {/* Burn tx hash — shared between modes */}
-          <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="burn-tx-hash">
-            Burn transaction hash
-          </label>
-          <input
-            id="burn-tx-hash"
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-slate-500 focus:border-slate-500"
-            type="text"
-            placeholder="0x..."
-            value={burnTxHash}
-            onChange={(e) => setBurnTxHash(e.target.value)}
-            required
-            disabled={status === "proving" || batchRunning}
-          />
-          <div className="flex items-center gap-2 mt-1 mb-4">
-            <p className="text-xs text-slate-400 flex-1">
-              The substrate extrinsic hash from your alpha burn transfer. One burn can cover multiple attestations.
-            </p>
-            {creditsLoading && (
-              <span className="text-xs text-slate-400 flex-shrink-0">Checking...</span>
-            )}
-            {!creditsLoading && credits !== null && (
-              <span className={`text-xs font-medium flex-shrink-0 ${credits > 0 ? "text-green-600" : "text-red-500"}`}>
-                {credits > 0 ? `${credits} credit${credits !== 1 ? "s" : ""} remaining` : "No credits remaining"}
-              </span>
-            )}
-          </div>
-
           {mode === "single" ? (
             <>
               <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="attest-url">
@@ -408,7 +273,7 @@ export default function AttestPage() {
               />
               {parsedBatchCount > 0 && (
                 <p className="text-xs text-slate-500 mt-1">
-                  {parsedBatchCount} URL{parsedBatchCount !== 1 ? "s" : ""} — burn cost: <strong>{batchCost} TAO</strong>
+                  {parsedBatchCount} URL{parsedBatchCount !== 1 ? "s" : ""}
                 </p>
               )}
             </>
@@ -420,7 +285,6 @@ export default function AttestPage() {
             disabled={
               status === "proving" ||
               batchRunning ||
-              !burnTxHash ||
               (mode === "single" ? !url : parsedBatchCount === 0)
             }
           >
@@ -531,8 +395,7 @@ export default function AttestPage() {
   -H "Content-Type: application/json" \\
   -d '{
     "url": "https://example.com/page",
-    "request_id": "my-unique-id",
-    "burn_tx_hash": "0x..."
+    "request_id": "my-unique-id"
   }'`}</pre>
               <p className="text-xs text-slate-400 mt-1">
                 Response includes <code className="bg-slate-100 px-1 rounded">proof_hex</code>,{" "}
@@ -542,22 +405,10 @@ export default function AttestPage() {
               </p>
             </div>
             <div>
-              <h4 className="font-semibold text-slate-800 mb-1">POST /api/attest/credits</h4>
-              <p className="text-slate-500 mb-2">Check remaining credits for a burn transaction.</p>
-              <pre className="bg-slate-800 text-slate-100 rounded-lg p-3 text-xs overflow-x-auto">{`curl -X POST https://djinn.gg/api/attest/credits \\
-  -H "Content-Type: application/json" \\
-  -d '{ "burn_tx_hash": "0x..." }'`}</pre>
-              <p className="text-xs text-slate-400 mt-1">
-                Returns <code className="bg-slate-100 px-1 rounded">{`{ "remaining": 12 }`}</code>
-              </p>
-            </div>
-            <div>
-              <h4 className="font-semibold text-slate-800 mb-1">Bulk attestation</h4>
+              <h4 className="font-semibold text-slate-800 mb-1">Batch attestation</h4>
               <p className="text-slate-500">
-                To attest multiple pages, burn <strong>N &times; {COST_PER_ATTEST} TAO</strong> in a single
-                transfer, then call <code className="bg-slate-100 px-1 rounded">POST /api/attest</code> once
-                per URL using the same <code className="bg-slate-100 px-1 rounded">burn_tx_hash</code>. Each
-                call consumes one credit.
+                To attest multiple pages, call <code className="bg-slate-100 px-1 rounded">POST /api/attest</code> once
+                per URL. Each request is processed sequentially by a random miner on Subnet 103.
               </p>
             </div>
           </div>
@@ -589,10 +440,31 @@ function ResultCard({
   result: AttestResult;
   onDownload: (proofHex: string, timestamp: number) => void;
 }) {
+  const [viewMode, setViewMode] = useState<"source" | "preview">("source");
+  const [copied, setCopied] = useState(false);
+
   const proofFingerprint =
     result.proof_hex && result.proof_hex.length >= 2
       ? result.proof_hex.slice(0, 32)
       : null;
+
+  const hasBody = !!result.response_body;
+
+  const copySource = useCallback(async () => {
+    if (!result.response_body) return;
+    try {
+      await navigator.clipboard.writeText(result.response_body);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = result.response_body;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [result.response_body]);
 
   return (
     <div className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
@@ -642,13 +514,74 @@ function ResultCard({
         </div>
       </dl>
 
-      {result.proof_hex && (
-        <button
-          onClick={() => onDownload(result.proof_hex!, result.timestamp)}
-          className="mt-4 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-        >
-          Download proof
-        </button>
+      <div className="mt-4 flex items-center gap-2">
+        {result.proof_hex && (
+          <button
+            onClick={() => onDownload(result.proof_hex!, result.timestamp)}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+          >
+            Download proof
+          </button>
+        )}
+      </div>
+
+      {/* Response body viewer */}
+      {hasBody && (
+        <div className="mt-6 border-t border-slate-200 pt-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-slate-900">Response Content</h3>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={copySource}
+                className="rounded-md px-2.5 py-1 text-xs font-medium border border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+              >
+                {copied ? "Copied!" : "Copy HTML"}
+              </button>
+              <div className="flex rounded-lg border border-slate-200 overflow-hidden ml-2">
+                <button
+                  onClick={() => setViewMode("source")}
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                    viewMode === "source"
+                      ? "bg-slate-900 text-white"
+                      : "bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  Source
+                </button>
+                <button
+                  onClick={() => setViewMode("preview")}
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                    viewMode === "preview"
+                      ? "bg-slate-900 text-white"
+                      : "bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  Preview
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {viewMode === "preview" && (
+            <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5 mb-2">
+              Preview only &mdash; external resources (CSS, images, scripts) are not included in the proof and will not load.
+            </p>
+          )}
+
+          {viewMode === "source" ? (
+            <pre className="bg-slate-800 text-slate-100 rounded-lg p-4 text-xs overflow-auto max-h-[500px] whitespace-pre-wrap break-all">
+              {result.response_body}
+            </pre>
+          ) : (
+            <iframe
+              srcDoc={result.response_body!}
+              sandbox=""
+              className="w-full rounded-lg border border-slate-200 bg-white"
+              style={{ height: "500px" }}
+              title="Attested page preview"
+            />
+          )}
+        </div>
       )}
     </div>
   );
