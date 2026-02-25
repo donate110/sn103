@@ -16,7 +16,7 @@ import structlog
 import uvicorn
 
 from djinn_miner import __version__
-from djinn_miner.logging import configure_logging
+from djinn_miner.log_config import configure_logging
 
 configure_logging()
 
