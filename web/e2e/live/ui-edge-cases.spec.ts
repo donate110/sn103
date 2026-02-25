@@ -38,8 +38,6 @@ test.describe("No console errors on page load", () => {
       const realErrors = errors.filter(
         (e) =>
           !e.includes("wallet") &&
-          !e.includes("Privy") &&
-          !e.includes("privy") &&
           !e.includes("MetaMask") &&
           !e.includes("ethereum") &&
           !e.includes("ResizeObserver"),

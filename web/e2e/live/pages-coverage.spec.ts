@@ -54,8 +54,6 @@ test.describe("Press page", () => {
     await page.waitForLoadState("networkidle");
     const real = errors.filter(
       (e) =>
-        !e.includes("Privy") &&
-        !e.includes("privy") &&
         !e.includes("wallet") &&
         !e.includes("ResizeObserver"),
     );
@@ -97,8 +95,6 @@ test.describe("Privacy page", () => {
     await page.waitForLoadState("networkidle");
     const real = errors.filter(
       (e) =>
-        !e.includes("Privy") &&
-        !e.includes("privy") &&
         !e.includes("wallet") &&
         !e.includes("ResizeObserver"),
     );
@@ -139,8 +135,6 @@ test.describe("Terms page", () => {
     await page.waitForLoadState("networkidle");
     const real = errors.filter(
       (e) =>
-        !e.includes("Privy") &&
-        !e.includes("privy") &&
         !e.includes("wallet") &&
         !e.includes("ResizeObserver"),
     );
@@ -194,8 +188,6 @@ test.describe("Admin page", () => {
     await page.waitForLoadState("networkidle");
     const real = errors.filter(
       (e) =>
-        !e.includes("Privy") &&
-        !e.includes("privy") &&
         !e.includes("wallet") &&
         !e.includes("ResizeObserver"),
     );

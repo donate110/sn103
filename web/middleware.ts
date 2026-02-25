@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 
 const cspDirectives = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com",
+  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline'",
   "connect-src 'self' https://*.base.org wss://*.base.org https://api.the-odds-api.com https://*.walletconnect.com https://*.walletconnect.org wss://*.walletconnect.com wss://*.walletconnect.org https://api.studio.thegraph.com https://api.web3modal.org https://*.web3modal.org",
   "frame-src https://challenges.cloudflare.com",

@@ -72,7 +72,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (!body.password || body.password !== expected) {
+  if (
+    !body.password ||
+    body.password.length !== expected.length ||
+    !timingSafeEqual(Buffer.from(body.password), Buffer.from(expected))
+  ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

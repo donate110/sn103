@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import structlog
 
-from djinn_validator.logging import configure_logging
+from djinn_validator.log_config import configure_logging
 
 
 class TestConfigureLogging:

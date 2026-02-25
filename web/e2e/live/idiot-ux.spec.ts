@@ -128,8 +128,6 @@ test.describe("Browse Signals page", () => {
 
     const critical = errors.filter(
       (e) =>
-        !e.includes("Privy") &&
-        !e.includes("privy") &&
         !e.includes("MetaMask") &&
         !e.includes("ethereum") &&
         !e.includes("ResizeObserver") &&
@@ -199,8 +197,6 @@ test.describe("Signal Detail page", () => {
 
     const critical = errors.filter(
       (e) =>
-        !e.includes("Privy") &&
-        !e.includes("privy") &&
         !e.includes("MetaMask") &&
         !e.includes("ethereum") &&
         !e.includes("ResizeObserver") &&
@@ -352,8 +348,6 @@ test.describe("Idiot pages no JS errors", () => {
 
       const critical = errors.filter(
         (e) =>
-          !e.includes("Privy") &&
-          !e.includes("privy") &&
           !e.includes("MetaMask") &&
           !e.includes("ethereum") &&
           !e.includes("ResizeObserver") &&

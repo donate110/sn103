@@ -108,7 +108,7 @@ async def async_main() -> None:
     )
 
     health_tracker = HealthTracker(
-        odds_api_connected=bool(config.odds_api_key),
+        odds_api_connected=False,
     )
 
     checker = LineChecker(

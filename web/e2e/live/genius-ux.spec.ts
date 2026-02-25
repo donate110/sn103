@@ -81,8 +81,6 @@ test.describe("Create Signal page", () => {
 
     const real = errors.filter(
       (e) =>
-        !e.includes("Privy") &&
-        !e.includes("privy") &&
         !e.includes("MetaMask") &&
         !e.includes("ethereum") &&
         !e.includes("ResizeObserver") &&
@@ -251,8 +249,6 @@ test.describe("Genius pages no JS errors", () => {
 
       const critical = errors.filter(
         (e) =>
-          !e.includes("Privy") &&
-          !e.includes("privy") &&
           !e.includes("MetaMask") &&
           !e.includes("ethereum") &&
           !e.includes("ResizeObserver") &&

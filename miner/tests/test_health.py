@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from unittest.mock import patch
 
+from djinn_miner import __version__
 from djinn_miner.core.health import HealthTracker
 
 
@@ -13,7 +14,7 @@ class TestHealthTracker:
         tracker = HealthTracker(uid=42, odds_api_connected=True, bt_connected=True)
         status = tracker.get_status()
         assert status.status == "ok"
-        assert status.version == "0.1.0"
+        assert status.version == __version__
         assert status.uid == 42
         assert status.odds_api_connected is True
         assert status.bt_connected is True

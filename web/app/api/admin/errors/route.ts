@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 
 /**
  * GET /api/admin/errors?limit=50
@@ -19,7 +20,12 @@ export async function GET(request: NextRequest) {
       ? authHeader.slice(7)
       : null;
     const expected = process.env.ADMIN_PASSWORD;
-    if (!expected || !bearerPassword || bearerPassword !== expected) {
+    if (
+      !expected ||
+      !bearerPassword ||
+      bearerPassword.length !== expected.length ||
+      !timingSafeEqual(Buffer.from(bearerPassword), Buffer.from(expected))
+    ) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
   }

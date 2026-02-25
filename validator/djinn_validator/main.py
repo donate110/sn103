@@ -15,7 +15,7 @@ import structlog
 import uvicorn
 
 from djinn_validator import __version__
-from djinn_validator.logging import configure_logging
+from djinn_validator.log_config import configure_logging
 
 configure_logging()
 
