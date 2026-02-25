@@ -26,6 +26,7 @@ async function getValidatorUrls(): Promise<string[]> {
 
 const MAX_ATTEMPTS = 3;
 const TIMEOUT_MS = 240_000; // 240s per attempt (large pages can take up to 180s)
+const TOTAL_DEADLINE_MS = 270_000; // 4.5 min total — must finish before client's 5 min timeout
 
 /**
  * Translate raw backend errors into helpful human-readable messages.
@@ -155,15 +156,22 @@ export async function POST(request: NextRequest) {
   const validators = await getValidatorUrls();
   const attempts = Math.min(MAX_ATTEMPTS, validators.length);
   let lastError = "No attestation services are currently available on the network. Please try again in a few minutes.";
+  const startedAt = Date.now();
 
   for (let i = 0; i < attempts; i++) {
+    // Stop if we don't have enough time for a meaningful attempt (at least 30s)
+    const elapsed = Date.now() - startedAt;
+    const remaining = TOTAL_DEADLINE_MS - elapsed;
+    if (remaining < 30_000) break;
+
     const target = `${validators[i]}/v1/attest`;
+    const perAttemptTimeout = Math.min(TIMEOUT_MS, remaining);
     try {
       const res = await fetch(target, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sanitizedBody),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(perAttemptTimeout),
       });
       if (res.ok) {
         const data = await res.json();
