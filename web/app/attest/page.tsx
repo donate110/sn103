@@ -60,6 +60,7 @@ export default function AttestPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url, request_id: requestId }),
+          signal: AbortSignal.timeout(300_000), // 5 min client-side timeout
         });
 
         if (!resp.ok) {
@@ -94,7 +95,11 @@ export default function AttestPage() {
           setErrorMsg(data.error || "Attestation failed");
         }
       } catch (err) {
-        setErrorMsg(err instanceof Error ? err.message : "Network error");
+        if (err instanceof DOMException && err.name === "TimeoutError") {
+          setErrorMsg("The request timed out after 5 minutes. Try a smaller page or try again later.");
+        } else {
+          setErrorMsg(err instanceof Error ? err.message : "Network error");
+        }
         setStatus("error");
       }
     },
