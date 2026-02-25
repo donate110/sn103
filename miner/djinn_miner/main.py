@@ -12,6 +12,7 @@ import os
 import random
 import signal
 
+import httpx
 import structlog
 import uvicorn
 
@@ -107,8 +108,22 @@ async def async_main() -> None:
         session_capture=session_capture,
     )
 
+    # Probe odds API at startup to verify key works (costs 0 credits)
+    odds_api_ok = False
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as probe:
+            resp = await probe.get(
+                f"{config.odds_api_base_url}/v4/sports",
+                params={"apiKey": config.odds_api_key},
+            )
+            odds_api_ok = resp.status_code == 200
+            if not odds_api_ok:
+                log.warning("odds_api_probe_failed", status=resp.status_code)
+    except Exception as e:
+        log.warning("odds_api_probe_error", err=str(e))
+
     health_tracker = HealthTracker(
-        odds_api_connected=False,
+        odds_api_connected=odds_api_ok,
     )
 
     checker = LineChecker(
