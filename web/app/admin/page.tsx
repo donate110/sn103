@@ -33,6 +33,7 @@ interface ValidatorNode {
   ip: string;
   port: number;
   hotkey?: string;
+  stake?: string;
 }
 
 interface MinerNode {
@@ -40,6 +41,7 @@ interface MinerNode {
   ip: string;
   port: number;
   hotkey?: string;
+  stake?: string;
 }
 
 interface ValidatorHealth {
@@ -47,6 +49,7 @@ interface ValidatorHealth {
   ip: string;
   port: number;
   hotkey?: string;
+  stake?: string;
   status: string;
   version: string;
   shares_held: number;
@@ -60,6 +63,7 @@ interface MinerHealth {
   ip: string;
   port: number;
   hotkey?: string;
+  stake?: string;
   status: string;
   version: string;
   odds_api_connected: boolean;
@@ -73,6 +77,17 @@ function truncateHotkey(hotkey?: string): string {
   const h = hotkey.startsWith("0x") ? hotkey.slice(2) : hotkey;
   if (h.length <= 12) return `0x${h}`;
   return `0x${h.slice(0, 6)}...${h.slice(-6)}`;
+}
+
+function formatStake(raw?: string): string {
+  if (!raw) return "-";
+  // raw is rao (1e9 per TAO) as a string
+  const rao = BigInt(raw);
+  const tao = Number(rao) / 1e9;
+  if (tao >= 1_000_000) return `${(tao / 1_000_000).toFixed(1)}M`;
+  if (tao >= 1_000) return `${(tao / 1_000).toFixed(1)}K`;
+  if (tao >= 1) return `${tao.toFixed(1)}`;
+  return `${tao.toFixed(4)}`;
 }
 
 interface NetworkEvent {
@@ -399,6 +414,7 @@ export default function AdminDashboard() {
                     <th className="px-4 py-3 text-left font-medium">UID</th>
                     <th className="px-4 py-3 text-left font-medium">Name</th>
                     <th className="px-4 py-3 text-left font-medium">IP</th>
+                    <th className="px-4 py-3 text-right font-medium">Stake</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Version</th>
                     <th className="px-4 py-3 text-right font-medium">Shares</th>
@@ -409,7 +425,7 @@ export default function AdminDashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {validators.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
                         No validators discovered
                       </td>
                     </tr>
@@ -425,6 +441,7 @@ export default function AdminDashboard() {
                         )}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{v.ip}:{v.port}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatStake(v.stake)}</td>
                       <td className="px-4 py-3">
                         {v.error ? (
                           <span className="inline-flex items-center gap-1 text-red-600">
@@ -477,6 +494,7 @@ export default function AdminDashboard() {
                     <th className="px-4 py-3 text-left font-medium">UID</th>
                     <th className="px-4 py-3 text-left font-medium">Name</th>
                     <th className="px-4 py-3 text-left font-medium">IP</th>
+                    <th className="px-4 py-3 text-right font-medium">Stake</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Version</th>
                     <th className="px-4 py-3 text-center font-medium">Odds API</th>
@@ -487,7 +505,7 @@ export default function AdminDashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {miners.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
                         No miners discovered
                       </td>
                     </tr>
@@ -503,6 +521,7 @@ export default function AdminDashboard() {
                         )}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.ip}:{m.port}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatStake(m.stake)}</td>
                       <td className="px-4 py-3">
                         {m.error ? (
                           <span className="inline-flex items-center gap-1 text-red-600">
@@ -1355,14 +1374,14 @@ async function fetchValidatorHealth(): Promise<ValidatorHealth[]> {
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
-        return { ...data, uid: v.uid, ip: v.ip, port: v.port, hotkey: v.hotkey } as ValidatorHealth;
+        return { ...data, uid: v.uid, ip: v.ip, port: v.port, hotkey: v.hotkey, stake: v.stake } as ValidatorHealth;
       }),
     );
 
     return results.map((r, i) =>
       r.status === "fulfilled"
         ? r.value
-        : { uid: validators[i].uid, ip: validators[i].ip, port: validators[i].port, hotkey: validators[i].hotkey, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, error: String((r as PromiseRejectedResult).reason) },
+        : { uid: validators[i].uid, ip: validators[i].ip, port: validators[i].port, hotkey: validators[i].hotkey, stake: validators[i].stake, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, error: String((r as PromiseRejectedResult).reason) },
     );
   } catch {
     return [];
@@ -1470,14 +1489,14 @@ async function fetchMinerHealth(): Promise<MinerHealth[]> {
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
-        return { ...data, uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey } as MinerHealth;
+        return { ...data, uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey, stake: m.stake } as MinerHealth;
       }),
     );
 
     return results.map((r, i) =>
       r.status === "fulfilled"
         ? r.value
-        : { uid: miners[i].uid, ip: miners[i].ip, port: miners[i].port, hotkey: miners[i].hotkey, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
+        : { uid: miners[i].uid, ip: miners[i].ip, port: miners[i].port, hotkey: miners[i].hotkey, stake: miners[i].stake, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
     );
   } catch {
     return [];

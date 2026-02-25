@@ -18,7 +18,7 @@ export async function GET() {
 
     const validators = pool
       .sort((a, b) => (b.stake > a.stake ? 1 : b.stake < a.stake ? -1 : 0))
-      .map((n) => ({ uid: n.uid, ip: n.ip, port: n.port, hotkey: n.hotkey }));
+      .map((n) => ({ uid: n.uid, ip: n.ip, port: n.port, hotkey: n.hotkey, stake: n.stake.toString() }));
 
     return NextResponse.json({ validators }, {
       headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" },
