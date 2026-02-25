@@ -148,6 +148,10 @@ class MinerScorer:
         if attestation_blend is not None:
             self.W_ATTESTATION_BLEND = attestation_blend
 
+    def get(self, uid: int) -> MinerMetrics | None:
+        """Get metrics for a miner without creating or resetting."""
+        return self._miners.get(uid)
+
     def get_or_create(self, uid: int, hotkey: str) -> MinerMetrics:
         """Get or create metrics for a miner.
 
