@@ -622,33 +622,41 @@ async def challenge_miners_attestation(
     miner_axons: list[dict],
     wallet: Any | None = None,
 ) -> int:
-    """Run a TLSNotary attestation challenge against all reachable miners.
+    """Run a TLSNotary attestation challenge against capable miners.
 
-    Picks a known-good URL and asks each miner to produce a TLSNotary
-    proof. The validator then verifies each returned proof. Successful
-    attestations contribute to accuracy, coverage, and speed metrics.
+    Splits miners into two groups:
+    - Proven/unproven: challenged with full timeout (210s)
+    - Known-failed: challenged with short timeout (15s) so they can
+      redeem themselves without blocking the queue for hours
 
     Returns the number of miners challenged.
     """
     url = random.choice(_ATTESTATION_CHALLENGE_URLS)
 
-    # Attestation challenges run concurrently but with lower concurrency
-    # since each takes 30-90s and involves CPU-intensive TLSNotary work
+    # Classify miners by attestation history
+    candidate_uids = [a["uid"] for a in miner_axons if a.get("ip") and a.get("port")]
+    ranked = scorer.select_attest_miners(candidate_uids, max_results=len(candidate_uids))
+    ranked_uids = {uid for uid, _ in ranked}
+
+    proven_axons: list[dict] = []
+    probe_axons: list[dict] = []
+    for axon in miner_axons:
+        if not axon.get("ip") or not axon.get("port"):
+            continue
+        if axon["uid"] in ranked_uids:
+            proven_axons.append(axon)
+        else:
+            probe_axons.append(axon)
+
     sem = asyncio.Semaphore(4)
 
     async with httpx.AsyncClient() as client:
 
-        async def _challenge_one(axon: dict) -> bool:
+        async def _challenge_one(axon: dict, timeout: float) -> bool:
             uid = axon["uid"]
             hotkey = axon["hotkey"]
-            ip = axon.get("ip", "")
-            port = axon.get("port", 0)
-
-            if not ip or not port:
-                return False
-
             metrics = scorer.get_or_create(uid, hotkey)
-            miner_url = f"http://{ip}:{port}/v1/attest"
+            miner_url = f"http://{axon['ip']}:{axon['port']}/v1/attest"
             request_id = f"challenge-{uid}-{int(time.time())}"
 
             async with sem:
@@ -660,7 +668,7 @@ async def challenge_miners_attestation(
                         miner_url,
                         content=body,
                         headers={"Content-Type": "application/json", **auth_headers},
-                        timeout=120.0,
+                        timeout=timeout,
                     )
                     latency = time.perf_counter() - start
 
@@ -708,9 +716,22 @@ async def challenge_miners_attestation(
                     log.debug("attest_challenge_unreachable", uid=uid, err=str(e))
                     return True
 
-        results = await asyncio.gather(*[_challenge_one(axon) for axon in miner_axons])
-        challenged = sum(1 for r in results if r)
+        # Challenge proven/unproven miners first with full timeout
+        results = await asyncio.gather(*[_challenge_one(a, 210.0) for a in proven_axons])
+        proven_count = sum(1 for r in results if r)
+
+        # Probe known-failed miners with short timeout for redemption
+        probe_results = await asyncio.gather(*[_challenge_one(a, 15.0) for a in probe_axons])
+        probe_count = sum(1 for r in probe_results if r)
+
+        challenged = proven_count + probe_count
 
     if challenged:
-        log.info("attest_challenge_round_complete", url=url, miners_challenged=challenged)
+        log.info(
+            "attest_challenge_round_complete",
+            url=url,
+            proven_challenged=proven_count,
+            probed=probe_count,
+            total=challenged,
+        )
     return challenged
