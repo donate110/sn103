@@ -617,6 +617,37 @@ _ATTESTATION_CHALLENGE_URLS = [
 ]
 
 
+async def _probe_attest_capability(
+    client: httpx.AsyncClient,
+    axons: list[dict],
+    concurrency: int = 20,
+) -> list[dict]:
+    """Fast probe to find miners that have /v1/attest endpoint.
+
+    POSTs an empty body — miners with the endpoint return 422 (validation
+    error) instantly, miners without it return 404 or timeout.
+    Returns the list of axons that responded with 422.
+    """
+    sem = asyncio.Semaphore(concurrency)
+    capable: list[dict] = []
+
+    async def _probe(axon: dict) -> None:
+        url = f"http://{axon['ip']}:{axon['port']}/v1/attest"
+        async with sem:
+            try:
+                resp = await client.post(
+                    url, content=b"{}", headers={"Content-Type": "application/json"},
+                    timeout=5.0,
+                )
+                if resp.status_code == 422:
+                    capable.append(axon)
+            except httpx.HTTPError:
+                pass
+
+    await asyncio.gather(*[_probe(a) for a in axons])
+    return capable
+
+
 async def challenge_miners_attestation(
     scorer: MinerScorer,
     miner_axons: list[dict],
@@ -624,35 +655,29 @@ async def challenge_miners_attestation(
 ) -> int:
     """Run a TLSNotary attestation challenge against capable miners.
 
-    Splits miners into two groups:
-    - Proven/unproven: challenged with full timeout (210s)
-    - Known-failed: challenged with short timeout (15s) so they can
-      redeem themselves without blocking the queue for hours
+    Two phases:
+    1. Fast probe (5s): POST empty body to all miners to find which ones
+       have /v1/attest (422 = has it, 404/timeout = doesn't)
+    2. Full challenge (210s): send real attestation to capable miners only
 
     Returns the number of miners challenged.
     """
     url = random.choice(_ATTESTATION_CHALLENGE_URLS)
 
-    # Classify miners by attestation history
-    candidate_uids = [a["uid"] for a in miner_axons if a.get("ip") and a.get("port")]
-    ranked = scorer.select_attest_miners(candidate_uids, max_results=len(candidate_uids))
-    ranked_uids = {uid for uid, _ in ranked}
-
-    proven_axons: list[dict] = []
-    probe_axons: list[dict] = []
-    for axon in miner_axons:
-        if not axon.get("ip") or not axon.get("port"):
-            continue
-        if axon["uid"] in ranked_uids:
-            proven_axons.append(axon)
-        else:
-            probe_axons.append(axon)
-
-    sem = asyncio.Semaphore(4)
+    reachable = [a for a in miner_axons if a.get("ip") and a.get("port")]
 
     async with httpx.AsyncClient() as client:
+        # Phase 1: fast probe all miners (~15s for 246 miners at concurrency 20)
+        capable = await _probe_attest_capability(client, reachable)
+        log.info("attest_probe_complete", total=len(reachable), capable=len(capable))
 
-        async def _challenge_one(axon: dict, timeout: float) -> bool:
+        if not capable:
+            return 0
+
+        # Phase 2: full challenge only capable miners
+        sem = asyncio.Semaphore(4)
+
+        async def _challenge_one(axon: dict) -> bool:
             uid = axon["uid"]
             hotkey = axon["hotkey"]
             metrics = scorer.get_or_create(uid, hotkey)
@@ -668,7 +693,7 @@ async def challenge_miners_attestation(
                         miner_url,
                         content=body,
                         headers={"Content-Type": "application/json", **auth_headers},
-                        timeout=timeout,
+                        timeout=210.0,
                     )
                     latency = time.perf_counter() - start
 
@@ -716,22 +741,15 @@ async def challenge_miners_attestation(
                     log.debug("attest_challenge_unreachable", uid=uid, err=str(e))
                     return True
 
-        # Challenge proven/unproven miners first with full timeout
-        results = await asyncio.gather(*[_challenge_one(a, 210.0) for a in proven_axons])
-        proven_count = sum(1 for r in results if r)
-
-        # Probe known-failed miners with short timeout for redemption
-        probe_results = await asyncio.gather(*[_challenge_one(a, 15.0) for a in probe_axons])
-        probe_count = sum(1 for r in probe_results if r)
-
-        challenged = proven_count + probe_count
+        results = await asyncio.gather(*[_challenge_one(a) for a in capable])
+        challenged = sum(1 for r in results if r)
 
     if challenged:
         log.info(
             "attest_challenge_round_complete",
             url=url,
-            proven_challenged=proven_count,
-            probed=probe_count,
-            total=challenged,
+            probed=len(reachable),
+            capable=len(capable),
+            challenged=challenged,
         )
     return challenged
