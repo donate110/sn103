@@ -156,7 +156,7 @@ async fn main() -> Result<()> {
     let request = Request::builder()
         .uri(&path)
         .header("Host", &host)
-        .header("Accept", "application/json")
+        .header("Accept", "*/*")
         .header("Accept-Encoding", "identity")
         .header("Connection", "close")
         .header("User-Agent", USER_AGENT)
@@ -171,19 +171,31 @@ async fn main() -> Result<()> {
     info!("Response status: {}", status);
 
     if status != StatusCode::OK {
-        anyhow::bail!("server returned non-200 status: {status}");
+        tracing::warn!("server returned non-200 status: {status}");
     }
 
     // Finalize prover.
     let mut prover = prover_task.await??;
 
-    // Parse HTTP transcript.
-    let transcript = HttpTranscript::parse(prover.transcript())?;
+    // Try HTTP-aware transcript commit (selective disclosure).
+    // Fall back to raw transcript commit if HTTP parsing fails (e.g. chunked encoding).
+    let http_transcript_result = HttpTranscript::parse(prover.transcript());
+    let use_raw = http_transcript_result.is_err();
+    if use_raw {
+        info!("HTTP parsing failed, falling back to raw transcript commitment");
+    }
 
-    // Commit to transcript segments.
-    let mut builder = TranscriptCommitConfig::builder(prover.transcript());
-    DefaultHttpCommitter::default().commit_transcript(&mut builder, &transcript)?;
-    let transcript_commit = builder.build()?;
+    let transcript_commit = if let Ok(ref transcript) = http_transcript_result {
+        let mut builder = TranscriptCommitConfig::builder(prover.transcript());
+        DefaultHttpCommitter::default().commit_transcript(&mut builder, transcript)?;
+        builder.build()?
+    } else {
+        // Raw: commit entire sent and received ranges
+        let mut builder = TranscriptCommitConfig::builder(prover.transcript());
+        builder.commit_sent(&(0..prover.transcript().sent().len()))?;
+        builder.commit_recv(&(0..prover.transcript().received().len()))?;
+        builder.build()?
+    };
 
     // Build attestation request config.
     let mut builder = RequestConfig::builder();
@@ -247,34 +259,38 @@ async fn main() -> Result<()> {
 
     info!("Attestation received and validated. Building presentation...");
 
-    // Build presentation with selective disclosure.
-    let http_transcript = HttpTranscript::parse(secrets.transcript())?;
+    // Build presentation — HTTP-aware selective disclosure or raw full disclosure.
     let mut proof_builder = secrets.transcript_proof_builder();
 
-    let req = &http_transcript.requests[0];
-    // Reveal request structure and target.
-    proof_builder.reveal_sent(&req.without_data())?;
-    proof_builder.reveal_sent(&req.request.target)?;
+    if !use_raw {
+        // HTTP-aware: selective disclosure with header redaction
+        let http_transcript = HttpTranscript::parse(secrets.transcript())?;
 
-    // Reveal headers, redacting sensitive ones.
-    for header in &req.headers {
-        let name_lower = header.name.as_str().to_lowercase();
-        if redact_set.iter().any(|r| name_lower.contains(r)) {
-            // Redact the value but reveal the header name.
-            proof_builder.reveal_sent(&header.without_value())?;
-        } else {
-            proof_builder.reveal_sent(header)?;
+        let req = &http_transcript.requests[0];
+        proof_builder.reveal_sent(&req.without_data())?;
+        proof_builder.reveal_sent(&req.request.target)?;
+
+        for header in &req.headers {
+            let name_lower = header.name.as_str().to_lowercase();
+            if redact_set.iter().any(|r| name_lower.contains(r)) {
+                proof_builder.reveal_sent(&header.without_value())?;
+            } else {
+                proof_builder.reveal_sent(header)?;
+            }
         }
-    }
 
-    // Reveal full response (headers + body).
-    let resp = &http_transcript.responses[0];
-    proof_builder.reveal_recv(&resp.without_data())?;
-    for header in &resp.headers {
-        proof_builder.reveal_recv(header)?;
-    }
-    if let Some(body) = resp.body.as_ref() {
-        proof_builder.reveal_recv(body)?;
+        let resp = &http_transcript.responses[0];
+        proof_builder.reveal_recv(&resp.without_data())?;
+        for header in &resp.headers {
+            proof_builder.reveal_recv(header)?;
+        }
+        if let Some(body) = resp.body.as_ref() {
+            proof_builder.reveal_recv(body)?;
+        }
+    } else {
+        // Raw: reveal entire sent and received transcript
+        proof_builder.reveal_sent(&(0..secrets.transcript().sent().len()))?;
+        proof_builder.reveal_recv(&(0..secrets.transcript().received().len()))?;
     }
 
     let transcript_proof = proof_builder.build()?;
