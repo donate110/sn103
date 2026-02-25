@@ -14,7 +14,7 @@ interface AttestResult {
   error: string | null;
 }
 
-type Status = "idle" | "proving" | "done" | "error";
+type Status = "idle" | "proving" | "verifying" | "done" | "error";
 
 function useElapsedTimer(running: boolean) {
   const [elapsed, setElapsed] = useState(0);
@@ -40,7 +40,7 @@ export default function AttestPage() {
   const [result, setResult] = useState<AttestResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showApi, setShowApi] = useState(false);
-  const elapsed = useElapsedTimer(status === "proving");
+  const elapsed = useElapsedTimer(status === "proving" || status === "verifying");
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -68,6 +68,26 @@ export default function AttestPage() {
         }
 
         const data = await resp.json();
+
+        // If proof exists but validator didn't verify, try client-side WASM verification
+        if (data.success && !data.verified && data.proof_hex) {
+          setResult(data);
+          setStatus("verifying");
+          try {
+            const { verifyProof } = await import("@/lib/wasm/verify");
+            const verifyResult = await verifyProof(data.proof_hex);
+            if (verifyResult.status === "verified") {
+              data.verified = true;
+              // Fill in response_body from WASM verification if validator didn't provide it
+              if (!data.response_body && verifyResult.response_body) {
+                data.response_body = verifyResult.response_body;
+              }
+            }
+          } catch {
+            // WASM verification failed — show result as-is
+          }
+        }
+
         setResult(data);
         setStatus("done");
         if (data && !data.success) {
@@ -147,22 +167,23 @@ export default function AttestPage() {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             required
-            disabled={status === "proving"}
+            disabled={status === "proving" || status === "verifying"}
           />
           <p className="text-xs text-slate-400 mt-1">Must be a public HTTPS URL. Smaller pages (articles, API endpoints) work best. Very large pages (homepages, feeds) may time out.</p>
 
           <button
             type="submit"
             className="mt-4 w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-6 py-2.5 text-sm font-medium text-white hover:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={status === "proving" || !url}
+            disabled={status === "proving" || status === "verifying" || !url}
           >
-            {status === "proving" ? (
+            {status === "proving" || status === "verifying" ? (
               <>
                 <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                Generating proof... {elapsed > 0 && <span className="tabular-nums">{elapsed}s</span>}
+                {status === "verifying" ? "Verifying proof..." : "Generating proof..."}{" "}
+                {elapsed > 0 && <span className="tabular-nums">{elapsed}s</span>}
               </>
             ) : (
               "Attest"
@@ -170,6 +191,13 @@ export default function AttestPage() {
           </button>
         </form>
       </div>
+
+      {/* Input disabled overlay */}
+      {status === "verifying" && (
+        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700">
+          Verifying proof in your browser...
+        </div>
+      )}
 
       {/* Error message */}
       {errorMsg && (

@@ -1,0 +1,27 @@
+[package]
+name = "djinn-tlsn-verify-wasm"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "WASM TLSNotary proof verifier for browser-side verification"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tlsn-attestation = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.14", package = "tlsn-attestation" }
+tlsn-core = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.14", package = "tlsn-core", features = ["mozilla-certs"] }
+
+bincode = "1"
+# getrandom 0.2 (used by ring) needs "js" feature for WASM
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+# getrandom 0.3 (used by rand 0.9 / tlsn) needs "wasm_js" feature for WASM
+getrandom = { version = "0.3", features = ["wasm_js"] }
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wasm-bindgen = "0.2"
+
+[profile.release]
+opt-level = "s"
+lto = true
