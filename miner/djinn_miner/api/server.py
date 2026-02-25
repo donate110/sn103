@@ -202,6 +202,7 @@ def create_app(
         arbitrary web content.
         """
         from djinn_miner.core import tlsn as tlsn_module
+        from djinn_miner.utils.watchtower import task_started, task_finished
 
         start = time.perf_counter()
         timestamp = int(time.time())
@@ -217,6 +218,7 @@ def create_app(
                 error="TLSNotary prover binary not available",
             )
 
+        task_started()
         try:
             result = await asyncio.wait_for(
                 tlsn_module.generate_proof(request.url, timeout=180.0),
@@ -241,6 +243,8 @@ def create_app(
                 status_code=503,
                 content={"detail": "Service shutting down"},
             )
+        finally:
+            task_finished()
 
         elapsed = time.perf_counter() - start
         ATTESTATION_DURATION.observe(elapsed)

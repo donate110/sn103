@@ -27,6 +27,35 @@ log = structlog.get_logger()
 _ENABLED = os.getenv("AUTO_UPDATE", "false").lower() in ("true", "1", "yes")
 _BRANCH = os.getenv("AUTO_UPDATE_BRANCH", "main")
 _INTERVAL = int(os.getenv("AUTO_UPDATE_INTERVAL", "300"))
+_DRAIN_TIMEOUT = 300  # Max seconds to wait for in-flight tasks before restarting
+
+# Counter for in-flight tasks. Increment before starting work,
+# decrement when done. Watchtower waits for this to reach zero.
+_in_flight: int = 0
+_in_flight_zero: asyncio.Event | None = None
+
+
+def _get_zero_event() -> asyncio.Event:
+    global _in_flight_zero
+    if _in_flight_zero is None:
+        _in_flight_zero = asyncio.Event()
+        _in_flight_zero.set()
+    return _in_flight_zero
+
+
+def task_started() -> None:
+    """Call when a long-running task (e.g. TLSNotary proof) begins."""
+    global _in_flight
+    _in_flight += 1
+    _get_zero_event().clear()
+
+
+def task_finished() -> None:
+    """Call when a long-running task completes."""
+    global _in_flight
+    _in_flight = max(0, _in_flight - 1)
+    if _in_flight == 0:
+        _get_zero_event().set()
 
 
 def _find_repo_root() -> Path | None:
@@ -161,6 +190,24 @@ async def watch_loop(package_dir: Path | None = None) -> None:
 
             if not _install_deps(package_dir):
                 continue
+
+            # Wait for in-flight tasks to finish before restarting
+            if _in_flight > 0:
+                log.info(
+                    "watchtower_draining",
+                    in_flight=_in_flight,
+                    timeout_s=_DRAIN_TIMEOUT,
+                )
+                try:
+                    await asyncio.wait_for(
+                        _get_zero_event().wait(), timeout=_DRAIN_TIMEOUT
+                    )
+                except TimeoutError:
+                    log.warning(
+                        "watchtower_drain_timeout",
+                        in_flight=_in_flight,
+                        msg="Restarting anyway after drain timeout",
+                    )
 
             _restart()
 
