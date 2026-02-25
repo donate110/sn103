@@ -121,7 +121,7 @@ export default function AttestPage() {
           <li className="flex gap-3">
             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold">2</span>
             <span>
-              <strong>Wait for the proof.</strong> A miner on Bittensor Subnet 103 generates a TLSNotary proof (30-90 seconds). The validator verifies it.
+              <strong>Wait for the proof.</strong> A miner on Bittensor Subnet 103 generates a TLSNotary proof. Simple pages take 30 seconds; large pages can take up to 3 minutes.
             </span>
           </li>
           <li className="flex gap-3">
@@ -149,7 +149,7 @@ export default function AttestPage() {
             required
             disabled={status === "proving"}
           />
-          <p className="text-xs text-slate-400 mt-1">Must be an HTTPS URL.</p>
+          <p className="text-xs text-slate-400 mt-1">Must be a public HTTPS URL. Smaller pages (articles, API endpoints) work best. Very large pages (homepages, feeds) may time out.</p>
 
           <button
             type="submit"
@@ -174,7 +174,20 @@ export default function AttestPage() {
       {/* Error message */}
       {errorMsg && (
         <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {errorMsg}
+          <p>{errorMsg}</p>
+          {!errorMsg.includes("github.com") && (
+            <p className="mt-2 text-xs text-red-500">
+              Persistent issues?{" "}
+              <a
+                href="https://github.com/djinn-inc/djinn/issues"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-red-700"
+              >
+                Report it on GitHub
+              </a>
+            </p>
+          )}
         </div>
       )}
 

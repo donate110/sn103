@@ -25,13 +25,70 @@ async function getValidatorUrls(): Promise<string[]> {
 }
 
 const MAX_ATTEMPTS = 3;
-const TIMEOUT_MS = 150_000; // 150s per attempt (TLSNotary takes up to 90s)
+const TIMEOUT_MS = 240_000; // 240s per attempt (large pages can take up to 180s)
+
+/**
+ * Translate raw backend errors into helpful human-readable messages.
+ * Users see these directly — make them actionable.
+ */
+function humanizeError(raw: string): string {
+  const lower = raw.toLowerCase();
+
+  // Response too large for the configured TLSNotary buffer
+  if (lower.includes("more data than was configured") || lower.includes("max_recv")) {
+    return "This page is too large to attest (over 2 MB uncompressed). Try attesting a specific article or API endpoint instead of a homepage.";
+  }
+  // TLS certificate issues
+  if (lower.includes("badcertificate") || lower.includes("certificate")) {
+    return "Could not verify this site's TLS certificate. The site may use an unusual certificate authority or have an expired certificate.";
+  }
+  // Connection closed / interrupted
+  if (lower.includes("connection closed") || lower.includes("connection reset")) {
+    return "The target website closed the connection before the proof could complete. This can happen with sites that block automated requests. Try a different page or URL.";
+  }
+  // Timeouts
+  if (lower.includes("timed out") || lower.includes("timeout")) {
+    return "The proof took too long to generate. Large or slow-loading pages need more time. Try a smaller page, a specific article URL, or try again in a moment.";
+  }
+  // Binary not found (miner misconfigured)
+  if (lower.includes("binary not found") || lower.includes("binary not available")) {
+    return "The attestation service is temporarily misconfigured. This has been logged and the team has been notified. Please try again later.";
+  }
+  // Server returned non-200 (e.g. 403, 401)
+  if (lower.includes("status 403") || lower.includes("forbidden")) {
+    return "This website blocked the attestation request (403 Forbidden). Some sites require login or block automated access. Try a publicly accessible page.";
+  }
+  if (lower.includes("status 401") || lower.includes("unauthorized")) {
+    return "This website requires authentication (401 Unauthorized). Only publicly accessible pages can be attested.";
+  }
+  if (lower.includes("status 404") || lower.includes("not found")) {
+    return "The page was not found (404). Double-check the URL and make sure the page exists.";
+  }
+  // DNS / unreachable
+  if (lower.includes("unreachable") || lower.includes("dns") || lower.includes("resolve")) {
+    return "Could not reach this website. Check that the URL is correct and the site is online.";
+  }
+  // Miner busy / 503
+  if (lower.includes("service shutting down") || lower.includes("503")) {
+    return "The attestation service is temporarily busy. Please try again in a minute.";
+  }
+  // No miners/validators
+  if (lower.includes("no reachable miners") || lower.includes("no validators")) {
+    return "No attestation services are currently available on the network. Please try again in a few minutes.";
+  }
+  // Proof verification failed
+  if (lower.includes("verification") && lower.includes("failed")) {
+    return "The proof was generated but could not be verified. This is unusual — please try again.";
+  }
+  // Fallback: return the raw error but with a help suffix
+  return `${raw}. If this persists, please report it at github.com/djinn-inc/djinn/issues.`;
+}
 
 /**
  * POST /api/attest — Proxy attestation requests to validators with fallback.
  *
  * Tries up to 3 randomly-selected validators sequentially. Each attempt has
- * a 150s timeout to accommodate TLSNotary proof generation.
+ * a 240s timeout to accommodate TLSNotary proof generation for large pages.
  *
  * Body: { url: string, request_id: string }
  * Response: AttestResponse from the validator
@@ -46,12 +103,18 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Could not parse the request. Make sure you're sending valid JSON with a \"url\" field." },
+      { status: 400 },
+    );
   }
 
   // Server-side validation
   if (!body.url || typeof body.url !== "string" || !body.url.startsWith("https://") || body.url.length > 2048) {
-    return NextResponse.json({ error: "URL must start with https:// and be under 2048 chars" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Please enter a valid HTTPS URL (must start with https:// and be under 2048 characters)." },
+      { status: 400 },
+    );
   }
   // Block SSRF to private/internal addresses
   try {
@@ -66,13 +129,22 @@ export async function POST(request: NextRequest) {
       host.endsWith(".internal") ||
       /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(host)
     ) {
-      return NextResponse.json({ error: "Private/internal URLs not allowed" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Only public websites can be attested. Internal or private network URLs are not supported." },
+        { status: 400 },
+      );
     }
   } catch {
-    return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
+    return NextResponse.json(
+      { error: "This doesn't look like a valid URL. Please check the format and try again." },
+      { status: 400 },
+    );
   }
   if (!body.request_id || typeof body.request_id !== "string" || body.request_id.length > 256) {
-    return NextResponse.json({ error: "request_id is required (max 256 chars)" }, { status: 400 });
+    return NextResponse.json(
+      { error: "A request_id is required (max 256 characters)." },
+      { status: 400 },
+    );
   }
 
   const sanitizedBody = {
@@ -82,7 +154,7 @@ export async function POST(request: NextRequest) {
 
   const validators = await getValidatorUrls();
   const attempts = Math.min(MAX_ATTEMPTS, validators.length);
-  let lastError = "No validators available";
+  let lastError = "No attestation services are currently available on the network. Please try again in a few minutes.";
 
   for (let i = 0; i < attempts; i++) {
     const target = `${validators[i]}/v1/attest`;
@@ -94,21 +166,25 @@ export async function POST(request: NextRequest) {
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
       if (res.ok) {
-        const text = await res.text();
-        return new NextResponse(text, {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
+        const data = await res.json();
+        // Translate miner/validator errors into human-readable messages
+        if (data && !data.success && data.error) {
+          data.error = humanizeError(data.error);
+        }
+        return NextResponse.json(data);
       }
-      // Non-200 = validator can't handle it, try next
-      lastError = `Validator ${i + 1}/${attempts} returned ${res.status}`;
+      // Non-200 = try next validator
+      if (res.status === 404) {
+        lastError = "This validator doesn't support attestation yet. Trying others...";
+      } else {
+        lastError = `Attestation service returned an error (${res.status}). Tried ${i + 1} of ${attempts} services.`;
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === "TimeoutError") {
-        lastError = `Validator ${i + 1}/${attempts} timed out`;
+        lastError = "The attestation took too long. Large pages can take up to 3 minutes — try a smaller page, or try again.";
       } else {
-        lastError = `Validator ${i + 1}/${attempts} unavailable`;
+        lastError = `Could not reach attestation service (tried ${i + 1} of ${attempts}). The network may be temporarily unavailable.`;
       }
-      // Try next validator
     }
   }
 

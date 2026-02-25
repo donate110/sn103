@@ -219,8 +219,8 @@ def create_app(
 
         try:
             result = await asyncio.wait_for(
-                tlsn_module.generate_proof(request.url, timeout=90.0),
-                timeout=120.0,
+                tlsn_module.generate_proof(request.url, timeout=180.0),
+                timeout=210.0,
             )
         except TimeoutError:
             ATTESTATION_REQUESTS.labels(status="error").inc()
