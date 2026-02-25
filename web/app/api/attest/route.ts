@@ -69,6 +69,10 @@ function humanizeError(raw: string): string {
   if (lower.includes("unreachable") || lower.includes("dns") || lower.includes("resolve")) {
     return "Could not reach this website. Check that the URL is correct and the site is online.";
   }
+  // Miner internal error / 500
+  if (lower.includes("status 500") || lower.includes("internal server error")) {
+    return "The attestation miner encountered an internal error. This is usually temporary — please try again.";
+  }
   // Miner busy / 503
   if (lower.includes("service shutting down") || lower.includes("503")) {
     return "The attestation service is temporarily busy. Please try again in a minute.";
