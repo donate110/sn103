@@ -60,7 +60,7 @@ async def generate_proof(
     notary_host: str | None = None,
     notary_port: int | None = None,
     output_dir: str | None = None,
-    timeout: float = 60.0,
+    timeout: float = 180.0,
 ) -> TLSNProofResult:
     """Generate a TLSNotary proof for an HTTPS request.
 

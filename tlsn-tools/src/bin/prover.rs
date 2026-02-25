@@ -178,36 +178,56 @@ async fn main() -> Result<()> {
     let mut prover = prover_task.await??;
 
     // Try HTTP-aware transcript commit (selective disclosure).
-    // Fall back to raw transcript commit if HTTP parsing fails (e.g. chunked encoding).
+    // Fall back to full-reveal mode if HTTP parsing fails (e.g. chunked encoding).
+    // Full-reveal uses the "reveal all" fast path which discloses the TLS key
+    // directly instead of per-byte ZK proofs — O(1) instead of O(n) in response size.
     let http_transcript_result = HttpTranscript::parse(prover.transcript());
     let use_raw = http_transcript_result.is_err();
     if use_raw {
-        info!("HTTP parsing failed, falling back to raw transcript commitment");
+        info!("HTTP parsing failed, using full-reveal mode (fast path)");
     }
 
-    let transcript_commit = if let Ok(ref transcript) = http_transcript_result {
+    let (request_config, disclosure_config) = if !use_raw {
+        // HTTP-aware: selective disclosure with per-field hash commitments.
         let mut builder = TranscriptCommitConfig::builder(prover.transcript());
-        DefaultHttpCommitter::default().commit_transcript(&mut builder, transcript)?;
-        builder.build()?
+        DefaultHttpCommitter::default()
+            .commit_transcript(&mut builder, http_transcript_result.as_ref().unwrap())?;
+        let transcript_commit = builder.build()?;
+
+        let mut req_builder = RequestConfig::builder();
+        req_builder.transcript_commit(transcript_commit);
+        let request_config = req_builder.build()?;
+
+        let mut prove_builder = ProveConfig::builder(prover.transcript());
+        if let Some(config) = request_config.transcript_commit() {
+            prove_builder.transcript_commit(config.clone());
+        }
+        let disclosure_config = prove_builder.build()?;
+        (request_config, disclosure_config)
     } else {
-        // Raw: commit entire sent and received ranges
-        let mut builder = TranscriptCommitConfig::builder(prover.transcript());
-        builder.commit_sent(&(0..prover.transcript().sent().len()))?;
-        builder.commit_recv(&(0..prover.transcript().received().len()))?;
-        builder.build()?
+        // Raw full-reveal: commit entire transcript AND reveal all.
+        // Having both reveal_all + commit triggers the is_reveal_all fast path
+        // in prove_plaintext(): plaintext is verified via key disclosure (O(1))
+        // instead of per-byte ZK circuits (O(n)). Hash commitments are still
+        // created for the presentation, but cheaply — no garbled circuits.
+        let mut commit_builder = TranscriptCommitConfig::builder(prover.transcript());
+        commit_builder.commit_sent(&(0..prover.transcript().sent().len()))?;
+        commit_builder.commit_recv(&(0..prover.transcript().received().len()))?;
+        let transcript_commit = commit_builder.build()?;
+
+        let mut req_builder = RequestConfig::builder();
+        req_builder.transcript_commit(transcript_commit);
+        let request_config = req_builder.build()?;
+
+        let mut prove_builder = ProveConfig::builder(prover.transcript());
+        if let Some(config) = request_config.transcript_commit() {
+            prove_builder.transcript_commit(config.clone());
+        }
+        prove_builder.reveal_sent_all()?;
+        prove_builder.reveal_recv_all()?;
+        let disclosure_config = prove_builder.build()?;
+        (request_config, disclosure_config)
     };
-
-    // Build attestation request config.
-    let mut builder = RequestConfig::builder();
-    builder.transcript_commit(transcript_commit);
-    let request_config = builder.build()?;
-
-    // Build prove config.
-    let mut builder = ProveConfig::builder(prover.transcript());
-    if let Some(config) = request_config.transcript_commit() {
-        builder.transcript_commit(config.clone());
-    }
-    let disclosure_config = builder.build()?;
 
     let ProverOutput {
         transcript_commitments,
