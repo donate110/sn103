@@ -704,26 +704,24 @@ def create_app(
     # Web Attestation (whitepaper §15 — pure Bittensor)
     # ------------------------------------------------------------------
 
-    # Round-robin index for miner selection
-    _attest_miner_idx = [0]
-
     @app.post("/v1/attest", response_model=AttestResponse)
     async def attest_url(req: AttestRequest) -> AttestResponse:
         """Dispatch a TLSNotary attestation request to a miner and verify the proof.
 
         Flow:
-        1. Pick a miner from the metagraph (round-robin)
-        2. POST the URL to the miner's /v1/attest endpoint
+        1. Rank miners by attestation track record (proven > unproven > failed)
+        2. Try up to 3 miners sequentially with short timeouts
         3. Verify the returned TLSNotary proof
         4. Return the verified proof to the caller
         """
+        import json as _json
         import time as _t
 
         start = _t.perf_counter()
         ATTESTATION_DISPATCHED.inc()
 
-        # Get list of reachable miners
-        miner_axons: list[dict] = []
+        # Build axon lookup by UID
+        axon_by_uid: dict[int, dict] = {}
         if neuron:
             for uid in neuron.get_miner_uids():
                 try:
@@ -731,22 +729,35 @@ def create_app(
                     ip = axon.get("ip", "")
                     port = axon.get("port", 0)
                     if ip and port:
-                        miner_axons.append({
+                        axon_by_uid[uid] = {
                             "uid": uid, "ip": ip, "port": port,
                             "hotkey": axon.get("hotkey", ""),
-                        })
+                        }
                 except (IndexError, KeyError, AttributeError) as exc:
                     log.warning("attest_axon_lookup_failed", uid=uid, error=str(exc))
 
-        # Fallback: if no miners on the metagraph, use configured miner URL
-        if not miner_axons and fallback_miner_url:
-            miner_axons.append({
-                "uid": -1, "ip": "", "port": 0,
-                "hotkey": "fallback",
-                "_url": fallback_miner_url.rstrip("/") + "/v1/attest",
-            })
+        # Smart miner selection: proven miners first, then unproven
+        candidates: list[tuple[dict, str]] = []  # (axon_info, tier)
+        if scorer is not None and axon_by_uid:
+            ranked = scorer.select_attest_miners(list(axon_by_uid.keys()))
+            for uid, tier in ranked:
+                if uid in axon_by_uid:
+                    candidates.append((axon_by_uid[uid], tier))
 
-        if not miner_axons:
+        # Fallback: if scorer has no data yet, try all miners with health responses
+        if not candidates and axon_by_uid:
+            for uid, axon in list(axon_by_uid.items())[:5]:
+                candidates.append((axon, "unproven"))
+
+        # Last resort: configured fallback miner URL
+        if not candidates and fallback_miner_url:
+            candidates.append((
+                {"uid": -1, "ip": "", "port": 0, "hotkey": "fallback",
+                 "_url": fallback_miner_url.rstrip("/") + "/v1/attest"},
+                "fallback",
+            ))
+
+        if not candidates:
             if attestation_log is not None:
                 attestation_log.log_attestation(
                     url=req.url, request_id=req.request_id,
@@ -760,121 +771,93 @@ def create_app(
                 error="No reachable miners available",
             )
 
-        # Round-robin miner selection
-        idx = _attest_miner_idx[0] % len(miner_axons)
-        _attest_miner_idx[0] = idx + 1
-        selected = miner_axons[idx]
-
-        miner_url = selected.get("_url") or f"http://{selected['ip']}:{selected['port']}/v1/attest"
         log.info(
-            "attest_dispatching",
+            "attest_candidates",
             url=req.url,
             request_id=req.request_id,
-            miner_uid=selected["uid"],
+            candidates=[(c[0]["uid"], c[1]) for c in candidates],
         )
 
-        # Dispatch to miner (shared client for connection reuse, signed request)
-        try:
-            import json as _json
-            _body = _json.dumps({"url": req.url, "request_id": req.request_id}).encode()
-            _auth_hdrs: dict[str, str] = {}
-            if neuron and neuron.wallet:
-                from djinn_validator.api.middleware import create_signed_headers
-                _auth_hdrs = create_signed_headers("/v1/attest", _body, neuron.wallet)
-            resp = await _attest_client.post(
-                miner_url,
-                content=_body,
-                headers={"Content-Type": "application/json", **_auth_hdrs},
-                timeout=120.0,
-            )
-        except httpx.HTTPError as e:
-            elapsed = _t.perf_counter() - start
-            ATTESTATION_DURATION.observe(elapsed)
-            ATTESTATION_VERIFIED.labels(valid="false").inc()
-            log.warning("attest_miner_unreachable", miner_uid=selected["uid"], err=str(e))
-            if attestation_log is not None:
-                attestation_log.log_attestation(
-                    url=req.url, request_id=req.request_id,
-                    success=False, verified=False,
-                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
-                    error=f"Miner unreachable: {e}",
-                )
-            return AttestResponse(
-                request_id=req.request_id,
+        # Try up to 3 miners sequentially
+        _body = _json.dumps({"url": req.url, "request_id": req.request_id}).encode()
+        _auth_hdrs: dict[str, str] = {}
+        if neuron and neuron.wallet:
+            from djinn_validator.api.middleware import create_signed_headers
+            _auth_hdrs = create_signed_headers("/v1/attest", _body, neuron.wallet)
+
+        last_error = "No miners attempted"
+        miner_data: dict | None = None
+        selected: dict | None = None
+        proof_hex: str | None = None
+
+        for attempt, (axon, tier) in enumerate(candidates[:3]):
+            attempt_start = _t.perf_counter()
+            miner_url = axon.get("_url") or f"http://{axon['ip']}:{axon['port']}/v1/attest"
+            # Proven miners get full timeout; unproven get short timeout to fail fast
+            timeout = 210.0 if tier == "proven" else 15.0
+
+            log.info(
+                "attest_dispatching",
                 url=req.url,
-                success=False,
-                error=f"Miner unreachable: {e}",
+                request_id=req.request_id,
+                miner_uid=axon["uid"],
+                tier=tier,
+                attempt=attempt + 1,
+                timeout_s=timeout,
             )
 
-        if resp.status_code != 200:
-            elapsed = _t.perf_counter() - start
-            ATTESTATION_DURATION.observe(elapsed)
-            ATTESTATION_VERIFIED.labels(valid="false").inc()
-            error_msg = f"Miner returned status {resp.status_code}"
-            if attestation_log is not None:
-                attestation_log.log_attestation(
-                    url=req.url, request_id=req.request_id,
-                    success=False, verified=False,
-                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
-                    error=error_msg,
+            try:
+                resp = await _attest_client.post(
+                    miner_url,
+                    content=_body,
+                    headers={"Content-Type": "application/json", **_auth_hdrs},
+                    timeout=timeout,
                 )
-            return AttestResponse(
-                request_id=req.request_id,
-                url=req.url,
-                success=False,
-                error=error_msg,
-            )
+            except httpx.HTTPError as e:
+                attempt_elapsed = _t.perf_counter() - attempt_start
+                last_error = f"Miner {axon['uid']} unreachable: {e}"
+                log.warning("attest_miner_unreachable", miner_uid=axon["uid"], tier=tier, err=str(e), elapsed_s=round(attempt_elapsed, 1))
+                if scorer is not None:
+                    m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
+                    m.record_attestation(latency=attempt_elapsed, proof_valid=False)
+                continue
 
-        try:
-            miner_data = resp.json()
-        except Exception:
-            elapsed = _t.perf_counter() - start
-            ATTESTATION_DURATION.observe(elapsed)
-            ATTESTATION_VERIFIED.labels(valid="false").inc()
-            log.error(
-                "miner_malformed_json",
-                request_id=req.request_id,
-                response_text=resp.text[:500] if hasattr(resp, "text") else "<no text>",
-                status_code=resp.status_code,
-            )
-            if attestation_log is not None:
-                attestation_log.log_attestation(
-                    url=req.url, request_id=req.request_id,
-                    success=False, verified=False,
-                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
-                    error="Miner returned malformed response",
-                )
-            return AttestResponse(
-                request_id=req.request_id,
-                url=req.url,
-                success=False,
-                error="Miner returned malformed response",
-            )
+            if resp.status_code != 200:
+                last_error = f"Miner {axon['uid']} returned status {resp.status_code}"
+                log.warning("attest_miner_error", miner_uid=axon["uid"], status=resp.status_code)
+                if scorer is not None:
+                    m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
+                    m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
+                continue
 
-        if not miner_data.get("success"):
-            elapsed = _t.perf_counter() - start
-            ATTESTATION_DURATION.observe(elapsed)
-            ATTESTATION_VERIFIED.labels(valid="false").inc()
-            if scorer is not None:
-                m = scorer.get_or_create(selected["uid"], selected.get("hotkey", ""))
-                m.record_attestation(latency=elapsed, proof_valid=False)
-            error_msg = miner_data.get("error", "Miner attestation failed")
-            if attestation_log is not None:
-                attestation_log.log_attestation(
-                    url=req.url, request_id=req.request_id,
-                    success=False, verified=False,
-                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
-                    error=error_msg,
-                )
-            return AttestResponse(
-                request_id=req.request_id,
-                url=req.url,
-                success=False,
-                error=error_msg,
-            )
+            try:
+                miner_data = resp.json()
+            except Exception:
+                last_error = f"Miner {axon['uid']} returned malformed response"
+                log.error("miner_malformed_json", miner_uid=axon["uid"])
+                continue
 
-        proof_hex = miner_data.get("proof_hex")
-        if not proof_hex:
+            if not miner_data.get("success"):
+                last_error = miner_data.get("error", f"Miner {axon['uid']} attestation failed")
+                if scorer is not None:
+                    m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
+                    m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
+                log.warning("attest_miner_failed", miner_uid=axon["uid"], error=last_error)
+                miner_data = None
+                continue
+
+            proof_hex = miner_data.get("proof_hex")
+            if not proof_hex:
+                last_error = f"Miner {axon['uid']} returned no proof data"
+                miner_data = None
+                continue
+
+            # Success — we have a proof
+            selected = axon
+            break
+
+        # All attempts failed
+        if selected is None or miner_data is None or proof_hex is None:
             elapsed = _t.perf_counter() - start
             ATTESTATION_DURATION.observe(elapsed)
             ATTESTATION_VERIFIED.labels(valid="false").inc()
@@ -882,14 +865,14 @@ def create_app(
                 attestation_log.log_attestation(
                     url=req.url, request_id=req.request_id,
                     success=False, verified=False,
-                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
-                    error="Miner returned no proof data",
+                    elapsed_s=round(elapsed, 2),
+                    error=last_error,
                 )
             return AttestResponse(
                 request_id=req.request_id,
                 url=req.url,
                 success=False,
-                error="Miner returned no proof data",
+                error=last_error,
             )
 
         # Verify the TLSNotary proof
