@@ -72,16 +72,19 @@ test.setTimeout(90_000);
 
 const waitForSync = () => new Promise((r) => setTimeout(r, 4000));
 
-/** Retry a transaction once if it fails with a nonce error. */
+/** Brief delay to let Base Sepolia RPC nonce state catch up between transactions. */
+const nonceDelay = () => new Promise((r) => setTimeout(r, 3000));
+
+/** Retry a transaction once if it fails with a nonce or replacement fee error. */
 async function sendWithRetry(fn: () => Promise<ethers.ContractTransactionResponse>): Promise<ethers.ContractTransactionReceipt | null> {
   try {
     const tx = await fn();
     return tx.wait();
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("nonce") || msg.includes("NONCE")) {
-      // Stale nonce — wait for RPC sync, reconnect, and retry
-      await new Promise((r) => setTimeout(r, 3000));
+    if (msg.includes("nonce") || msg.includes("NONCE") || msg.includes("replacement")) {
+      // Stale nonce or replacement fee — wait for RPC sync, reconnect, and retry
+      await new Promise((r) => setTimeout(r, 5000));
       reconnect();
       const tx = await fn();
       return tx.wait();
@@ -378,15 +381,8 @@ test("purchase signal: second partial buy from different buyer (20 USDC)", async
     value: ethers.parseEther("0.0002"),
   });
   await ethTx.wait();
+  await nonceDelay(); // Let RPC nonce state settle before next tx from same wallet
 
-  const usdc = new ethers.Contract(
-    ADDRESSES.usdc,
-    [
-      "function mint(address to, uint256 amount) external",
-      "function approve(address spender, uint256 amount) external returns (bool)",
-    ],
-    buyer2Wallet,
-  );
   const usdcMinter = new ethers.Contract(
     ADDRESSES.usdc,
     ["function mint(address to, uint256 amount) external"],
@@ -394,7 +390,17 @@ test("purchase signal: second partial buy from different buyer (20 USDC)", async
   );
   const mintTx = await usdcMinter.mint(buyer2Wallet.address, ethers.parseUnits("100", 6));
   await mintTx.wait();
-  const approveTx = await usdc.approve(ADDRESSES.escrow, ethers.parseUnits("100", 6));
+
+  // buyer2 is a fresh wallet — use explicit nonces to avoid Base Sepolia RPC lag
+  let buyer2Nonce = 0;
+  const usdc = new ethers.Contract(
+    ADDRESSES.usdc,
+    [
+      "function approve(address spender, uint256 amount) external returns (bool)",
+    ],
+    buyer2Wallet,
+  );
+  const approveTx = await usdc.approve(ADDRESSES.escrow, ethers.parseUnits("100", 6), { nonce: buyer2Nonce++ });
   await approveTx.wait();
 
   // Deposit to escrow
@@ -408,7 +414,7 @@ test("purchase signal: second partial buy from different buyer (20 USDC)", async
     ],
     buyer2Wallet,
   );
-  const depositTx = await escrowAsBuyer2.deposit(ethers.parseUnits("50", 6));
+  const depositTx = await escrowAsBuyer2.deposit(ethers.parseUnits("50", 6), { nonce: buyer2Nonce++ });
   await depositTx.wait();
   await waitForSync();
 
@@ -419,6 +425,7 @@ test("purchase signal: second partial buy from different buyer (20 USDC)", async
     SIGNAL_ID,
     ethers.parseUnits("20", 6),
     1_200_000n, // 1.2x in 6-decimal precision
+    { nonce: buyer2Nonce++ },
   );
   const receipt = await tx.wait();
   expect(receipt?.status).toBe(1);
