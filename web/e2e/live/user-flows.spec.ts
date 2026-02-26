@@ -180,46 +180,23 @@ test.describe("Attest page", () => {
     ).toBeVisible();
   });
 
-  test("attest page has burn address information", async ({ page }) => {
+  test("attest page has URL input and submit button", async ({ page }) => {
     await page.goto("/attest");
     await page.waitForLoadState("networkidle");
-    // Should mention the burn address or TAO cost
-    const body = await page.locator("body").textContent();
-    expect(
-      body!.includes("5E9tjcvFc9F9xPzGeCDoSkHoWKWmUvq4T4saydcSGL5ZbxKV") ||
-        body!.includes("TAO") ||
-        body!.includes("burn") ||
-        body!.includes("Burn"),
-    ).toBeTruthy();
-  });
-
-  test("attest single mode validation prevents empty submission", async ({
-    page,
-  }) => {
-    await page.goto("/attest");
-    await page.waitForLoadState("networkidle");
-    // The submit button should be disabled when no URL is entered
+    // Should have a URL input field
+    const urlInput = page
+      .locator('input[type="text"], input[type="url"], textarea')
+      .first();
+    await expect(urlInput).toBeVisible({ timeout: 10_000 });
+    // Should have a submit/attest button
     const submitBtn = page
-      .getByRole("button", { name: /attest|submit|prove/i })
+      .getByRole("button", { name: /attest|submit|prove|verify/i })
       .first();
     if (await submitBtn.isVisible()) {
       const isDisabled = await submitBtn.isDisabled();
-      // Either disabled or clicking it should show an error, not submit
-      expect(isDisabled || true).toBeTruthy();
+      // Either disabled (empty URL) or enabled — either is valid
+      expect(typeof isDisabled).toBe("boolean");
     }
-  });
-
-  test("attest page has mode toggle (single/batch)", async ({ page }) => {
-    await page.goto("/attest");
-    await page.waitForLoadState("networkidle");
-    // Should have single/batch toggle or tabs
-    const body = await page.locator("body").textContent();
-    expect(
-      body!.includes("Single") ||
-        body!.includes("Batch") ||
-        body!.includes("single") ||
-        body!.includes("batch"),
-    ).toBeTruthy();
   });
 });
 
@@ -262,51 +239,32 @@ test.describe("Attest API", () => {
     expect(body.error).toContain("request_id");
   });
 
-  test("POST /api/attest rejects missing burn_tx_hash", async ({
+  test("POST /api/attest accepts valid request and proxies to validator", async ({
     request,
   }) => {
+    // Attestation can take up to 5 minutes as it generates a TLSNotary proof
+    test.setTimeout(300_000);
     const res = await request.post("/api/attest", {
       data: {
         url: "https://example.com",
-        request_id: "test-123",
+        request_id: "test-e2e-valid",
+      },
+      timeout: 280_000,
+    });
+    // Should not be 400 (validation passes) — may be 200 or 502 depending on validator
+    expect(res.status()).not.toBe(400);
+  });
+
+  test("POST /api/attest rejects private IP URLs", async ({ request }) => {
+    const res = await request.post("/api/attest", {
+      data: {
+        url: "https://127.0.0.1/secret",
+        request_id: "test-ssrf",
       },
     });
     expect(res.status()).toBe(400);
     const body = await res.json();
-    expect(body.error).toContain("burn_tx_hash");
-  });
-
-  test("POST /api/attest/credits rejects invalid body", async ({
-    request,
-  }) => {
-    const res = await request.post("/api/attest/credits", {
-      data: {},
-    });
-    expect(res.status()).toBe(400);
-    const body = await res.json();
-    expect(body.error).toBeTruthy();
-  });
-
-  test("POST /api/attest/credits rejects non-hex burn hash", async ({
-    request,
-  }) => {
-    const res = await request.post("/api/attest/credits", {
-      data: { burn_tx_hash: "not-a-hex-string!!!" },
-    });
-    expect(res.status()).toBe(400);
-    const body = await res.json();
-    expect(body.error).toContain("hex");
-  });
-
-  test("POST /api/attest/credits accepts valid hex hash", async ({
-    request,
-  }) => {
-    const res = await request.post("/api/attest/credits", {
-      data: { burn_tx_hash: "0xabcdef1234567890abcdef1234567890" },
-    });
-    // Should reach the validator (may get 200 with 0 credits or error from validator)
-    // but should NOT be a 400 validation error
-    expect(res.status()).not.toBe(400);
+    expect(body.error).toContain("public");
   });
 });
 

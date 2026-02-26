@@ -230,16 +230,18 @@ test.describe("Leaderboard interactions", () => {
 // ─────────────────────────────────────────────
 
 test.describe("Attest page interactions", () => {
-  test("attest page has Single and Batch mode toggle", async ({ page }) => {
+  test("attest page has URL input and heading", async ({ page }) => {
     await page.goto("/attest");
     await page.waitForLoadState("networkidle");
-    // Labels are "Single URL" and "Batch (multiple URLs)"
-    const singleBtn = page.getByText(/single url/i).first();
-    const batchBtn = page.getByText(/batch/i).first();
-    const hasModeToggle =
-      (await singleBtn.isVisible().catch(() => false)) ||
-      (await batchBtn.isVisible().catch(() => false));
-    expect(hasModeToggle).toBeTruthy();
+    // Should have the attest heading
+    await expect(
+      page.getByRole("heading", { name: /attest/i }).first(),
+    ).toBeVisible({ timeout: 10_000 });
+    // Should have a URL input field
+    const urlInput = page
+      .locator('input[type="text"], input[type="url"], textarea')
+      .first();
+    await expect(urlInput).toBeVisible();
   });
 
   test("attest page URL input accepts text", async ({ page }) => {
