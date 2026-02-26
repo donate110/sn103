@@ -337,7 +337,19 @@ class ValidatorAuthMiddleware(BaseHTTPMiddleware):
         super().__init__(app)  # type: ignore[arg-type]
         self._neuron = neuron
         import os
-        self._enabled = os.getenv("REQUIRE_VALIDATOR_AUTH", "").lower() in ("1", "true", "yes")
+        env_val = os.getenv("REQUIRE_VALIDATOR_AUTH", "").lower()
+        bt_network = os.getenv("BT_NETWORK", "").lower()
+        if env_val in ("1", "true", "yes"):
+            self._enabled = True
+        elif env_val in ("0", "false", "no"):
+            self._enabled = False
+            if bt_network in ("finney", "mainnet"):
+                log.warning("validator_auth_disabled_production", msg="REQUIRE_VALIDATOR_AUTH=false on production network — miners are exposed to unauthenticated queries")
+        else:
+            # Not explicitly set — default to on for production
+            self._enabled = bt_network in ("finney", "mainnet")
+            if self._enabled:
+                log.info("validator_auth_auto_enabled", msg="REQUIRE_VALIDATOR_AUTH defaulting to true on production network")
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         path = request.url.path

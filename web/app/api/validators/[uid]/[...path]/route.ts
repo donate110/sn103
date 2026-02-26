@@ -27,7 +27,7 @@ function isValidOrigin(request: NextRequest): boolean {
     "https://www.djinn.gg",
     ...(process.env.NODE_ENV !== "production" ? ["http://localhost:3000"] : []),
   ];
-  return allowed.includes(origin) || origin.endsWith(".vercel.app");
+  return allowed.includes(origin) || origin.endsWith(".djinn.vercel.app");
 }
 
 async function proxy(
@@ -66,8 +66,13 @@ async function proxy(
     "Content-Type": "application/json",
   };
 
+  const MAX_BODY = 1_000_000; // 1 MB
   const init: RequestInit = { method: request.method, headers };
   if (request.method !== "GET" && request.method !== "HEAD") {
+    const cl = parseInt(request.headers.get("content-length") || "0");
+    if (cl > MAX_BODY) {
+      return NextResponse.json({ error: "Payload too large" }, { status: 413 });
+    }
     init.body = await request.text();
   }
 

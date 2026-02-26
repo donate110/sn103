@@ -135,26 +135,32 @@ class DjinnValidator:
             return int(tensor_or_val.item())
         return int(tensor_or_val)
 
+    _sync_pool: Any = None  # Reused ThreadPoolExecutor
+    _sync_in_flight: bool = False
+
     def sync_metagraph(self, timeout: float = 30.0) -> None:
         """Re-sync the metagraph to pick up new registrations/deregistrations.
 
-        Uses a thread with a timeout to prevent the epoch loop from hanging
-        if the subtensor WebSocket connection is unresponsive.
+        Uses a reusable thread pool with a timeout to prevent the epoch loop
+        from hanging if the subtensor WebSocket connection is unresponsive.
         """
         if self.subtensor and self.metagraph:
+            if self._sync_in_flight:
+                log.debug("metagraph_sync_skipped", reason="previous sync still running")
+                return
             import concurrent.futures
 
-            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            future = pool.submit(self.metagraph.sync, subtensor=self.subtensor)
+            if self._sync_pool is None:
+                self._sync_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            self._sync_in_flight = True
+            future = self._sync_pool.submit(self.metagraph.sync, subtensor=self.subtensor)
             try:
                 future.result(timeout=timeout)
+                log.debug("metagraph_synced", n=self._safe_item(self.metagraph.n))
             except concurrent.futures.TimeoutError:
                 log.warning("metagraph_sync_timeout", timeout_s=timeout)
-                # Don't wait for the thread — let it dangle and die
-                pool.shutdown(wait=False, cancel_futures=True)
-                return
-            pool.shutdown(wait=False)
-            log.debug("metagraph_synced", n=self._safe_item(self.metagraph.n))
+            finally:
+                self._sync_in_flight = False
 
     def apply_burn(self, weights: dict[int, float], burn_fraction: float) -> dict[int, float]:
         """Allocate burn_fraction of weight to UID 0, scale miners to the remainder.

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyAdminRequest } from "@/lib/admin-auth";
 
 /**
  * GET /api/admin/feedback?limit=50&state=open
@@ -11,17 +12,8 @@ const GITHUB_REPO = process.env.ERROR_REPORT_REPO || "djinn-inc/error-reports";
 const GITHUB_TOKEN = process.env.GITHUB_ERROR_TOKEN || "";
 
 export async function GET(request: NextRequest) {
-  // Verify admin session via httpOnly cookie
-  const token = request.cookies.get("djinn_admin_token")?.value;
-  if (!token || !token.startsWith("ZGppbm4tYWRtaW46")) {
-    const authHeader = request.headers.get("authorization");
-    const bearerPassword = authHeader?.startsWith("Bearer ")
-      ? authHeader.slice(7)
-      : null;
-    const expected = process.env.ADMIN_PASSWORD;
-    if (!expected || !bearerPassword || bearerPassword !== expected) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!verifyAdminRequest(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   if (!GITHUB_TOKEN) {
@@ -62,7 +54,6 @@ export async function GET(request: NextRequest) {
       created_at: issue.created_at,
       updated_at: issue.updated_at,
       html_url: issue.html_url,
-      // Parse structured fields from the body
       ...parseIssueBody(issue.body || ""),
     }));
 

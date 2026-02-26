@@ -127,12 +127,15 @@ class TestBuildChallengeLines:
         games = [ESPNGame(espn_id="1", home_team="", away_team="")]
         assert build_challenge_lines(games, "basketball_nba") == []
 
-    def test_synthetic_lines_have_fake_event_ids(self) -> None:
+    def test_synthetic_lines_have_distinct_event_ids(self) -> None:
         games = [_make_game(), _make_game("evt2")]
         lines = build_challenge_lines(games, "basketball_nba")
         synthetic = [l for l in lines if l.get("is_synthetic")]
+        real_ids = {l["event_id"] for l in lines if not l.get("is_synthetic")}
         for s in synthetic:
-            assert s["event_id"].startswith("fake_")
+            # Synthetic IDs are SHA256 hex hashes, distinct from real event IDs
+            assert len(s["event_id"]) == 24
+            assert s["event_id"] not in real_ids
 
 
 # ---------------------------------------------------------------------------

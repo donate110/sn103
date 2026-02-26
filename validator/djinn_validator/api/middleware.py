@@ -240,10 +240,13 @@ def verify_hotkey_signature(
         return keypair.verify(message, bytes.fromhex(signature))
     except ImportError:
         # Bittensor not available — default deny. Only skip verification
-        # when explicitly opted in via DEV_SKIP_SIG_VERIFY=1.
+        # when explicitly opted in via DEV_SKIP_SIG_VERIFY=1 on non-production networks.
         import os
 
         if os.getenv("DEV_SKIP_SIG_VERIFY") == "1":
+            if os.getenv("BT_NETWORK", "") in ("finney", "mainnet"):
+                log.error("dev_skip_sig_verify_blocked", reason="DEV_SKIP_SIG_VERIFY=1 is not allowed on production networks")
+                return False
             log.warning("signature_verification_skipped", reason="bittensor not installed, DEV_SKIP_SIG_VERIFY=1")
             return True
         log.error(

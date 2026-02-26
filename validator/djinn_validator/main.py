@@ -9,6 +9,7 @@ import asyncio
 import os
 import random
 import signal
+import time
 
 import httpx
 import structlog
@@ -70,6 +71,9 @@ async def epoch_loop(
     # Throttle miner challenges: once every CHALLENGE_INTERVAL_EPOCHS epochs (~10 min)
     CHALLENGE_INTERVAL_EPOCHS = 50  # 50 * 12s = 10 minutes
     epoch_count = 0
+    # Time-based fallback: reset scorer if weights haven't been set in MAX_EPOCH_DURATION
+    MAX_EPOCH_DURATION = 1800  # 30 minutes
+    last_reset_time = time.monotonic()
 
     while True:
         try:
@@ -196,7 +200,7 @@ async def epoch_loop(
             if audit_set_store:
                 ready_sets = audit_set_store.get_ready_sets()
                 for audit_set in ready_sets:
-                    result = batch_settle_audit_set(audit_set, share_store)
+                    result = batch_settle_audit_set(audit_set, share_store, threshold=config.shares_threshold)
                     if result is None:
                         continue
                     # Phase 3: Submit aggregate quality score vote on-chain
@@ -252,6 +256,17 @@ async def epoch_loop(
                 # Reset per-epoch metrics after weight setting (increments
                 # consecutive_epochs for miners that participated)
                 scorer.reset_epoch()
+                last_reset_time = time.monotonic()
+            elif time.monotonic() - last_reset_time > MAX_EPOCH_DURATION:
+                # Fallback: reset scorer even if weights weren't set to prevent
+                # unbounded metric accumulation when weight-setting is stuck
+                log.warning(
+                    "epoch_reset_fallback",
+                    seconds_since_reset=round(time.monotonic() - last_reset_time),
+                    msg="Resetting scorer metrics — weight-setting has not fired in 30 min",
+                )
+                scorer.reset_epoch()
+                last_reset_time = time.monotonic()
 
             consecutive_errors = 0
 

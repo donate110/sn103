@@ -1,41 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHmac, timingSafeEqual } from "crypto";
-
-const TOKEN_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
-
-function getSecret(): string {
-  return process.env.ADMIN_PASSWORD || "";
-}
-
-function signToken(payload: string): string {
-  return createHmac("sha256", getSecret()).update(payload).digest("hex");
-}
-
-function createToken(): string {
-  const payload = `djinn-admin:${Date.now()}`;
-  const sig = signToken(payload);
-  return Buffer.from(`${payload}:${sig}`).toString("base64");
-}
-
-function verifyToken(token: string): boolean {
-  try {
-    const decoded = Buffer.from(token, "base64").toString("utf-8");
-    const parts = decoded.split(":");
-    if (parts.length !== 3) return false;
-
-    const [prefix, timestampStr, sig] = parts;
-    if (prefix !== "djinn-admin") return false;
-
-    const timestamp = parseInt(timestampStr, 10);
-    if (isNaN(timestamp) || Date.now() - timestamp > TOKEN_TTL_MS) return false;
-
-    const expectedSig = signToken(`${prefix}:${timestampStr}`);
-    if (sig.length !== expectedSig.length) return false;
-    return timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig));
-  } catch {
-    return false;
-  }
-}
+import { createToken, verifyToken } from "@/lib/admin-auth";
 
 /**
  * GET /api/admin/auth
@@ -57,6 +21,8 @@ export async function GET(request: NextRequest) {
  * Returns an HMAC-signed session token stored as an httpOnly cookie.
  */
 export async function POST(request: NextRequest) {
+  const { timingSafeEqual } = await import("crypto");
+
   const expected = process.env.ADMIN_PASSWORD;
   if (!expected) {
     return NextResponse.json(

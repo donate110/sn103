@@ -64,7 +64,8 @@ class TestHealthEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert data["version"] == "0.1.0"
+        from djinn_miner import __version__
+        assert data["version"] == __version__
         assert data["uid"] == 42
         assert data["odds_api_connected"] is True
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "crypto";
+import { verifyAdminRequest } from "@/lib/admin-auth";
 
 /**
  * GET /api/admin/errors?limit=50
@@ -9,27 +9,11 @@ import { timingSafeEqual } from "crypto";
  */
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-
-  // Verify admin session via httpOnly cookie
-  const token = request.cookies.get("djinn_admin_token")?.value;
-  if (!token || !token.startsWith("ZGppbm4tYWRtaW46")) {
-    // Also accept Bearer token for backwards compatibility (e.g., CLI tools)
-    const authHeader = request.headers.get("authorization");
-    const bearerPassword = authHeader?.startsWith("Bearer ")
-      ? authHeader.slice(7)
-      : null;
-    const expected = process.env.ADMIN_PASSWORD;
-    if (
-      !expected ||
-      !bearerPassword ||
-      bearerPassword.length !== expected.length ||
-      !timingSafeEqual(Buffer.from(bearerPassword), Buffer.from(expected))
-    ) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!verifyAdminRequest(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const { searchParams } = new URL(request.url);
   const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 200);
 
   try {

@@ -16,6 +16,7 @@ IDs) provide absolute ground truth. TLSNotary proofs target outliers.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import random
 import time
@@ -160,7 +161,7 @@ def build_challenge_lines(games: list[ESPNGame], sport: str) -> list[dict]:
         base = random.choice(real_lines)
         selected.append({
             "sport": sport,
-            "event_id": f"fake_{base['event_id']}_{i}",
+            "event_id": hashlib.sha256(f"{base['event_id']}:synthetic:{i}".encode()).hexdigest()[:24],
             "home_team": base["home_team"],
             "away_team": base["away_team"],
             "market": base["market"],

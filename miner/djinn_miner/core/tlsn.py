@@ -92,13 +92,31 @@ async def generate_proof(
         log.debug("tlsn_redirect_check_failed", error=str(e))
 
     # Create output file
+    tmp_dir: str | None = None
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, "presentation.bin")
     else:
-        tmp = tempfile.mkdtemp(prefix="djinn-tlsn-")
-        output_path = os.path.join(tmp, "presentation.bin")
+        tmp_dir = tempfile.mkdtemp(prefix="djinn-tlsn-")
+        output_path = os.path.join(tmp_dir, "presentation.bin")
 
+    try:
+        return await _run_prover(url, host, port, output_path, timeout)
+    except Exception:
+        # Ensure temp dir is cleaned up on any unexpected exception
+        if tmp_dir:
+            _cleanup_dir(output_path)
+        raise
+
+
+async def _run_prover(
+    url: str,
+    host: str,
+    port: int,
+    output_path: str,
+    timeout: float,
+) -> TLSNProofResult:
+    """Run the TLSNotary prover binary and return the result."""
     # Split URL at query params to avoid leaking API key in /proc/*/cmdline
     from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 

@@ -21,12 +21,27 @@ async function getMinerUrl(): Promise<string> {
   return "http://localhost:8422";
 }
 
+function isValidOrigin(request: NextRequest): boolean {
+  const origin = request.headers.get("origin") ?? "";
+  if (!origin) return true;
+  const allowed = [
+    process.env.NEXT_PUBLIC_APP_URL || "https://djinn.gg",
+    "https://www.djinn.gg",
+    ...(process.env.NODE_ENV !== "production" ? ["http://localhost:3000"] : []),
+  ];
+  return allowed.includes(origin) || origin.endsWith(".djinn.vercel.app");
+}
+
 async function proxy(
   request: NextRequest,
   { params }: { params: { path: string[] } },
 ) {
   if (isRateLimited("miner-proxy", getIp(request))) {
     return rateLimitResponse();
+  }
+
+  if (request.method === "POST" && !isValidOrigin(request)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const path = params.path.join("/");
@@ -39,8 +54,13 @@ async function proxy(
     "Content-Type": "application/json",
   };
 
+  const MAX_BODY = 1_000_000; // 1 MB
   const init: RequestInit = { method: request.method, headers };
   if (request.method !== "GET" && request.method !== "HEAD") {
+    const cl = parseInt(request.headers.get("content-length") || "0");
+    if (cl > MAX_BODY) {
+      return NextResponse.json({ error: "Payload too large" }, { status: 413 });
+    }
     init.body = await request.text();
   }
 
