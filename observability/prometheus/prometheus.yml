@@ -3,42 +3,37 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  # RunPod validators (val-1 through val-8, external ports 12223-12230)
-  - job_name: "validator-runpod"
+  # Remote validators (update targets with your deployment IPs/ports)
+  - job_name: "validator-remote"
     static_configs:
       - targets:
-          - "213.144.200.206:12223"
-          - "213.144.200.206:12224"
-          - "213.144.200.206:12225"
-          - "213.144.200.206:12226"
-          - "213.144.200.206:12227"
-          - "213.144.200.206:12228"
-          - "213.144.200.206:12229"
-          - "213.144.200.206:12230"
+          # Example: "YOUR_HOST_IP:12223"
+          []
         labels:
           environment: "testnet"
-          host: "runpod"
+          host: "remote"
     metrics_path: /metrics
     scrape_timeout: 10s
 
-  # VPS validators (local, ports 8431-8432)
-  - job_name: "validator-vps"
+  # Local validators (running on same host as prometheus)
+  - job_name: "validator-local"
     static_configs:
       - targets:
           - "host.docker.internal:8431"
           - "host.docker.internal:8432"
         labels:
           environment: "testnet"
-          host: "vps"
+          host: "local"
     metrics_path: /metrics
 
-  # RunPod miner (external port 12222)
+  # Miner (update target with your deployment IP/port)
   - job_name: "miner"
     static_configs:
       - targets:
-          - "213.144.200.206:12222"
+          # Example: "YOUR_HOST_IP:12222"
+          []
         labels:
           environment: "testnet"
-          host: "runpod"
+          host: "remote"
     metrics_path: /metrics
     scrape_timeout: 10s
