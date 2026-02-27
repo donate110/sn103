@@ -474,6 +474,7 @@ class AttestRequest(BaseModel):
             raise ValueError("URL must use HTTPS")
         from urllib.parse import urlparse
         import ipaddress
+        import socket
 
         parsed = urlparse(v)
         if not parsed.hostname:
@@ -486,7 +487,16 @@ class AttestRequest(BaseModel):
         try:
             addr = ipaddress.ip_address(hostname)
         except ValueError:
-            pass  # Not an IP literal — it's a domain name, which is fine
+            # Domain name — resolve to IP and check for private/internal addresses
+            try:
+                resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                for family, _, _, _, sockaddr in resolved:
+                    ip_str = sockaddr[0]
+                    addr = ipaddress.ip_address(ip_str)
+                    if not addr.is_global:
+                        raise ValueError("URL must not point to private/internal addresses")
+            except socket.gaierror:
+                pass  # DNS resolution failed — will fail at request time anyway
         else:
             if not addr.is_global:
                 raise ValueError("URL must not point to private/internal addresses")

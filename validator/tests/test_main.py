@@ -45,6 +45,13 @@ def mock_outcome_attestor() -> AsyncMock:
     return attestor
 
 
+@pytest.fixture(autouse=True)
+def _patch_sleep():
+    """Prevent real sleeps in all epoch loop tests."""
+    with patch("djinn_validator.main.asyncio.sleep", new_callable=AsyncMock):
+        yield
+
+
 class TestEpochLoop:
     """Test the validator's main epoch loop."""
 
@@ -59,7 +66,7 @@ class TestEpochLoop:
         """One successful epoch cycle: sync, health check, resolve, score."""
         call_count = 0
 
-        def counting_sync():
+        def counting_sync(**kwargs):
             nonlocal call_count
             call_count += 1
             if call_count >= 2:
@@ -84,7 +91,7 @@ class TestEpochLoop:
         """Each miner gets a health check recorded (and consecutive_epochs incremented)."""
         call_count = 0
 
-        def counting_sync():
+        def counting_sync(**kwargs):
             nonlocal call_count
             call_count += 1
             if call_count >= 2:
@@ -131,7 +138,7 @@ class TestEpochLoop:
 
         call_count = 0
 
-        def counting_sync():
+        def counting_sync(**kwargs):
             nonlocal call_count
             call_count += 1
             if call_count >= 2:
@@ -158,7 +165,7 @@ class TestEpochLoop:
 
         call_count = 0
 
-        def counting_sync():
+        def counting_sync(**kwargs):
             nonlocal call_count
             call_count += 1
             if call_count >= 2:
@@ -184,7 +191,7 @@ class TestEpochLoop:
 
         call_count = 0
 
-        def counting_sync():
+        def counting_sync(**kwargs):
             nonlocal call_count
             call_count += 1
             if call_count >= 2:
@@ -207,7 +214,7 @@ class TestEpochLoop:
         """Errors trigger backoff, not a crash."""
         call_count = 0
 
-        def error_then_cancel():
+        def error_then_cancel(**kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -255,7 +262,7 @@ class TestEpochLoop:
 
         call_count = 0
 
-        def counting_sync():
+        def counting_sync(**kwargs):
             nonlocal call_count
             call_count += 1
             if call_count >= 2:

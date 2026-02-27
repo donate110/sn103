@@ -138,10 +138,13 @@ class DjinnMiner:
             return int(tensor_or_val.item())
         return int(tensor_or_val)
 
-    def sync_metagraph(self) -> None:
-        """Re-sync the metagraph."""
+    def sync_metagraph(self, timeout: float = 30.0) -> None:
+        """Re-sync the metagraph with a timeout to prevent hangs."""
         if self.subtensor and self.metagraph:
-            self.metagraph.sync(subtensor=self.subtensor)
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(self.metagraph.sync, subtensor=self.subtensor)
+                future.result(timeout=timeout)
             log.debug("metagraph_synced", n=self._safe_item(self.metagraph.n))
 
     def is_registered(self) -> bool:

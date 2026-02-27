@@ -560,8 +560,8 @@ async def _request_and_verify_proof(
             return False, False
 
         proof_data = proof_resp.json()
-        if proof_data.get("status") != "submitted" and proof_data.get("status") != "verified":
-            return True, False
+        if proof_data.get("status") not in ("submitted", "verified"):
+            return False, False
 
         # Extract and verify the TLSNotary presentation bytes if present
         proof_bytes = None
@@ -678,7 +678,8 @@ async def challenge_miners_attestation(
         # Phase 2: full challenge only capable miners
         sem = asyncio.Semaphore(4)
 
-        async def _challenge_one(axon: dict) -> bool:
+        async def _challenge_one(axon: dict) -> tuple[bool, bool]:
+            """Returns (attempted, proof_valid)."""
             uid = axon["uid"]
             hotkey = axon["hotkey"]
             metrics = scorer.get_or_create(uid, hotkey)
@@ -701,7 +702,7 @@ async def challenge_miners_attestation(
                     if resp.status_code != 200:
                         metrics.record_attestation(latency=latency, proof_valid=False)
                         log.debug("attest_challenge_error", uid=uid, status=resp.status_code)
-                        return True
+                        return True, False
 
                     try:
                         data = resp.json()
@@ -712,7 +713,7 @@ async def challenge_miners_attestation(
                             response_text=resp.text[:300] if hasattr(resp, "text") else "<no text>",
                         )
                         metrics.record_attestation(latency=latency, proof_valid=False)
-                        return True
+                        return True, False
 
                     proof_valid = data.get("success", False) and bool(data.get("proof_hex"))
 
@@ -734,16 +735,17 @@ async def challenge_miners_attestation(
 
                     metrics.record_attestation(latency=latency, proof_valid=proof_valid)
                     log.info("attest_challenge_scored", uid=uid, proof_valid=proof_valid, latency_s=round(latency, 3))
-                    return True
+                    return True, proof_valid
 
                 except httpx.HTTPError as e:
                     latency = time.perf_counter() - start
                     metrics.record_attestation(latency=latency, proof_valid=False)
                     log.debug("attest_challenge_unreachable", uid=uid, err=str(e))
-                    return True
+                    return True, False
 
         results = await asyncio.gather(*[_challenge_one(a) for a in capable])
-        challenged = sum(1 for r in results if r)
+        challenged = sum(1 for attempted, _ in results if attempted)
+        verified = sum(1 for _, valid in results if valid)
 
     if challenged:
         log.info(
@@ -752,5 +754,6 @@ async def challenge_miners_attestation(
             probed=len(reachable),
             capable=len(capable),
             challenged=challenged,
+            verified=verified,
         )
     return challenged

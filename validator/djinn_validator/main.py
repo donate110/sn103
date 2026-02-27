@@ -61,6 +61,8 @@ async def epoch_loop(
     activity: ActivityBuffer | None = None,
     audit_set_store: AuditSetStore | None = None,
     burn_fraction: float = 0.95,
+    espn_client: ESPNClient | None = None,
+    shares_threshold: int = 3,
 ) -> None:
     """Main validator epoch loop: sync metagraph, score miners, set weights."""
     log.info(
@@ -70,6 +72,7 @@ async def epoch_loop(
     consecutive_errors = 0
     # Throttle miner challenges: once every CHALLENGE_INTERVAL_EPOCHS epochs (~10 min)
     CHALLENGE_INTERVAL_EPOCHS = 50  # 50 * 12s = 10 minutes
+    ATTESTATION_CHALLENGE_INTERVAL = 100  # 100 * 12s = ~20 min
     epoch_count = 0
     # Time-based fallback: reset scorer if weights haven't been set in MAX_EPOCH_DURATION
     MAX_EPOCH_DURATION = 1800  # 30 minutes
@@ -87,34 +90,26 @@ async def epoch_loop(
 
             # Prune deregistered miner UIDs from scorer
             scorer.prune_absent(set(miner_uids))
+
+            async def _check_health(client: httpx.AsyncClient, uid: int) -> None:
+                axon = neuron.get_axon_info(uid)
+                hotkey = axon.get("hotkey", f"uid-{uid}")
+                ip = axon.get("ip", "")
+                port = axon.get("port", 0)
+                metrics = scorer.get_or_create(uid, hotkey)
+                if not ip or not port:
+                    metrics.record_health_check(responded=False)
+                    return
+                url = f"http://{ip}:{port}/health"
+                try:
+                    resp = await client.get(url)
+                    responded = resp.status_code == 200
+                except httpx.HTTPError:
+                    responded = False
+                metrics.record_health_check(responded=responded)
+
             async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
-                for uid in miner_uids:
-                    axon = neuron.get_axon_info(uid)
-                    hotkey = axon.get("hotkey", f"uid-{uid}")
-                    ip = axon.get("ip", "")
-                    port = axon.get("port", 0)
-                    metrics = scorer.get_or_create(uid, hotkey)
-
-                    if not ip or not port:
-                        metrics.record_health_check(responded=False)
-                        log.debug("miner_no_axon", uid=uid, hotkey=hotkey)
-                        continue
-
-                    url = f"http://{ip}:{port}/health"
-                    try:
-                        resp = await client.get(url)
-                        responded = resp.status_code == 200
-                    except httpx.HTTPError:
-                        responded = False
-
-                    metrics.record_health_check(responded=responded)
-                    log.debug(
-                        "miner_health_check",
-                        uid=uid,
-                        hotkey=hotkey,
-                        url=url,
-                        responded=responded,
-                    )
+                await asyncio.gather(*[_check_health(client, uid) for uid in miner_uids])
 
             if activity is not None and miner_uids:
                 responded = sum(
@@ -129,7 +124,6 @@ async def epoch_loop(
 
             # Challenge miners for accuracy scoring (throttled)
             epoch_count += 1
-            ATTESTATION_CHALLENGE_INTERVAL = 100  # 100 * 12s = ~20 min
             if epoch_count % CHALLENGE_INTERVAL_EPOCHS == 0:
                 if miner_uids:
                     miner_axons = []
@@ -200,7 +194,7 @@ async def epoch_loop(
             if audit_set_store:
                 ready_sets = audit_set_store.get_ready_sets()
                 for audit_set in ready_sets:
-                    result = batch_settle_audit_set(audit_set, share_store, threshold=config.shares_threshold)
+                    result = batch_settle_audit_set(audit_set, share_store, threshold=shares_threshold)
                     if result is None:
                         continue
                     # Phase 3: Submit aggregate quality score vote on-chain
@@ -439,7 +433,11 @@ async def async_main() -> None:
     ]
     if bt_ok:
         running_tasks.append(asyncio.create_task(
-            epoch_loop(neuron, scorer, share_store, outcome_attestor, chain_client, activity, audit_set_store, config.bt_burn_fraction)
+            epoch_loop(
+                neuron, scorer, share_store, outcome_attestor,
+                chain_client, activity, audit_set_store, config.bt_burn_fraction,
+                espn_client=espn_client, shares_threshold=config.shares_threshold,
+            )
         ))
         # Validator set sync: discover peers via metagraph, propose on-chain changes
         if chain_client.can_write:

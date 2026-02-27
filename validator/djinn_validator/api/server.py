@@ -794,7 +794,7 @@ def create_app(
             attempt_start = _t.perf_counter()
             miner_url = axon.get("_url") or f"http://{axon['ip']}:{axon['port']}/v1/attest"
             # Proven miners get full timeout; unproven get short timeout to fail fast
-            timeout = 210.0 if tier == "proven" else 15.0
+            timeout = 210.0 if tier == "proven" else 120.0
 
             log.info(
                 "attest_dispatching",
@@ -817,7 +817,7 @@ def create_app(
                 attempt_elapsed = _t.perf_counter() - attempt_start
                 last_error = f"Miner {axon['uid']} unreachable: {e}"
                 log.warning("attest_miner_unreachable", miner_uid=axon["uid"], tier=tier, err=str(e), elapsed_s=round(attempt_elapsed, 1))
-                if scorer is not None:
+                if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=attempt_elapsed, proof_valid=False)
                 continue
@@ -825,7 +825,7 @@ def create_app(
             if resp.status_code != 200:
                 last_error = f"Miner {axon['uid']} returned status {resp.status_code}"
                 log.warning("attest_miner_error", miner_uid=axon["uid"], status=resp.status_code)
-                if scorer is not None:
+                if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
                 continue
@@ -839,7 +839,7 @@ def create_app(
 
             if not miner_data.get("success"):
                 last_error = miner_data.get("error", f"Miner {axon['uid']} attestation failed")
-                if scorer is not None:
+                if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
                 log.warning("attest_miner_failed", miner_uid=axon["uid"], error=last_error)
@@ -933,7 +933,7 @@ def create_app(
         ATTESTATION_VERIFIED.labels(valid=str(verify_result.verified).lower()).inc()
 
         # Record attestation performance in scorer for weight setting
-        if scorer is not None:
+        if scorer is not None and selected["uid"] >= 0:
             miner_metrics = scorer.get_or_create(
                 selected["uid"], selected.get("hotkey", "")
             )
@@ -1056,14 +1056,12 @@ def create_app(
             )
             checks["account_configured"] = bool(cfg.account_address) and zero not in cfg.account_address
             checks["collateral_configured"] = bool(cfg.collateral_address) and zero not in cfg.collateral_address
-            checks["sports_api_key"] = bool(cfg.sports_api_key)
         except Exception as e:
             log.warning("readiness_config_error", error=str(e))
             checks["escrow_configured"] = False
             checks["signal_configured"] = False
             checks["account_configured"] = False
             checks["collateral_configured"] = False
-            checks["sports_api_key"] = False
 
         # Bittensor connectivity
         checks["bt_connected"] = neuron is not None and neuron.uid is not None
