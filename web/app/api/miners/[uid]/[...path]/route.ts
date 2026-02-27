@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { discoverMetagraph } from "@/lib/bt-metagraph";
 import { getIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
 
-const ALLOWED_PATHS = new Set(["health"]);
+const ALLOWED_PATHS = new Set(["health", "v1/telemetry"]);
 
 async function resolveMinerUrl(uid: number): Promise<string | null> {
   const { nodes } = await discoverMetagraph();

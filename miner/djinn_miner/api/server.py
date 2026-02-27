@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from djinn_miner.core.checker import LineChecker
     from djinn_miner.core.health import HealthTracker
     from djinn_miner.core.proof import ProofGenerator
+    from djinn_miner.core.telemetry import TelemetryStore
 
 log = structlog.get_logger()
 
@@ -54,6 +55,7 @@ def create_app(
     rate_limit_capacity: int = 30,
     rate_limit_rate: int = 5,
     neuron: DjinnMiner | None = None,
+    telemetry: TelemetryStore | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with all routes wired."""
 
@@ -129,6 +131,8 @@ def create_app(
             )
         except TimeoutError:
             log.error("check_lines_timeout", lines=len(request.lines))
+            if telemetry:
+                telemetry.record("challenge_error", f"Check timed out ({len(request.lines)} lines)", error="timeout")
             return JSONResponse(
                 status_code=504,
                 content={"detail": "Line check timed out"},
@@ -155,6 +159,27 @@ def create_app(
             time_ms=round(elapsed_ms, 1),
             api_error=check_result.api_error,
         )
+
+        if telemetry:
+            telemetry.record(
+                "challenge_received",
+                f"Check {len(request.lines)} lines → {len(available_indices)} available ({round(elapsed_ms)}ms)",
+                lines_requested=[
+                    {"index": l.index, "sport": l.sport, "event_id": l.event_id,
+                     "home_team": l.home_team, "away_team": l.away_team,
+                     "market": l.market, "line": l.line, "side": l.side}
+                    for l in request.lines
+                ],
+                available_indices=available_indices,
+                results=[
+                    {"index": r.index, "available": r.available,
+                     "bookmakers": [{"bookmaker": b.bookmaker, "odds": b.odds} for b in (r.bookmakers or [])]}
+                    for r in results
+                ],
+                elapsed_ms=round(elapsed_ms, 1),
+                query_id=checker.last_query_id,
+                api_error=check_result.api_error,
+            )
 
         return CheckResponse(
             results=results,
@@ -210,6 +235,8 @@ def create_app(
         if not tlsn_module.is_available():
             ATTESTATION_REQUESTS.labels(status="error").inc()
             log.warning("attest_tlsn_unavailable", url=request.url)
+            if telemetry:
+                telemetry.record("attestation_error", f"TLSNotary unavailable for {request.url}", url=request.url, request_id=request.request_id, error="tlsn_unavailable")
             return AttestResponse(
                 request_id=request.request_id,
                 url=request.url,
@@ -257,6 +284,8 @@ def create_app(
                 request_id=request.request_id,
                 error=result.error,
             )
+            if telemetry:
+                telemetry.record("attestation_failed", f"Attestation failed for {request.url}", url=request.url, request_id=request.request_id, error=result.error, elapsed_s=round(elapsed, 1))
             return AttestResponse(
                 request_id=request.request_id,
                 url=request.url,
@@ -275,6 +304,8 @@ def create_app(
             proof_size=len(result.presentation_bytes or b""),
             elapsed_s=round(elapsed, 1),
         )
+        if telemetry:
+            telemetry.record("attestation_success", f"Attested {request.url} ({round(elapsed, 1)}s)", url=request.url, request_id=request.request_id, server=result.server, proof_size=len(result.presentation_bytes or b""), elapsed_s=round(elapsed, 1))
 
         return AttestResponse(
             request_id=request.request_id,
@@ -289,6 +320,8 @@ def create_app(
     async def health() -> HealthResponse:
         """Health check endpoint for validator pings."""
         health_tracker.record_ping()
+        if telemetry:
+            telemetry.record("health_ping", "Health check received")
         return health_tracker.get_status()
 
     # Cache Config for readiness checks (avoid re-loading dotenv on every probe)
@@ -320,5 +353,19 @@ def create_app(
             content=metrics_response(),
             media_type="text/plain; version=0.0.4; charset=utf-8",
         )
+
+    @app.get("/v1/telemetry")
+    async def get_telemetry(
+        limit: int = 200,
+        since: float | None = None,
+        category: str | None = None,
+        offset: int = 0,
+    ) -> dict:
+        """Query persistent telemetry events. Full history, newest first."""
+        if telemetry is None:
+            return {"events": [], "total": 0}
+        events = telemetry.query(limit=limit, since=since, category=category, offset=offset)
+        total = telemetry.count(category=category)
+        return {"events": events, "total": total}
 
     return app

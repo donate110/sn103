@@ -160,7 +160,17 @@ interface FeedbackEntry {
   errorMessage?: string;
 }
 
-type AdminTab = "overview" | "network" | "protocol" | "attestations" | "feedback";
+interface TelemetryEvent {
+  id: number;
+  timestamp: number;
+  category: string;
+  summary: string;
+  details: Record<string, unknown>;
+  sourceType: "validator" | "miner";
+  sourceUid: number;
+}
+
+type AdminTab = "overview" | "network" | "protocol" | "attestations" | "telemetry" | "feedback";
 
 const GRAFANA_URL = process.env.NEXT_PUBLIC_GRAFANA_URL || "";
 const BASE_EXPLORER = process.env.NEXT_PUBLIC_BASE_EXPLORER || "https://basescan.org";
@@ -193,6 +203,9 @@ export default function AdminDashboard() {
 
   // Attestations tab data
   const [attestations, setAttestations] = useState<AttestationEntry[]>([]);
+
+  // Telemetry tab data
+  const [telemetryEvents, setTelemetryEvents] = useState<TelemetryEvent[]>([]);
 
   // Feedback tab data
   const [feedback, setFeedback] = useState<FeedbackEntry[]>([]);
@@ -241,6 +254,7 @@ export default function AdminDashboard() {
       purchasesRes,
       auditsRes,
       attestRes,
+      telemetryRes,
       feedbackRes,
       delegatesRes,
     ] = await Promise.allSettled([
@@ -253,8 +267,9 @@ export default function AdminDashboard() {
       fetchRecentPurchases(50),     // 6
       fetchRecentAudits(50),        // 7
       fetchAttestationData(),       // 8
-      fetchFeedback(feedbackFilter),// 9
-      fetchDelegateNames(),         // 10
+      fetchTelemetry(),             // 9
+      fetchFeedback(feedbackFilter),// 10
+      fetchDelegateNames(),         // 11
     ]);
 
     if (validatorRes.status === "fulfilled") setValidators(validatorRes.value as ValidatorHealth[]);
@@ -277,6 +292,9 @@ export default function AdminDashboard() {
     if (auditsRes.status === "fulfilled") setRecentAudits(auditsRes.value as SubgraphRecentAudit[]);
     if (attestRes.status === "fulfilled") {
       setAttestations(attestRes.value as AttestationEntry[]);
+    }
+    if (telemetryRes.status === "fulfilled") {
+      setTelemetryEvents(telemetryRes.value as TelemetryEvent[]);
     }
     if (feedbackRes.status === "fulfilled") {
       setFeedback(feedbackRes.value as FeedbackEntry[]);
@@ -369,11 +387,12 @@ export default function AdminDashboard() {
             ["network", "Network"],
             ["protocol", "Protocol"],
             ["attestations", "Attestations"],
+            ["telemetry", "Telemetry"],
             ["feedback", "Feedback"],
           ] as const
         ).map(([tab, label]) => {
           const badge = getBadge(tab, {
-            networkEvents, recentSignals, recentPurchases, attestations, feedback,
+            networkEvents, recentSignals, recentPurchases, attestations, telemetryEvents, feedback,
           });
           return (
             <button
@@ -729,6 +748,10 @@ export default function AdminDashboard() {
           loading={loading}
           validators={validators}
         />
+      )}
+
+      {activeTab === "telemetry" && (
+        <TelemetryTab events={telemetryEvents} loading={loading} />
       )}
 
       {activeTab === "feedback" && (
@@ -1814,6 +1837,7 @@ function getBadge(
     recentSignals: SubgraphRecentSignal[];
     recentPurchases: SubgraphRecentPurchase[];
     attestations: AttestationEntry[];
+    telemetryEvents: TelemetryEvent[];
     feedback: FeedbackEntry[];
   },
 ): string | null {
@@ -1830,6 +1854,10 @@ function getBadge(
     case "attestations": {
       const a = data.attestations.length;
       return a > 0 ? String(a) : null;
+    }
+    case "telemetry": {
+      const t = data.telemetryEvents.length;
+      return t > 0 ? String(t) : null;
     }
     case "feedback": {
       const open = data.feedback.filter((f) => f.state === "open").length;
@@ -2048,6 +2076,321 @@ async function fetchMinerHealth(): Promise<MinerHealth[]> {
   } catch {
     return [];
   }
+}
+
+async function fetchTelemetry(): Promise<TelemetryEvent[]> {
+  try {
+    // Discover both validators and miners, then fetch /v1/telemetry from each
+    const [valRes, minRes] = await Promise.allSettled([
+      fetch("/api/validators/discover"),
+      fetch("/api/miners/discover"),
+    ]);
+
+    const validators: ValidatorNode[] =
+      valRes.status === "fulfilled" && valRes.value.ok
+        ? ((await valRes.value.json()) as { validators: ValidatorNode[] }).validators
+        : [];
+    const miners: MinerNode[] =
+      minRes.status === "fulfilled" && minRes.value.ok
+        ? ((await minRes.value.json()) as { miners: MinerNode[] }).miners
+        : [];
+
+    const fetches = [
+      ...validators.map((v) => ({
+        uid: v.uid,
+        type: "validator" as const,
+        url: `/api/validators/${v.uid}/v1/telemetry?limit=200`,
+      })),
+      ...miners.map((m) => ({
+        uid: m.uid,
+        type: "miner" as const,
+        url: `/api/miners/${m.uid}/v1/telemetry?limit=200`,
+      })),
+    ];
+
+    const results = await Promise.allSettled(
+      fetches.map(async (f) => {
+        const res = await fetch(f.url, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return ((data.events || []) as Array<{ id: number; timestamp: number; category: string; summary: string; details: Record<string, unknown> }>).map(
+          (e) => ({
+            ...e,
+            sourceType: f.type,
+            sourceUid: f.uid,
+          }),
+        );
+      }),
+    );
+
+    const all: TelemetryEvent[] = results
+      .filter((r) => r.status === "fulfilled")
+      .flatMap((r) => (r as PromiseFulfilledResult<TelemetryEvent[]>).value);
+    all.sort((a, b) => b.timestamp - a.timestamp);
+    return all.slice(0, 500);
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Telemetry Tab
+// ---------------------------------------------------------------------------
+
+const TELEMETRY_CATEGORY_COLORS: Record<string, string> = {
+  startup: "bg-green-100 text-green-700",
+  shutdown: "bg-red-100 text-red-700",
+  challenge_round: "bg-blue-100 text-blue-700",
+  challenge_received: "bg-blue-100 text-blue-700",
+  challenge_error: "bg-red-100 text-red-700",
+  attestation_challenge: "bg-cyan-100 text-cyan-700",
+  attestation_success: "bg-emerald-100 text-emerald-700",
+  attestation_failed: "bg-red-100 text-red-700",
+  attestation_error: "bg-red-100 text-red-700",
+  weight_set: "bg-amber-100 text-amber-700",
+  weight_set_failed: "bg-red-100 text-red-700",
+  outcome_resolution: "bg-purple-100 text-purple-700",
+  audit_vote: "bg-indigo-100 text-indigo-700",
+  audit_vote_error: "bg-red-100 text-red-700",
+  epoch_error: "bg-red-100 text-red-700",
+  health_ping: "bg-slate-100 text-slate-500",
+  bt_deregistered: "bg-red-100 text-red-700",
+};
+
+function TelemetryTab({ events, loading }: { events: TelemetryEvent[]; loading: boolean }) {
+  const [filter, setFilter] = useState<string | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<"all" | "validator" | "miner">("all");
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+  if (loading && events.length === 0) {
+    return <div className="text-center text-slate-400 py-12">Loading telemetry...</div>;
+  }
+
+  let filtered = events;
+  if (sourceFilter !== "all") {
+    filtered = filtered.filter((e) => e.sourceType === sourceFilter);
+  }
+  if (filter) {
+    filtered = filtered.filter((e) => e.category === filter);
+  }
+
+  const categories = [...new Set(events.map((e) => e.category))];
+  const valCount = events.filter((e) => e.sourceType === "validator").length;
+  const minCount = events.filter((e) => e.sourceType === "miner").length;
+  const errorCount = filtered.filter((e) => e.category.includes("error") || e.category.includes("failed")).length;
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-slate-700">
+            Persistent Telemetry
+            <span className="ml-2 text-xs text-slate-400">
+              ({filtered.length}{filter || sourceFilter !== "all" ? ` of ${events.length}` : ""} events)
+            </span>
+          </h3>
+          <div className="flex gap-1.5">
+            {(["all", "validator", "miner"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSourceFilter(s)}
+                className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors ${
+                  sourceFilter === s
+                    ? "bg-slate-900 text-white"
+                    : "bg-slate-200 text-slate-500 hover:bg-slate-300"
+                }`}
+              >
+                {s === "all" ? "All" : s === "validator" ? `Validators (${valCount})` : `Miners (${minCount})`}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-400 mt-1">
+          SQLite-backed event history from all nodes. Survives restarts.
+          {errorCount > 0 && <span className="text-red-400 ml-2">{errorCount} error{errorCount !== 1 ? "s" : ""}</span>}
+        </p>
+        {categories.length > 1 && (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            <button
+              onClick={() => setFilter(null)}
+              className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors ${
+                !filter ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-500 hover:bg-slate-300"
+              }`}
+            >
+              All
+            </button>
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setFilter(filter === cat ? null : cat)}
+                className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors ${
+                  filter === cat
+                    ? "bg-slate-900 text-white"
+                    : TELEMETRY_CATEGORY_COLORS[cat] || "bg-slate-100 text-slate-600"
+                }`}
+              >
+                {cat.replace(/_/g, " ")}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {filtered.length === 0 ? (
+        <div className="px-4 py-8 text-center text-slate-400 text-sm">
+          {events.length === 0
+            ? "No telemetry data available. Nodes must be running the latest version with SQLite telemetry enabled."
+            : "No events match the current filters."
+          }
+        </div>
+      ) : (
+        <div className="divide-y divide-slate-100 max-h-[700px] overflow-y-auto">
+          {filtered.map((event, i) => {
+            const isExpanded = expandedIdx === i;
+            const hasDetails = Object.keys(event.details || {}).length > 0;
+            const isError = event.category.includes("error") || event.category.includes("failed");
+            return (
+              <div key={`${event.sourceType}-${event.sourceUid}-${event.id}`} className={`hover:bg-slate-50 ${isError ? "bg-red-50/30" : ""}`}>
+                <button
+                  onClick={() => hasDetails && setExpandedIdx(isExpanded ? null : i)}
+                  className={`w-full px-4 py-2.5 text-left ${hasDetails ? "cursor-pointer" : "cursor-default"}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      {hasDetails && (
+                        <span className={`text-slate-400 text-[10px] transition-transform ${isExpanded ? "rotate-90" : ""}`}>
+                          &#9654;
+                        </span>
+                      )}
+                      <span className={`inline-block px-1.5 py-0.5 text-[10px] font-medium rounded whitespace-nowrap ${
+                        event.sourceType === "validator" ? "bg-violet-100 text-violet-700" : "bg-orange-100 text-orange-700"
+                      }`}>
+                        {event.sourceType[0].toUpperCase()}{event.sourceUid}
+                      </span>
+                      <span
+                        className={`inline-block px-1.5 py-0.5 text-[10px] font-medium rounded whitespace-nowrap ${
+                          TELEMETRY_CATEGORY_COLORS[event.category] || "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {event.category.replace(/_/g, " ")}
+                      </span>
+                      <span className="text-sm text-slate-700 truncate">{event.summary}</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                      {formatTimeAgo(event.timestamp)}
+                    </span>
+                  </div>
+                </button>
+                {isExpanded && (
+                  <TelemetryDetailPanel event={event} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TelemetryDetailPanel({ event }: { event: TelemetryEvent }) {
+  const d = event.details || {};
+  const entries = Object.entries(d);
+  if (entries.length === 0) return null;
+
+  // Separate arrays from scalars for better layout
+  const scalarEntries = entries.filter(([, v]) => !Array.isArray(v) && typeof v !== "object");
+  const arrayEntries = entries.filter(([, v]) => Array.isArray(v));
+  const objectEntries = entries.filter(([, v]) => typeof v === "object" && v !== null && !Array.isArray(v));
+
+  const isError = event.category.includes("error") || event.category.includes("failed");
+  const borderColor = isError ? "border-red-200" : "border-slate-200";
+  const bgColor = isError ? "bg-red-50" : "bg-slate-50";
+
+  return (
+    <div className={`mx-4 mb-3 p-3 ${bgColor} border ${borderColor} rounded-lg text-xs`}>
+      {scalarEntries.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2">
+          {scalarEntries.map(([k, v]) => (
+            <div key={k}>
+              <span className="text-slate-500 font-medium block">{k.replace(/_/g, " ")}</span>
+              <span className={`font-mono ${isError && k === "error" ? "text-red-700" : "text-slate-800"}`}>
+                {formatDetailValue(v)}
+              </span>
+            </div>
+          ))}
+          <div>
+            <span className="text-slate-500 font-medium block">source</span>
+            <span className="text-slate-800 font-mono">{event.sourceType} UID {event.sourceUid}</span>
+          </div>
+          <div>
+            <span className="text-slate-500 font-medium block">time</span>
+            <span className="text-slate-800">{new Date(event.timestamp * 1000).toLocaleString()}</span>
+          </div>
+        </div>
+      )}
+      {arrayEntries.map(([k, v]) => {
+        const arr = v as unknown[];
+        if (arr.length === 0) return null;
+        // If it's an array of objects (like miners, challenge_lines), show as table
+        if (typeof arr[0] === "object" && arr[0] !== null) {
+          const items = arr as Array<Record<string, unknown>>;
+          const keys = [...new Set(items.flatMap((item) => Object.keys(item)))];
+          return (
+            <div key={k} className="mt-2">
+              <span className="text-slate-500 font-medium block mb-1">{k.replace(/_/g, " ")} ({arr.length})</span>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="text-slate-500">
+                      {keys.map((col) => (
+                        <th key={col} className="px-2 py-1 font-medium text-left">{col.replace(/_/g, " ")}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100/50">
+                    {items.slice(0, 50).map((item, idx) => (
+                      <tr key={idx}>
+                        {keys.map((col) => (
+                          <td key={col} className="px-2 py-1 font-mono text-slate-700">
+                            {formatDetailValue(item[col])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {items.length > 50 && (
+                  <div className="text-[10px] text-slate-400 mt-1">...and {items.length - 50} more</div>
+                )}
+              </div>
+            </div>
+          );
+        }
+        // Simple array of primitives
+        return (
+          <div key={k} className="mt-2">
+            <span className="text-slate-500 font-medium block mb-1">{k.replace(/_/g, " ")}</span>
+            <div className="flex flex-wrap gap-1">
+              {arr.slice(0, 50).map((item, idx) => (
+                <span key={idx} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 font-mono text-[10px] rounded">
+                  {formatDetailValue(item)}
+                </span>
+              ))}
+              {arr.length > 50 && <span className="text-[10px] text-slate-400">...+{arr.length - 50}</span>}
+            </div>
+          </div>
+        );
+      })}
+      {objectEntries.map(([k, v]) => (
+        <div key={k} className="mt-2">
+          <span className="text-slate-500 font-medium block mb-1">{k.replace(/_/g, " ")}</span>
+          <pre className="text-[10px] text-slate-600 font-mono bg-white rounded p-2 overflow-x-auto">
+            {JSON.stringify(v, null, 2)}
+          </pre>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 async function fetchDelegateNames(): Promise<Record<string, string>> {

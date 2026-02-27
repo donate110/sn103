@@ -415,6 +415,7 @@ class ChallengeResult:
     proofs_requested: int = 0
     proofs_submitted: int = 0
     miner_results: list[dict] = field(default_factory=list)
+    challenge_lines: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -469,6 +470,20 @@ async def challenge_miners(
     result.games_found = len(active_games)
     challenge_lines = build_challenge_lines(active_games, sport)
     result.lines_used = len(challenge_lines)
+    result.challenge_lines = [
+        {
+            "index": line["index"],
+            "sport": line["sport"],
+            "event_id": line["event_id"],
+            "home_team": line["home_team"],
+            "away_team": line["away_team"],
+            "market": line["market"],
+            "line": line.get("line"),
+            "side": line["side"],
+            "is_synthetic": line.get("is_synthetic", False),
+        }
+        for line in challenge_lines
+    ]
     if len(challenge_lines) < 3:
         log.debug("insufficient_challenge_lines", sport=sport, count=len(challenge_lines))
         return result

@@ -35,6 +35,7 @@ from djinn_validator.core.audit_set import AuditSetStore
 from djinn_validator.core.mpc_audit import batch_settle_audit_set
 from djinn_validator.core.scoring import MinerScorer
 from djinn_validator.core.shares import ShareStore
+from djinn_validator.core.telemetry import TelemetryStore
 from djinn_validator.core.validator_sync import ValidatorSetSyncer
 from djinn_validator.utils.watchtower import watch_loop as watchtower_loop
 
@@ -63,6 +64,7 @@ async def epoch_loop(
     burn_fraction: float = 0.95,
     espn_client: ESPNClient | None = None,
     shares_threshold: int = 3,
+    telemetry: TelemetryStore | None = None,
 ) -> None:
     """Main validator epoch loop: sync metagraph, score miners, set weights."""
     log.info(
@@ -155,9 +157,27 @@ async def epoch_loop(
                                 proofs_requested=cr.proofs_requested,
                                 proofs_submitted=cr.proofs_submitted,
                                 miners=cr.miner_results[:50],
+                                challenge_lines=cr.challenge_lines,
+                            )
+                        if telemetry and cr.challenged:
+                            telemetry.record(
+                                "challenge_round",
+                                f"Challenged {cr.challenged} miners on {cr.sport}: {cr.responding} responded, {cr.games_found} games, {cr.lines_used} lines",
+                                miners_challenged=cr.challenged,
+                                sport=cr.sport,
+                                games_found=cr.games_found,
+                                lines_used=cr.lines_used,
+                                responding=cr.responding,
+                                consensus_quorum=cr.consensus_quorum,
+                                proofs_requested=cr.proofs_requested,
+                                proofs_submitted=cr.proofs_submitted,
+                                miners=cr.miner_results[:50],
+                                challenge_lines=cr.challenge_lines,
                             )
                     except Exception as e:
                         log.warning("challenge_miners_error", err=str(e))
+                        if telemetry:
+                            telemetry.record("challenge_error", f"Challenge failed: {e}", error=str(e), error_type=type(e).__name__)
 
             # Attestation challenges: run less frequently than sports (~20 min)
             if epoch_count % ATTESTATION_CHALLENGE_INTERVAL == 0 and miner_uids:
@@ -183,8 +203,21 @@ async def epoch_loop(
                             capable=ar.capable,
                             miners=ar.miner_results[:50],
                         )
+                    if telemetry and ar.challenged:
+                        telemetry.record(
+                            "attestation_challenge",
+                            f"Attestation: {ar.verified}/{ar.challenged} verified for {ar.url}",
+                            challenged=ar.challenged,
+                            verified=ar.verified,
+                            url=ar.url,
+                            reachable=ar.reachable,
+                            capable=ar.capable,
+                            miners=ar.miner_results[:50],
+                        )
                 except Exception as e:
                     log.warning("attest_challenge_error", err=str(e))
+                    if telemetry:
+                        telemetry.record("attestation_error", f"Attestation challenge failed: {e}", error=str(e), error_type=type(e).__name__)
 
             # Phase 1: Resolve games — compute all 10 line outcomes per signal
             # (public ESPN data, no MPC at this stage)
@@ -198,6 +231,13 @@ async def epoch_loop(
                 if activity is not None:
                     activity.record(
                         ActivityCategory.OUTCOME_RESOLUTION,
+                        f"Resolved {len(resolved_ids)} signal outcomes",
+                        count=len(resolved_ids),
+                        signal_ids=resolved_ids[:20],
+                    )
+                if telemetry:
+                    telemetry.record(
+                        "outcome_resolution",
                         f"Resolved {len(resolved_ids)} signal outcomes",
                         count=len(resolved_ids),
                         signal_ids=resolved_ids[:20],
@@ -233,12 +273,23 @@ async def epoch_loop(
                                 voids=result.voids,
                                 tx_hash=tx_hash,
                             )
+                            if telemetry:
+                                telemetry.record(
+                                    "audit_vote",
+                                    f"Vote submitted: quality={result.quality_score} ({result.wins}W/{result.losses}L/{result.voids}V)",
+                                    genius=result.genius, idiot=result.idiot,
+                                    cycle=result.cycle, quality_score=result.quality_score,
+                                    wins=result.wins, losses=result.losses, voids=result.voids,
+                                    tx_hash=tx_hash,
+                                )
                         except Exception as e:
                             err_str = str(e)
                             if "AlreadyVoted" in err_str or "CycleAlreadyFinalized" in err_str:
                                 log.debug("audit_vote_skipped", reason=err_str[:80])
                             else:
                                 log.error("audit_vote_failed", err=err_str)
+                                if telemetry:
+                                    telemetry.record("audit_vote_error", f"Vote failed: {err_str[:200]}", error=err_str[:500])
                                 continue  # Don't mark settled if vote failed
                     audit_set_store.mark_settled(
                         result.genius, result.idiot, result.cycle,
@@ -259,22 +310,39 @@ async def epoch_loop(
                 success = neuron.set_weights(weights)
                 if success:
                     neuron.record_weight_set()
+                    # Top 20 miners by weight (excluding UID 0 burn)
+                    sorted_w = sorted(
+                        ((uid, w) for uid, w in weights.items() if uid != 0),
+                        key=lambda x: x[1], reverse=True,
+                    )
+                    top_miners = [
+                        {"uid": uid, "weight": round(w, 6)}
+                        for uid, w in sorted_w[:20]
+                    ]
                     if activity is not None:
-                        # Top 20 miners by weight (excluding UID 0 burn)
-                        sorted_w = sorted(
-                            ((uid, w) for uid, w in weights.items() if uid != 0),
-                            key=lambda x: x[1], reverse=True,
-                        )
-                        top_miners = [
-                            {"uid": uid, "weight": round(w, 6)}
-                            for uid, w in sorted_w[:20]
-                        ]
                         activity.record(
                             ActivityCategory.WEIGHT_SET,
                             f"Set weights for {n_miners} miners (burn={burn_fraction})",
                             n_miners=n_miners, is_active=is_active,
                             burn_fraction=burn_fraction,
                             top_miners=top_miners,
+                        )
+                    if telemetry:
+                        telemetry.record(
+                            "weight_set",
+                            f"Set weights for {n_miners} miners (burn={burn_fraction})",
+                            n_miners=n_miners, is_active=is_active,
+                            burn_fraction=burn_fraction,
+                            top_miners=top_miners,
+                            success=True,
+                        )
+                else:
+                    if telemetry:
+                        telemetry.record(
+                            "weight_set_failed",
+                            f"Failed to set weights for {n_miners} miners",
+                            n_miners=n_miners, is_active=is_active,
+                            success=False,
                         )
                 log.info("weights_updated", n_miners=n_miners, active=is_active, success=success)
                 # Reset per-epoch metrics after weight setting (increments
@@ -312,6 +380,15 @@ async def epoch_loop(
                 backoff_s=round(backoff, 1),
                 exc_info=True,
             )
+            if telemetry:
+                telemetry.record(
+                    "epoch_error",
+                    f"Epoch error ({type(e).__name__}): {e}",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    consecutive_errors=consecutive_errors,
+                    backoff_s=round(backoff, 1),
+                )
             await asyncio.sleep(backoff)
             continue
 
@@ -384,6 +461,17 @@ async def async_main() -> None:
     scorer = MinerScorer()
     activity = ActivityBuffer()
 
+    # Persistent telemetry — stores all events to SQLite
+    telemetry_path = os.getenv("TELEMETRY_DB", str(data_dir / "validator_telemetry.db"))
+    telemetry = TelemetryStore(telemetry_path)
+    telemetry.record(
+        "startup",
+        f"Validator v{__version__} starting",
+        version=__version__,
+        network=config.bt_network,
+        netuid=config.bt_netuid,
+    )
+
     chain_client = ChainClient(
         rpc_url=config.base_rpc_url,
         escrow_address=config.escrow_address,
@@ -438,6 +526,7 @@ async def async_main() -> None:
         scorer=scorer,
         activity_buffer=activity,
         audit_set_store=audit_set_store,
+        telemetry=telemetry,
     )
 
     log.info(
@@ -467,6 +556,7 @@ async def async_main() -> None:
                 neuron, scorer, share_store, outcome_attestor,
                 chain_client, activity, audit_set_store, config.bt_burn_fraction,
                 espn_client=espn_client, shares_threshold=config.shares_threshold,
+                telemetry=telemetry,
             )
         ))
         # Validator set sync: discover peers via metagraph, propose on-chain changes
@@ -486,6 +576,7 @@ async def async_main() -> None:
 
     await shutdown_event.wait()
     log.info("shutting_down")
+    telemetry.record("shutdown", "Validator shutting down")
     for t in running_tasks:
         t.cancel()
     try:

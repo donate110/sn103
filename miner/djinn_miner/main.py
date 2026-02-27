@@ -27,13 +27,14 @@ from djinn_miner.config import Config
 from djinn_miner.core.checker import LineChecker
 from djinn_miner.core.health import HealthTracker
 from djinn_miner.core.proof import ProofGenerator, SessionCapture
+from djinn_miner.core.telemetry import TelemetryStore
 from djinn_miner.data.odds_api import OddsApiClient
 from djinn_miner.utils.watchtower import watch_loop as watchtower_loop
 
 log = structlog.get_logger()
 
 
-async def bt_sync_loop(neuron: DjinnMiner, health: HealthTracker) -> None:
+async def bt_sync_loop(neuron: DjinnMiner, health: HealthTracker, telemetry: TelemetryStore | None = None) -> None:
     """Background loop: keep metagraph fresh and check registration."""
     log.info("bt_sync_loop_started")
     consecutive_errors = 0
@@ -45,6 +46,8 @@ async def bt_sync_loop(neuron: DjinnMiner, health: HealthTracker) -> None:
             if not neuron.is_registered():
                 log.warning("miner_deregistered", msg="No longer registered on subnet")
                 health.set_bt_connected(False)
+                if telemetry:
+                    telemetry.record("bt_deregistered", "Miner no longer registered on subnet")
             else:
                 health.set_bt_connected(True)
                 # Refresh UID in case it changed after re-registration
@@ -122,6 +125,11 @@ async def async_main() -> None:
     except Exception as e:
         log.warning("odds_api_probe_error", err=str(e))
 
+    # Persistent telemetry — stores all events to SQLite
+    telemetry_path = os.getenv("TELEMETRY_DB", "miner_telemetry.db")
+    telemetry = TelemetryStore(telemetry_path)
+    telemetry.record("startup", f"Miner v{__version__} starting", version=__version__, network=config.bt_network, netuid=config.bt_netuid, odds_api_configured=bool(config.odds_api_key), odds_api_ok=odds_api_ok)
+
     health_tracker = HealthTracker(
         odds_api_connected=odds_api_ok,
     )
@@ -168,6 +176,7 @@ async def async_main() -> None:
         rate_limit_capacity=config.rate_limit_capacity,
         rate_limit_rate=config.rate_limit_rate,
         neuron=neuron if bt_ok else None,
+        telemetry=telemetry,
     )
 
     log.info(
@@ -189,7 +198,7 @@ async def async_main() -> None:
         asyncio.create_task(watchtower_loop(package_dir=Path(__file__).resolve().parent.parent)),
     ]
     if bt_ok:
-        running_tasks.append(asyncio.create_task(bt_sync_loop(neuron, health_tracker)))
+        running_tasks.append(asyncio.create_task(bt_sync_loop(neuron, health_tracker, telemetry)))
 
     shutdown_event = asyncio.Event()
 
@@ -203,6 +212,7 @@ async def async_main() -> None:
 
     await shutdown_event.wait()
     log.info("shutting_down")
+    telemetry.record("shutdown", "Miner shutting down")
     for t in running_tasks:
         t.cancel()
     try:

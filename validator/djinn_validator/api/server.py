@@ -111,6 +111,7 @@ from djinn_validator.core.outcomes import (
 )
 from djinn_validator.core.purchase import PurchaseOrchestrator, PurchaseStatus
 from djinn_validator.core.activity import ActivityBuffer
+from djinn_validator.core.telemetry import TelemetryStore
 from djinn_validator.core.scoring import MinerScorer
 from djinn_validator.core.shares import ShareStore, SignalShareRecord
 from djinn_validator.utils.crypto import BN254_PRIME, Share
@@ -183,6 +184,7 @@ def create_app(
     scorer: MinerScorer | None = None,
     activity_buffer: ActivityBuffer | None = None,
     audit_set_store: AuditSetStore | None = None,
+    telemetry: TelemetryStore | None = None,
 ) -> FastAPI:
     """Create the FastAPI application with injected dependencies."""
     bt_network = os.environ.get("BT_NETWORK", "")
@@ -1103,6 +1105,20 @@ def create_app(
         safe_limit = max(1, min(500, limit))
         events = activity_buffer.recent(limit=safe_limit, category=category)
         return {"events": events, "total": len(events)}
+
+    @app.get("/v1/telemetry")
+    async def get_telemetry(
+        limit: int = 200,
+        since: float | None = None,
+        category: str | None = None,
+        offset: int = 0,
+    ) -> dict:
+        """Query persistent telemetry events. Full history, newest first."""
+        if telemetry is None:
+            return {"events": [], "total": 0}
+        events = telemetry.query(limit=limit, since=since, category=category, offset=offset)
+        total = telemetry.count(category=category)
+        return {"events": events, "total": total}
 
     # ------------------------------------------------------------------
     # Shared HTTP client for attestation dispatch (connection reuse)
