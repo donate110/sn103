@@ -780,36 +780,81 @@ function MinerResultTable({ miners, columns }: { miners: Array<Record<string, un
   );
 }
 
+/** Extract burn value from summary like "Set weights for 153 miners (burn=0.95)" */
+function parseBurnFromSummary(summary: string): string | null {
+  const m = summary.match(/burn=([0-9.]+)/);
+  return m ? `${(parseFloat(m[1]) * 100).toFixed(0)}%` : null;
+}
+
+/** Render all known fields from details as a key-value grid, skipping arrays and listed keys */
+function DetailGrid({ details, skip, color }: { details: Record<string, unknown>; skip?: Set<string>; color: string }) {
+  const entries = Object.entries(details).filter(
+    ([k, v]) => !Array.isArray(v) && !(skip?.has(k))
+  );
+  if (entries.length === 0) return null;
+  return (
+    <div className={`grid grid-cols-2 sm:grid-cols-4 gap-3`}>
+      {entries.map(([k, v]) => (
+        <div key={k}>
+          <span className={`text-${color}-600 font-medium block`}>{k.replace(/_/g, " ")}</span>
+          <span className={`text-${color}-900 font-mono`}>{formatDetailValue(v)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function EventDetailPanel({ event }: { event: NetworkEvent }) {
   const d = event.details || {};
   const cat = event.category;
 
   if (cat === "health_check") {
     const failedUids = (d.failed_uids as number[]) || [];
+    const responded = d.responded as number | undefined;
+    const total = d.total as number | undefined;
+    const failedCount = (total !== undefined && responded !== undefined) ? total - responded : 0;
     return (
       <div className="mx-4 mb-3 p-3 bg-green-50 border border-green-200 rounded-lg text-xs">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div>
             <span className="text-green-600 font-medium block">Responded</span>
-            <span className="text-green-900 font-mono">{formatDetailValue(d.responded)}/{formatDetailValue(d.total)}</span>
+            <span className="text-green-900 font-mono">{formatDetailValue(responded)}/{formatDetailValue(total)}</span>
+          </div>
+          <div>
+            <span className="text-green-600 font-medium block">Response Rate</span>
+            <span className="text-green-900 font-mono">
+              {responded !== undefined && total ? `${((responded / total) * 100).toFixed(1)}%` : "-"}
+            </span>
           </div>
           <div>
             <span className="text-green-600 font-medium block">Time</span>
             <span className="text-green-900">{formatTimeAgo(event.timestamp)}</span>
           </div>
-          {failedUids.length > 0 && (
-            <div className="col-span-2">
-              <span className="text-red-500 font-medium block">Failed UIDs ({failedUids.length})</span>
-              <span className="text-red-700 font-mono text-[10px] break-all">{failedUids.slice(0, 30).join(", ")}{failedUids.length > 30 ? "..." : ""}</span>
-            </div>
-          )}
+          <div>
+            <span className="text-red-500 font-medium block">Failed</span>
+            <span className="text-red-700 font-mono">{failedCount}</span>
+          </div>
         </div>
+        {failedUids.length > 0 && (
+          <div className="mt-2">
+            <span className="text-red-500 font-medium block">Failed UIDs</span>
+            <span className="text-red-700 font-mono text-[10px] break-all">{failedUids.slice(0, 50).join(", ")}{failedUids.length > 50 ? ` ...+${failedUids.length - 50} more` : ""}</span>
+          </div>
+        )}
+        {failedUids.length === 0 && failedCount > 0 && (
+          <div className="mt-2 text-[10px] text-slate-400 italic">
+            Validator update required for per-miner failed UID breakdown
+          </div>
+        )}
       </div>
     );
   }
 
   if (cat === "weight_set") {
     const topMiners = (d.top_miners as Array<Record<string, unknown>>) || [];
+    const burnStr = d.burn_fraction !== undefined
+      ? `${(Number(d.burn_fraction) * 100).toFixed(0)}%`
+      : parseBurnFromSummary(event.summary);
     return (
       <div className="mx-4 mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2">
@@ -819,18 +864,24 @@ function EventDetailPanel({ event }: { event: NetworkEvent }) {
           </div>
           <div>
             <span className="text-amber-600 font-medium block">Burn</span>
-            <span className="text-amber-900 font-mono">{d.burn_fraction !== undefined ? `${(Number(d.burn_fraction) * 100).toFixed(0)}%` : "-"}</span>
+            <span className="text-amber-900 font-mono">{burnStr || "-"}</span>
           </div>
           <div>
             <span className="text-amber-600 font-medium block">Active Signals</span>
-            <span className="text-amber-900">{formatDetailValue(d.is_active)}</span>
+            <span className={`font-mono ${d.is_active ? "text-green-700" : "text-amber-900"}`}>{d.is_active ? "Yes" : "No"}</span>
+          </div>
+          <div>
+            <span className="text-amber-600 font-medium block">Time</span>
+            <span className="text-amber-900">{formatTimeAgo(event.timestamp)}</span>
           </div>
         </div>
-        {topMiners.length > 0 && (
+        {topMiners.length > 0 ? (
           <MinerResultTable miners={topMiners} columns={[
             { key: "uid", label: "UID" },
             { key: "weight", label: "Weight", align: "right" },
           ]} />
+        ) : (
+          <div className="text-[10px] text-slate-400 italic">Validator update required for per-miner weight breakdown</div>
         )}
       </div>
     );
@@ -838,40 +889,54 @@ function EventDetailPanel({ event }: { event: NetworkEvent }) {
 
   if (cat === "attestation_challenge") {
     const miners = (d.miners as Array<Record<string, unknown>>) || [];
+    // Support both old format (miners_challenged) and new format (challenged/verified/url/miners)
+    const challenged = d.challenged ?? d.miners_challenged;
     return (
       <div className="mx-4 mb-3 p-3 bg-cyan-50 border border-cyan-200 rounded-lg text-xs">
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-2">
-          <div>
-            <span className="text-cyan-600 font-medium block">Reachable</span>
-            <span className="text-cyan-900 font-mono">{formatDetailValue(d.reachable)}</span>
-          </div>
-          <div>
-            <span className="text-cyan-600 font-medium block">Capable</span>
-            <span className="text-cyan-900 font-mono">{formatDetailValue(d.capable)}</span>
-          </div>
+          {d.reachable !== undefined && (
+            <div>
+              <span className="text-cyan-600 font-medium block">Reachable</span>
+              <span className="text-cyan-900 font-mono">{formatDetailValue(d.reachable)}</span>
+            </div>
+          )}
+          {d.capable !== undefined && (
+            <div>
+              <span className="text-cyan-600 font-medium block">Capable</span>
+              <span className="text-cyan-900 font-mono">{formatDetailValue(d.capable)}</span>
+            </div>
+          )}
           <div>
             <span className="text-cyan-600 font-medium block">Challenged</span>
-            <span className="text-cyan-900 font-mono">{formatDetailValue(d.challenged)}</span>
+            <span className="text-cyan-900 font-mono">{formatDetailValue(challenged)}</span>
           </div>
-          <div>
-            <span className="text-cyan-600 font-medium block">Verified</span>
-            <span className="text-cyan-900 font-mono">{formatDetailValue(d.verified)}</span>
-          </div>
-          {typeof d.url === "string" && (
+          {d.verified !== undefined && (
             <div>
+              <span className="text-cyan-600 font-medium block">Verified</span>
+              <span className="text-cyan-900 font-mono">{formatDetailValue(d.verified)}</span>
+            </div>
+          )}
+          {typeof d.url === "string" && (
+            <div className="col-span-2 sm:col-span-1">
               <span className="text-cyan-600 font-medium block">URL</span>
               <span className="text-cyan-900 font-mono truncate block">{d.url.replace(/^https?:\/\//, "").slice(0, 40)}</span>
             </div>
           )}
+          <div>
+            <span className="text-cyan-600 font-medium block">Time</span>
+            <span className="text-cyan-900">{formatTimeAgo(event.timestamp)}</span>
+          </div>
         </div>
-        {miners.length > 0 && (
+        {miners.length > 0 ? (
           <MinerResultTable miners={miners} columns={[
             { key: "uid", label: "UID" },
             { key: "valid", label: "Valid" },
-            { key: "latency", label: "Latency", align: "right" },
+            { key: "latency", label: "Latency (s)", align: "right" },
             { key: "server", label: "Server" },
             { key: "error", label: "Error" },
           ]} />
+        ) : (
+          <div className="text-[10px] text-slate-400 italic">Validator update required for per-miner attestation breakdown</div>
         )}
       </div>
     );
@@ -882,43 +947,63 @@ function EventDetailPanel({ event }: { event: NetworkEvent }) {
     return (
       <div className="mx-4 mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs">
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-2">
+          {d.sport !== undefined ? (
+            <div>
+              <span className="text-blue-600 font-medium block">Sport</span>
+              <span className="text-blue-900 font-mono">{formatDetailValue(d.sport)}</span>
+            </div>
+          ) : null}
+          {d.games_found !== undefined && (
+            <div>
+              <span className="text-blue-600 font-medium block">Games</span>
+              <span className="text-blue-900 font-mono">{formatDetailValue(d.games_found)}</span>
+            </div>
+          )}
+          {d.lines_used !== undefined && (
+            <div>
+              <span className="text-blue-600 font-medium block">Lines</span>
+              <span className="text-blue-900 font-mono">{formatDetailValue(d.lines_used)}</span>
+            </div>
+          )}
           <div>
-            <span className="text-blue-600 font-medium block">Sport</span>
-            <span className="text-blue-900 font-mono">{formatDetailValue(d.sport)}</span>
+            <span className="text-blue-600 font-medium block">Miners Challenged</span>
+            <span className="text-blue-900 font-mono">{formatDetailValue(d.miners_challenged)}</span>
           </div>
-          <div>
-            <span className="text-blue-600 font-medium block">Games</span>
-            <span className="text-blue-900 font-mono">{formatDetailValue(d.games_found)}</span>
-          </div>
-          <div>
-            <span className="text-blue-600 font-medium block">Lines</span>
-            <span className="text-blue-900 font-mono">{formatDetailValue(d.lines_used)}</span>
-          </div>
-          <div>
-            <span className="text-blue-600 font-medium block">Responding</span>
-            <span className="text-blue-900 font-mono">{formatDetailValue(d.responding)}</span>
-          </div>
-          <div>
-            <span className="text-blue-600 font-medium block">Quorum</span>
-            <span className="text-blue-900">{formatDetailValue(d.consensus_quorum)}</span>
-          </div>
+          {d.responding !== undefined && (
+            <div>
+              <span className="text-blue-600 font-medium block">Responding</span>
+              <span className="text-blue-900 font-mono">{formatDetailValue(d.responding)}</span>
+            </div>
+          )}
+          {d.consensus_quorum !== undefined && (
+            <div>
+              <span className="text-blue-600 font-medium block">Quorum</span>
+              <span className="text-blue-900">{formatDetailValue(d.consensus_quorum)}</span>
+            </div>
+          )}
           {(d.proofs_requested as number) > 0 && (
             <div>
               <span className="text-blue-600 font-medium block">Proofs</span>
               <span className="text-blue-900 font-mono">{formatDetailValue(d.proofs_submitted)}/{formatDetailValue(d.proofs_requested)}</span>
             </div>
           )}
+          <div>
+            <span className="text-blue-600 font-medium block">Time</span>
+            <span className="text-blue-900">{formatTimeAgo(event.timestamp)}</span>
+          </div>
         </div>
-        {miners.length > 0 && (
+        {miners.length > 0 ? (
           <MinerResultTable miners={miners} columns={[
             { key: "uid", label: "UID" },
             { key: "correct", label: "Correct" },
             { key: "accuracy", label: "Accuracy", align: "right" },
             { key: "available", label: "Lines", align: "right" },
-            { key: "latency", label: "Latency", align: "right" },
+            { key: "latency", label: "Latency (s)", align: "right" },
             { key: "proof_valid", label: "Proof" },
             { key: "error", label: "Error" },
           ]} />
+        ) : (
+          <div className="text-[10px] text-slate-400 italic">Validator update required for per-miner challenge breakdown</div>
         )}
       </div>
     );
@@ -928,13 +1013,17 @@ function EventDetailPanel({ event }: { event: NetworkEvent }) {
     const signalIds = (d.signal_ids as string[]) || [];
     return (
       <div className="mx-4 mb-3 p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs">
-        <div className="grid grid-cols-2 gap-3 mb-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2">
           <div>
             <span className="text-purple-600 font-medium block">Signals Resolved</span>
             <span className="text-purple-900 font-mono">{formatDetailValue(d.count)}</span>
           </div>
+          <div>
+            <span className="text-purple-600 font-medium block">Time</span>
+            <span className="text-purple-900">{formatTimeAgo(event.timestamp)}</span>
+          </div>
         </div>
-        {signalIds.length > 0 && (
+        {signalIds.length > 0 ? (
           <div>
             <span className="text-purple-600 font-medium block mb-1">Signal IDs</span>
             <div className="flex flex-wrap gap-1">
@@ -945,14 +1034,31 @@ function EventDetailPanel({ event }: { event: NetworkEvent }) {
               ))}
             </div>
           </div>
+        ) : (
+          <div className="text-[10px] text-slate-400 italic">Validator update required for signal ID breakdown</div>
         )}
       </div>
     );
   }
 
-  // Generic fallback: key-value grid (skip arrays)
+  // Generic fallback: show all non-array fields in a key-value grid
   const entries = Object.entries(d).filter(([, v]) => !Array.isArray(v));
-  if (entries.length === 0) return null;
+  if (entries.length === 0) {
+    return (
+      <div className="mx-4 mb-3 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <span className="text-slate-500 font-medium block">Summary</span>
+            <span className="text-slate-800">{event.summary}</span>
+          </div>
+          <div>
+            <span className="text-slate-500 font-medium block">Time</span>
+            <span className="text-slate-800">{formatTimeAgo(event.timestamp)}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="mx-4 mb-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -962,6 +1068,10 @@ function EventDetailPanel({ event }: { event: NetworkEvent }) {
             <span className="text-slate-800 font-mono">{formatDetailValue(v)}</span>
           </div>
         ))}
+        <div>
+          <span className="text-slate-500 font-medium block">Time</span>
+          <span className="text-slate-800">{formatTimeAgo(event.timestamp)}</span>
+        </div>
       </div>
     </div>
   );
