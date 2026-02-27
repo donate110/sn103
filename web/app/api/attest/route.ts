@@ -11,17 +11,22 @@ function shuffle<T>(arr: T[]): T[] {
   return arr;
 }
 
-/** Get validator URLs — env override or metagraph discovery (shuffled). */
+/** Get validator URLs — metagraph discovery (shuffled), with optional fallback. */
 async function getValidatorUrls(): Promise<string[]> {
   const envUrl = process.env.VALIDATOR_URL || process.env.NEXT_PUBLIC_VALIDATOR_URL;
   if (envUrl) return [envUrl];
+  const fallback = process.env.FALLBACK_VALIDATOR_URL;
   try {
     const urls = await discoverValidatorUrls();
-    if (urls.length > 0) return shuffle([...urls]);
+    if (urls.length > 0) {
+      const shuffled = shuffle([...urls]);
+      if (fallback && !shuffled.includes(fallback)) shuffled.push(fallback);
+      return shuffled;
+    }
   } catch {
     // fall through
   }
-  return ["http://localhost:8421"];
+  return fallback ? [fallback] : ["http://localhost:8421"];
 }
 
 const MAX_ATTEMPTS = 3;
