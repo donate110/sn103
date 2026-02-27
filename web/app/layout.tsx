@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Cinzel } from "next/font/google";
+import { Analytics } from "@vercel/analytics/react";
 import Providers from "./providers";
 import Layout from "@/components/Layout";
 import BetaGate from "@/components/BetaGate";
@@ -64,6 +65,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.className} ${cinzel.variable}`}>
+        <Analytics />
         <ServiceWorker />
         <BetaGate>
           <Providers>
