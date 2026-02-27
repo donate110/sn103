@@ -718,9 +718,22 @@ def create_app(
         """
         import json as _json
         import time as _t
+        import httpx
 
         start = _t.perf_counter()
         ATTESTATION_DISPATCHED.inc()
+
+        # Resolve redirects to get the canonical URL so the TLS server_name
+        # in the proof matches what we verify against (e.g. hackernews.com → news.ycombinator.com)
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+                head = await client.head(req.url)
+                resolved_url = str(head.url)
+                if resolved_url != req.url:
+                    log.info("attest_url_resolved", original=req.url, resolved=resolved_url)
+                    req = AttestRequest(url=resolved_url, request_id=req.request_id)
+        except Exception as e:
+            log.debug("attest_redirect_check_failed", url=req.url, error=str(e))
 
         # Build axon lookup by UID
         axon_by_uid: dict[int, dict] = {}

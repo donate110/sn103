@@ -78,8 +78,22 @@ export default function AttestPage() {
             const { verifyProof } = await import("@/lib/wasm/verify");
             const verifyResult = await verifyProof(data.proof_hex);
             if (verifyResult.status === "verified") {
-              data.verified = true;
-              // Fill in response_body from WASM verification if validator didn't provide it
+              // Check server_name matches requested URL (accounting for redirects)
+              const requestedHost = new URL(data.url || url).hostname;
+              const proofServer = verifyResult.server_name || data.server_name || "";
+              const serverOk =
+                !proofServer ||
+                proofServer === requestedHost ||
+                requestedHost.endsWith("." + proofServer) ||
+                proofServer.endsWith("." + requestedHost);
+              data.verified = serverOk;
+              if (!serverOk) {
+                data.error = `server mismatch: expected ${requestedHost}, got ${proofServer}`;
+              }
+              // Fill in server_name and response_body from WASM verification
+              if (verifyResult.server_name && !data.server_name) {
+                data.server_name = verifyResult.server_name;
+              }
               if (!data.response_body && verifyResult.response_body) {
                 data.response_body = verifyResult.response_body;
               }
