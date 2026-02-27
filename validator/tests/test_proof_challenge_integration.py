@@ -103,7 +103,7 @@ async def test_full_pipeline_with_proof() -> None:
 
         challenged = await challenge_miners(scorer, axons, espn_client=mock_espn)
 
-    assert challenged == 2
+    assert challenged.challenged == 2
     # Both miners should have metrics recorded
     m0 = scorer.get_or_create(0, "hk0")
     m1 = scorer.get_or_create(1, "hk1")
@@ -130,7 +130,7 @@ async def test_pipeline_old_miner_no_query_id() -> None:
 
         challenged = await challenge_miners(scorer, [axon], espn_client=mock_espn)
 
-    assert challenged == 1
+    assert challenged.challenged == 1
     m = scorer.get_or_create(0, "hk0")
     assert m.queries_total > 0
     # Only one POST (check), no proof request (no query_id = not a proof target)
@@ -194,7 +194,7 @@ async def test_no_odds_api_key_needed() -> None:
             [{"uid": 0, "hotkey": "hk0", "ip": "127.0.0.1", "port": 8080}],
             espn_client=mock_espn,
         )
-    assert challenged == 1
+    assert challenged.challenged == 1
 
     # Outcome resolution works
     sample_lines2 = [parse_pick(l) for l in [

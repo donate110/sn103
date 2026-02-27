@@ -746,26 +746,61 @@ const CATEGORY_LABELS: Record<string, string> = {
   share_stored: "Shares",
 };
 
+function MinerResultTable({ miners, columns }: { miners: Array<Record<string, unknown>>; columns: { key: string; label: string; align?: string }[] }) {
+  if (!miners || miners.length === 0) return null;
+  return (
+    <div className="mt-2 overflow-x-auto">
+      <table className="w-full text-[11px]">
+        <thead>
+          <tr className="text-slate-500">
+            {columns.map((col) => (
+              <th key={col.key} className={`px-2 py-1 font-medium ${col.align === "right" ? "text-right" : "text-left"}`}>
+                {col.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100/50">
+          {miners.map((m, i) => (
+            <tr key={i}>
+              {columns.map((col) => (
+                <td key={col.key} className={`px-2 py-1 font-mono ${col.align === "right" ? "text-right" : "text-left"} ${
+                  col.key === "error" ? "text-red-600" : col.key === "correct" || col.key === "valid"
+                    ? m[col.key] ? "text-green-700" : "text-red-600"
+                    : "text-slate-700"
+                }`}>
+                  {formatDetailValue(m[col.key])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function EventDetailPanel({ event }: { event: NetworkEvent }) {
   const d = event.details || {};
   const cat = event.category;
 
   if (cat === "health_check") {
+    const failedUids = (d.failed_uids as number[]) || [];
     return (
-      <div className="mx-4 mb-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+      <div className="mx-4 mb-3 p-3 bg-green-50 border border-green-200 rounded-lg text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div>
             <span className="text-green-600 font-medium block">Responded</span>
-            <span className="text-green-900">{formatDetailValue(d.responded)}/{formatDetailValue(d.total)}</span>
+            <span className="text-green-900 font-mono">{formatDetailValue(d.responded)}/{formatDetailValue(d.total)}</span>
           </div>
           <div>
             <span className="text-green-600 font-medium block">Time</span>
             <span className="text-green-900">{formatTimeAgo(event.timestamp)}</span>
           </div>
-          {d.duration_s !== undefined && (
-            <div>
-              <span className="text-green-600 font-medium block">Duration</span>
-              <span className="text-green-900">{formatDetailValue(d.duration_s)}s</span>
+          {failedUids.length > 0 && (
+            <div className="col-span-2">
+              <span className="text-red-500 font-medium block">Failed UIDs ({failedUids.length})</span>
+              <span className="text-red-700 font-mono text-[10px] break-all">{failedUids.slice(0, 30).join(", ")}{failedUids.length > 30 ? "..." : ""}</span>
             </div>
           )}
         </div>
@@ -774,88 +809,149 @@ function EventDetailPanel({ event }: { event: NetworkEvent }) {
   }
 
   if (cat === "weight_set") {
+    const topMiners = (d.top_miners as Array<Record<string, unknown>>) || [];
     return (
-      <div className="mx-4 mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-          {d.burn_pct !== undefined && (
-            <div>
-              <span className="text-amber-600 font-medium block">Burn %</span>
-              <span className="text-amber-900">{formatDetailValue(d.burn_pct)}</span>
-            </div>
-          )}
-          {d.miners !== undefined && (
-            <div>
-              <span className="text-amber-600 font-medium block">Miners</span>
-              <span className="text-amber-900">{formatDetailValue(d.miners)}</span>
-            </div>
-          )}
-          {d.is_active !== undefined && (
-            <div>
-              <span className="text-amber-600 font-medium block">Active</span>
-              <span className="text-amber-900">{formatDetailValue(d.is_active)}</span>
-            </div>
-          )}
-          {d.success !== undefined && (
-            <div>
-              <span className="text-amber-600 font-medium block">Success</span>
-              <span className="text-amber-900">{formatDetailValue(d.success)}</span>
-            </div>
-          )}
+      <div className="mx-4 mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2">
+          <div>
+            <span className="text-amber-600 font-medium block">Miners</span>
+            <span className="text-amber-900 font-mono">{formatDetailValue(d.n_miners)}</span>
+          </div>
+          <div>
+            <span className="text-amber-600 font-medium block">Burn</span>
+            <span className="text-amber-900 font-mono">{d.burn_fraction !== undefined ? `${(Number(d.burn_fraction) * 100).toFixed(0)}%` : "-"}</span>
+          </div>
+          <div>
+            <span className="text-amber-600 font-medium block">Active Signals</span>
+            <span className="text-amber-900">{formatDetailValue(d.is_active)}</span>
+          </div>
         </div>
+        {topMiners.length > 0 && (
+          <MinerResultTable miners={topMiners} columns={[
+            { key: "uid", label: "UID" },
+            { key: "weight", label: "Weight", align: "right" },
+          ]} />
+        )}
       </div>
     );
   }
 
   if (cat === "attestation_challenge") {
+    const miners = (d.miners as Array<Record<string, unknown>>) || [];
     return (
-      <div className="mx-4 mb-3 p-3 bg-cyan-50 border border-cyan-200 rounded-lg">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-          {d.challenged !== undefined && (
+      <div className="mx-4 mb-3 p-3 bg-cyan-50 border border-cyan-200 rounded-lg text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-2">
+          <div>
+            <span className="text-cyan-600 font-medium block">Reachable</span>
+            <span className="text-cyan-900 font-mono">{formatDetailValue(d.reachable)}</span>
+          </div>
+          <div>
+            <span className="text-cyan-600 font-medium block">Capable</span>
+            <span className="text-cyan-900 font-mono">{formatDetailValue(d.capable)}</span>
+          </div>
+          <div>
+            <span className="text-cyan-600 font-medium block">Challenged</span>
+            <span className="text-cyan-900 font-mono">{formatDetailValue(d.challenged)}</span>
+          </div>
+          <div>
+            <span className="text-cyan-600 font-medium block">Verified</span>
+            <span className="text-cyan-900 font-mono">{formatDetailValue(d.verified)}</span>
+          </div>
+          {typeof d.url === "string" && (
             <div>
-              <span className="text-cyan-600 font-medium block">Challenged</span>
-              <span className="text-cyan-900">{formatDetailValue(d.challenged)}</span>
-            </div>
-          )}
-          {d.verified !== undefined && (
-            <div>
-              <span className="text-cyan-600 font-medium block">Verified</span>
-              <span className="text-cyan-900">{formatDetailValue(d.verified)}</span>
-            </div>
-          )}
-          {d.capable !== undefined && (
-            <div>
-              <span className="text-cyan-600 font-medium block">Capable</span>
-              <span className="text-cyan-900">{formatDetailValue(d.capable)}</span>
+              <span className="text-cyan-600 font-medium block">URL</span>
+              <span className="text-cyan-900 font-mono truncate block">{d.url.replace(/^https?:\/\//, "").slice(0, 40)}</span>
             </div>
           )}
         </div>
+        {miners.length > 0 && (
+          <MinerResultTable miners={miners} columns={[
+            { key: "uid", label: "UID" },
+            { key: "valid", label: "Valid" },
+            { key: "latency", label: "Latency", align: "right" },
+            { key: "server", label: "Server" },
+            { key: "error", label: "Error" },
+          ]} />
+        )}
       </div>
     );
   }
 
   if (cat === "challenge_round") {
+    const miners = (d.miners as Array<Record<string, unknown>>) || [];
     return (
-      <div className="mx-4 mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-          {d.miners_challenged !== undefined && (
+      <div className="mx-4 mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-2">
+          <div>
+            <span className="text-blue-600 font-medium block">Sport</span>
+            <span className="text-blue-900 font-mono">{formatDetailValue(d.sport)}</span>
+          </div>
+          <div>
+            <span className="text-blue-600 font-medium block">Games</span>
+            <span className="text-blue-900 font-mono">{formatDetailValue(d.games_found)}</span>
+          </div>
+          <div>
+            <span className="text-blue-600 font-medium block">Lines</span>
+            <span className="text-blue-900 font-mono">{formatDetailValue(d.lines_used)}</span>
+          </div>
+          <div>
+            <span className="text-blue-600 font-medium block">Responding</span>
+            <span className="text-blue-900 font-mono">{formatDetailValue(d.responding)}</span>
+          </div>
+          <div>
+            <span className="text-blue-600 font-medium block">Quorum</span>
+            <span className="text-blue-900">{formatDetailValue(d.consensus_quorum)}</span>
+          </div>
+          {(d.proofs_requested as number) > 0 && (
             <div>
-              <span className="text-blue-600 font-medium block">Miners Challenged</span>
-              <span className="text-blue-900">{formatDetailValue(d.miners_challenged)}</span>
-            </div>
-          )}
-          {d.total_miners !== undefined && (
-            <div>
-              <span className="text-blue-600 font-medium block">Total Miners</span>
-              <span className="text-blue-900">{formatDetailValue(d.total_miners)}</span>
+              <span className="text-blue-600 font-medium block">Proofs</span>
+              <span className="text-blue-900 font-mono">{formatDetailValue(d.proofs_submitted)}/{formatDetailValue(d.proofs_requested)}</span>
             </div>
           )}
         </div>
+        {miners.length > 0 && (
+          <MinerResultTable miners={miners} columns={[
+            { key: "uid", label: "UID" },
+            { key: "correct", label: "Correct" },
+            { key: "accuracy", label: "Accuracy", align: "right" },
+            { key: "available", label: "Lines", align: "right" },
+            { key: "latency", label: "Latency", align: "right" },
+            { key: "proof_valid", label: "Proof" },
+            { key: "error", label: "Error" },
+          ]} />
+        )}
       </div>
     );
   }
 
-  // Generic fallback: key-value grid
-  const entries = Object.entries(d);
+  if (cat === "outcome_resolution") {
+    const signalIds = (d.signal_ids as string[]) || [];
+    return (
+      <div className="mx-4 mb-3 p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs">
+        <div className="grid grid-cols-2 gap-3 mb-2">
+          <div>
+            <span className="text-purple-600 font-medium block">Signals Resolved</span>
+            <span className="text-purple-900 font-mono">{formatDetailValue(d.count)}</span>
+          </div>
+        </div>
+        {signalIds.length > 0 && (
+          <div>
+            <span className="text-purple-600 font-medium block mb-1">Signal IDs</span>
+            <div className="flex flex-wrap gap-1">
+              {signalIds.map((id) => (
+                <span key={id} className="px-1.5 py-0.5 bg-purple-100 text-purple-800 font-mono text-[10px] rounded">
+                  {id.length > 12 ? `${id.slice(0, 8)}...` : id}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Generic fallback: key-value grid (skip arrays)
+  const entries = Object.entries(d).filter(([, v]) => !Array.isArray(v));
   if (entries.length === 0) return null;
   return (
     <div className="mx-4 mb-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">

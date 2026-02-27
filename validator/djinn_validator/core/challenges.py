@@ -401,12 +401,39 @@ def _select_proof_targets(
     return targets
 
 
+@dataclass
+class ChallengeResult:
+    """Rich result from a challenge round for activity logging."""
+
+    challenged: int = 0
+    sport: str = ""
+    games_found: int = 0
+    lines_used: int = 0
+    responding: int = 0
+    consensus_quorum: bool = False
+    proofs_requested: int = 0
+    proofs_submitted: int = 0
+    miner_results: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class AttestationResult:
+    """Rich result from an attestation challenge for activity logging."""
+
+    challenged: int = 0
+    verified: int = 0
+    url: str = ""
+    reachable: int = 0
+    capable: int = 0
+    miner_results: list[dict] = field(default_factory=list)
+
+
 async def challenge_miners(
     scorer: MinerScorer,
     miner_axons: list[dict],
     espn_client: ESPNClient | None = None,
     wallet: Any | None = None,
-) -> int:
+) -> ChallengeResult:
     """Run a consensus-based scoring challenge against all reachable miners.
 
     4-phase flow:
@@ -415,30 +442,35 @@ async def challenge_miners(
     3. Score each miner against consensus + synthetic ground truth
     4. Request TLSNotary proofs from outliers + random sample
 
-    Returns the number of miners successfully challenged.
+    Returns a ChallengeResult with per-miner details.
     """
+    result = ChallengeResult()
+
     if espn_client is None:
         from djinn_validator.core.espn import ESPNClient
         espn_client = ESPNClient()
 
     # Pick a random sport
     sport = random.choice(CHALLENGE_SPORTS)
+    result.sport = sport
 
     # Fetch live games from ESPN
     games = await espn_client.get_scoreboard(sport)
     if not games:
         log.debug("no_challenge_games", sport=sport)
-        return 0
+        return result
 
     # Filter to in-progress or scheduled games
     active_games = [g for g in games if g.status in ("in_progress", "scheduled", "pending")]
     if not active_games:
         active_games = games  # Fall back to all games if none are active
 
+    result.games_found = len(active_games)
     challenge_lines = build_challenge_lines(active_games, sport)
+    result.lines_used = len(challenge_lines)
     if len(challenge_lines) < 3:
         log.debug("insufficient_challenge_lines", sport=sport, count=len(challenge_lines))
-        return 0
+        return result
 
     # Build the check request payload (matching miner's CheckRequest model)
     check_payload = {
@@ -473,17 +505,23 @@ async def challenge_miners(
         responses = [r for r in raw_results if r is not None]
 
         if not responses:
-            return 0
+            return result
 
         # ── Phase 2: Compute consensus ──
         consensus = _compute_consensus(responses, challenge_lines, synthetic_indices)
+        result.responding = consensus.responding_miners
+        result.consensus_quorum = consensus.has_quorum
 
         # ── Phase 3: Score each miner against consensus ──
         for r in responses:
             metrics = scorer.get_or_create(r.uid, r.hotkey)
+            mr: dict = {"uid": r.uid, "latency": round(r.latency, 3)}
             if not r.success:
                 metrics.record_query(correct=False, latency=r.latency, proof_submitted=False)
+                mr["error"] = r.error or "no response"
+                mr["correct"] = False
                 log.debug("challenge_miner_error", uid=r.uid, err=r.error)
+                result.miner_results.append(mr)
                 continue
 
             is_correct, accuracy = _score_against_consensus(
@@ -494,6 +532,10 @@ async def challenge_miners(
                 latency=r.latency,
                 proof_submitted=False,  # Updated in Phase 4 if proof requested
             )
+            mr["correct"] = is_correct
+            mr["accuracy"] = round(accuracy, 2)
+            mr["available"] = len(r.available_indices)
+            result.miner_results.append(mr)
             log.info(
                 "challenge_miner_scored", uid=r.uid,
                 accuracy=round(accuracy, 2),
@@ -508,6 +550,7 @@ async def challenge_miners(
         proof_targets = _select_proof_targets(
             responses, consensus, synthetic_indices,
         )
+        result.proofs_requested = len(proof_targets)
         for target in proof_targets:
             proof_submitted, proof_valid = await _request_and_verify_proof(
                 client, target.ip, target.port, target.query_id, target.uid,
@@ -516,21 +559,29 @@ async def challenge_miners(
             if proof_submitted:
                 metrics = scorer.get_or_create(target.uid, target.hotkey)
                 metrics.proofs_submitted += 1
+                result.proofs_submitted += 1
                 log.info(
                     "challenge_proof_result", uid=target.uid,
                     proof_submitted=proof_submitted,
                     proof_valid=proof_valid,
                 )
+            # Annotate the miner result with proof info
+            for mr in result.miner_results:
+                if mr["uid"] == target.uid:
+                    mr["proof_requested"] = True
+                    mr["proof_submitted"] = proof_submitted
+                    mr["proof_valid"] = proof_valid
+                    break
 
-    challenged = len(responses)
-    if challenged:
+    result.challenged = len(responses)
+    if result.challenged:
         log.info(
             "challenge_round_complete", sport=sport,
-            miners_challenged=challenged,
+            miners_challenged=result.challenged,
             consensus_quorum=consensus.has_quorum,
             responding=consensus.responding_miners,
         )
-    return challenged
+    return result
 
 
 async def _request_and_verify_proof(
@@ -653,7 +704,7 @@ async def challenge_miners_attestation(
     scorer: MinerScorer,
     miner_axons: list[dict],
     wallet: Any | None = None,
-) -> int:
+) -> AttestationResult:
     """Run a TLSNotary attestation challenge against capable miners.
 
     Two phases:
@@ -661,22 +712,27 @@ async def challenge_miners_attestation(
        have /v1/attest (422 = has it, 404/timeout = doesn't)
     2. Full challenge (210s): send real attestation to capable miners only
 
-    Returns the number of miners challenged.
+    Returns an AttestationResult with per-miner details.
     """
+    ar = AttestationResult()
     url = random.choice(_ATTESTATION_CHALLENGE_URLS)
+    ar.url = url
 
     reachable = [a for a in miner_axons if a.get("ip") and a.get("port")]
+    ar.reachable = len(reachable)
 
     async with httpx.AsyncClient() as client:
         # Phase 1: fast probe all miners (~15s for 246 miners at concurrency 20)
         capable = await _probe_attest_capability(client, reachable)
+        ar.capable = len(capable)
         log.info("attest_probe_complete", total=len(reachable), capable=len(capable))
 
         if not capable:
-            return 0
+            return ar
 
         # Phase 2: full challenge only capable miners
         sem = asyncio.Semaphore(4)
+        per_miner: list[dict] = []
 
         async def _challenge_one(axon: dict) -> tuple[bool, bool]:
             """Returns (attempted, proof_valid)."""
@@ -685,6 +741,7 @@ async def challenge_miners_attestation(
             metrics = scorer.get_or_create(uid, hotkey)
             miner_url = f"http://{axon['ip']}:{axon['port']}/v1/attest"
             request_id = f"challenge-{uid}-{int(time.time())}"
+            mr: dict = {"uid": uid}
 
             async with sem:
                 start = time.perf_counter()
@@ -698,10 +755,14 @@ async def challenge_miners_attestation(
                         timeout=210.0,
                     )
                     latency = time.perf_counter() - start
+                    mr["latency"] = round(latency, 1)
 
                     if resp.status_code != 200:
                         metrics.record_attestation(latency=latency, proof_valid=False)
+                        mr["error"] = f"HTTP {resp.status_code}"
+                        mr["valid"] = False
                         log.debug("attest_challenge_error", uid=uid, status=resp.status_code)
+                        per_miner.append(mr)
                         return True, False
 
                     try:
@@ -713,6 +774,9 @@ async def challenge_miners_attestation(
                             response_text=resp.text[:300] if hasattr(resp, "text") else "<no text>",
                         )
                         metrics.record_attestation(latency=latency, proof_valid=False)
+                        mr["error"] = "malformed JSON"
+                        mr["valid"] = False
+                        per_miner.append(mr)
                         return True, False
 
                     proof_valid = data.get("success", False) and bool(data.get("proof_hex"))
@@ -734,26 +798,34 @@ async def challenge_miners_attestation(
                             proof_valid = False
 
                     metrics.record_attestation(latency=latency, proof_valid=proof_valid)
+                    mr["valid"] = proof_valid
+                    mr["server"] = data.get("server_name", "")
+                    per_miner.append(mr)
                     log.info("attest_challenge_scored", uid=uid, proof_valid=proof_valid, latency_s=round(latency, 3))
                     return True, proof_valid
 
                 except httpx.HTTPError as e:
                     latency = time.perf_counter() - start
                     metrics.record_attestation(latency=latency, proof_valid=False)
+                    mr["latency"] = round(latency, 1)
+                    mr["error"] = str(e)[:80]
+                    mr["valid"] = False
+                    per_miner.append(mr)
                     log.debug("attest_challenge_unreachable", uid=uid, err=str(e))
                     return True, False
 
         results = await asyncio.gather(*[_challenge_one(a) for a in capable])
-        challenged = sum(1 for attempted, _ in results if attempted)
-        verified = sum(1 for _, valid in results if valid)
+        ar.challenged = sum(1 for attempted, _ in results if attempted)
+        ar.verified = sum(1 for _, valid in results if valid)
+        ar.miner_results = per_miner
 
-    if challenged:
+    if ar.challenged:
         log.info(
             "attest_challenge_round_complete",
             url=url,
             probed=len(reachable),
             capable=len(capable),
-            challenged=challenged,
-            verified=verified,
+            challenged=ar.challenged,
+            verified=ar.verified,
         )
-    return challenged
+    return ar

@@ -512,7 +512,7 @@ async def test_challenge_miners_no_games() -> None:
     scorer = MinerScorer()
 
     result = await challenge_miners(scorer, [], espn_client=mock_espn)
-    assert result == 0
+    assert result.challenged == 0
 
 
 @pytest.mark.asyncio
@@ -523,7 +523,7 @@ async def test_challenge_miners_no_miners() -> None:
     scorer = MinerScorer()
 
     result = await challenge_miners(scorer, [], espn_client=mock_espn)
-    assert result == 0
+    assert result.challenged == 0
 
 
 @pytest.mark.asyncio
@@ -542,7 +542,7 @@ async def test_challenge_miners_miner_no_ip() -> None:
 
         result = await challenge_miners(scorer, [axon], espn_client=mock_espn)
 
-    assert result == 0
+    assert result.challenged == 0
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +594,7 @@ async def test_challenge_miners_scores_miner() -> None:
 
         result = await challenge_miners(scorer, [axon], espn_client=mock_espn)
 
-    assert result == 1
+    assert result.challenged == 1
     metrics = scorer.get_or_create(0, "hk0")
     assert metrics.queries_total > 0
 
@@ -616,7 +616,7 @@ async def test_challenge_miners_unreachable_miner() -> None:
 
         result = await challenge_miners(scorer, [axon], espn_client=mock_espn)
 
-    assert result == 1  # Counted as challenged (but scored as incorrect)
+    assert result.challenged == 1  # Counted as challenged (but scored as incorrect)
 
 
 @pytest.mark.asyncio
@@ -640,7 +640,7 @@ async def test_challenge_miners_miner_500() -> None:
 
         result = await challenge_miners(scorer, [axon], espn_client=mock_espn)
 
-    assert result == 1
+    assert result.challenged == 1
 
 
 # ---------------------------------------------------------------------------
@@ -677,7 +677,7 @@ async def test_consensus_three_miners_majority() -> None:
 
         result = await challenge_miners(scorer, axons, espn_client=mock_espn)
 
-    assert result == 3
+    assert result.challenged == 3
     # All 3 should be scored
     for uid in range(3):
         m = scorer.get_or_create(uid, f"hk{uid}")
@@ -705,7 +705,7 @@ async def test_consensus_two_miners_fallback() -> None:
 
         result = await challenge_miners(scorer, axons, espn_client=mock_espn)
 
-    assert result == 2
+    assert result.challenged == 2
     # Both should still be scored (at least on synthetics)
     m0 = scorer.get_or_create(0, "hk0")
     m1 = scorer.get_or_create(1, "hk1")
@@ -735,7 +735,7 @@ async def test_consensus_all_same_response() -> None:
 
         result = await challenge_miners(scorer, axons, espn_client=mock_espn)
 
-    assert result == 5
+    assert result.challenged == 5
     for i in range(5):
         m = scorer.get_or_create(i, f"hk{i}")
         assert m.queries_total > 0
@@ -767,7 +767,7 @@ async def test_consensus_mixed_success_failure() -> None:
 
         result = await challenge_miners(scorer, axons, espn_client=mock_espn)
 
-    assert result == 3  # All 3 counted
+    assert result.challenged == 3  # All 3 counted
     # Failed miner still gets metrics
     m1 = scorer.get_or_create(1, "hk1")
     assert m1.queries_total > 0
@@ -811,6 +811,6 @@ async def test_consensus_proof_requested_from_outlier() -> None:
 
         result = await challenge_miners(scorer, axons, espn_client=mock_espn)
 
-    assert result == 4
+    assert result.challenged == 4
     # Proof was requested (at least check + proof calls)
     assert mock_http.post.call_count > 4

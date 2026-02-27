@@ -116,10 +116,15 @@ async def epoch_loop(
                     1 for uid in miner_uids
                     if (m := scorer.get(uid)) is not None and m.health_checks_responded > 0
                 )
+                failed_uids = [
+                    uid for uid in miner_uids
+                    if (m := scorer.get(uid)) is not None and m.health_checks_responded == 0
+                ]
                 activity.record(
                     ActivityCategory.HEALTH_CHECK,
                     f"{responded}/{len(miner_uids)} miners responded",
                     responded=responded, total=len(miner_uids),
+                    failed_uids=failed_uids[:50],  # Cap to avoid huge payloads
                 )
 
             # Challenge miners for accuracy scoring (throttled)
@@ -136,12 +141,20 @@ async def epoch_loop(
                             "port": axon.get("port", 0),
                         })
                     try:
-                        challenged = await challenge_miners(scorer, miner_axons, espn_client=espn_client, wallet=neuron.wallet)
-                        if activity and challenged:
+                        cr = await challenge_miners(scorer, miner_axons, espn_client=espn_client, wallet=neuron.wallet)
+                        if activity and cr.challenged:
                             activity.record(
                                 ActivityCategory.CHALLENGE_ROUND,
-                                f"Challenged {challenged} miners",
-                                miners_challenged=challenged,
+                                f"Challenged {cr.challenged} miners on {cr.sport}",
+                                miners_challenged=cr.challenged,
+                                sport=cr.sport,
+                                games_found=cr.games_found,
+                                lines_used=cr.lines_used,
+                                responding=cr.responding,
+                                consensus_quorum=cr.consensus_quorum,
+                                proofs_requested=cr.proofs_requested,
+                                proofs_submitted=cr.proofs_submitted,
+                                miners=cr.miner_results[:50],
                             )
                     except Exception as e:
                         log.warning("challenge_miners_error", err=str(e))
@@ -158,12 +171,17 @@ async def epoch_loop(
                         "port": axon.get("port", 0),
                     })
                 try:
-                    attest_count = await challenge_miners_attestation(scorer, miner_axons, wallet=neuron.wallet)
-                    if activity and attest_count:
+                    ar = await challenge_miners_attestation(scorer, miner_axons, wallet=neuron.wallet)
+                    if activity and ar.challenged:
                         activity.record(
                             ActivityCategory.ATTESTATION_CHALLENGE,
-                            f"Attestation challenge: {attest_count} miners",
-                            miners_challenged=attest_count,
+                            f"Attestation: {ar.verified}/{ar.challenged} verified ({ar.url.split('/')[2]})",
+                            challenged=ar.challenged,
+                            verified=ar.verified,
+                            url=ar.url,
+                            reachable=ar.reachable,
+                            capable=ar.capable,
+                            miners=ar.miner_results[:50],
                         )
                 except Exception as e:
                     log.warning("attest_challenge_error", err=str(e))
@@ -182,6 +200,7 @@ async def epoch_loop(
                         ActivityCategory.OUTCOME_RESOLUTION,
                         f"Resolved {len(resolved_ids)} signal outcomes",
                         count=len(resolved_ids),
+                        signal_ids=resolved_ids[:20],
                     )
                 # Record outcomes on audit set store
                 if audit_set_store:
@@ -241,10 +260,21 @@ async def epoch_loop(
                 if success:
                     neuron.record_weight_set()
                     if activity is not None:
+                        # Top 20 miners by weight (excluding UID 0 burn)
+                        sorted_w = sorted(
+                            ((uid, w) for uid, w in weights.items() if uid != 0),
+                            key=lambda x: x[1], reverse=True,
+                        )
+                        top_miners = [
+                            {"uid": uid, "weight": round(w, 6)}
+                            for uid, w in sorted_w[:20]
+                        ]
                         activity.record(
                             ActivityCategory.WEIGHT_SET,
                             f"Set weights for {n_miners} miners (burn={burn_fraction})",
                             n_miners=n_miners, is_active=is_active,
+                            burn_fraction=burn_fraction,
+                            top_miners=top_miners,
                         )
                 log.info("weights_updated", n_miners=n_miners, active=is_active, success=success)
                 # Reset per-epoch metrics after weight setting (increments
