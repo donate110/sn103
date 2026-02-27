@@ -184,11 +184,15 @@ export async function POST(request: NextRequest) {
       });
       if (res.ok) {
         const data = await res.json();
-        // Translate miner/validator errors into human-readable messages
-        if (data && !data.success && data.error) {
-          data.error = humanizeError(data.error);
+        if (data && data.success) {
+          // Successful attestation — return immediately
+          return NextResponse.json(data);
         }
-        return NextResponse.json(data);
+        // Validator returned 200 but attestation failed — try next validator
+        if (data && data.error) {
+          lastError = humanizeError(data.error);
+        }
+        continue;
       }
       // Non-200 = try next validator
       if (res.status === 404) {
