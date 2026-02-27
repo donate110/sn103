@@ -29,8 +29,8 @@ async function getValidatorUrls(): Promise<string[]> {
   return fallback ? [fallback] : ["http://localhost:8421"];
 }
 
-const MAX_ATTEMPTS = 3;
-const TIMEOUT_MS = 240_000; // 240s per attempt (large pages can take up to 180s)
+const DISCOVERY_TIMEOUT_MS = 45_000; // 45s for discovered validators — fast-fail if they can't attest
+const FALLBACK_TIMEOUT_MS = 240_000; // 240s for fallback — give it full time for proof generation
 const TOTAL_DEADLINE_MS = 270_000; // 4.5 min total — must finish before client's 5 min timeout
 
 /**
@@ -174,7 +174,8 @@ export async function POST(request: NextRequest) {
     if (remaining < 30_000) break;
 
     const target = `${validators[i]}/v1/attest`;
-    const perAttemptTimeout = Math.min(TIMEOUT_MS, remaining);
+    const isFallback = i === validators.length - 1 && !!process.env.FALLBACK_VALIDATOR_URL;
+    const perAttemptTimeout = Math.min(isFallback ? FALLBACK_TIMEOUT_MS : DISCOVERY_TIMEOUT_MS, remaining);
     try {
       const res = await fetch(target, {
         method: "POST",
