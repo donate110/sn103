@@ -34,6 +34,8 @@ interface ValidatorNode {
   port: number;
   hotkey?: string;
   stake?: string;
+  alphaStake?: string;
+  taoStake?: string;
   incentive?: number;
   emission?: string;
   consensus?: number;
@@ -49,6 +51,8 @@ interface MinerNode {
   port: number;
   hotkey?: string;
   stake?: string;
+  alphaStake?: string;
+  taoStake?: string;
   incentive?: number;
   emission?: string;
   rank?: number;
@@ -60,6 +64,9 @@ interface ValidatorHealth {
   port: number;
   hotkey?: string;
   stake?: string;
+  alphaStake?: string;
+  taoStake?: string;
+  validatorTrust?: number;
   incentive?: number;
   emission?: string;
   status: string;
@@ -76,6 +83,8 @@ interface MinerHealth {
   port: number;
   hotkey?: string;
   stake?: string;
+  alphaStake?: string;
+  taoStake?: string;
   incentive?: number;
   emission?: string;
   status: string;
@@ -95,13 +104,23 @@ function truncateHotkey(hotkey?: string): string {
 
 function formatStake(raw?: string): string {
   if (!raw) return "-";
-  // raw is rao (1e9 per TAO) as a string
   const rao = BigInt(raw);
-  const tao = Number(rao) / 1e9;
-  if (tao >= 1_000_000) return `${(tao / 1_000_000).toFixed(1)}M`;
-  if (tao >= 1_000) return `${(tao / 1_000).toFixed(1)}K`;
-  if (tao >= 1) return `${tao.toFixed(1)}`;
-  return `${tao.toFixed(4)}`;
+  const val = Number(rao) / 1e9;
+  if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(1)}M`;
+  if (val >= 1_000) return `${(val / 1_000).toFixed(1)}K`;
+  if (val >= 1) return `${val.toFixed(1)}`;
+  return `${val.toFixed(4)}`;
+}
+
+function stakeTooltip(alphaRaw?: string, taoRaw?: string): string {
+  const alpha = alphaRaw ? (Number(BigInt(alphaRaw)) / 1e9).toFixed(0) : "?";
+  const tao = taoRaw ? (Number(BigInt(taoRaw)) / 1e9).toFixed(0) : "?";
+  return `α ${alpha} + τ ${tao}`;
+}
+
+function formatVTrust(raw?: number): string {
+  if (raw === undefined || raw === null) return "-";
+  return `${((raw / 65535) * 100).toFixed(1)}%`;
 }
 
 interface NetworkEvent {
@@ -429,6 +448,7 @@ export default function AdminDashboard() {
                     <th className="px-4 py-3 text-left font-medium">Name</th>
                     <th className="px-4 py-3 text-left font-medium">IP</th>
                     <th className="px-4 py-3 text-right font-medium">Stake</th>
+                    <th className="px-4 py-3 text-right font-medium">VTrust</th>
                     <th className="px-4 py-3 text-right font-medium">Incentive</th>
                     <th className="px-4 py-3 text-right font-medium">Emission</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
@@ -441,7 +461,7 @@ export default function AdminDashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {validators.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={11} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={12} className="px-4 py-8 text-center text-slate-400">
                         No validators discovered
                       </td>
                     </tr>
@@ -457,7 +477,8 @@ export default function AdminDashboard() {
                         )}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{v.ip}:{v.port}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatStake(v.stake)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700" title={stakeTooltip(v.alphaStake, v.taoStake)}>{formatStake(v.stake)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatVTrust(v.validatorTrust)}</td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatU16Pct(v.incentive)}</td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatEmission(v.emission)}</td>
                       <td className="px-4 py-3">
@@ -541,7 +562,7 @@ export default function AdminDashboard() {
                         )}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.ip}:{m.port}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatStake(m.stake)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700" title={stakeTooltip(m.alphaStake, m.taoStake)}>{formatStake(m.stake)}</td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatU16Pct(m.incentive)}</td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatEmission(m.emission)}</td>
                       <td className="px-4 py-3">
@@ -1900,14 +1921,14 @@ async function fetchValidatorHealth(): Promise<ValidatorHealth[]> {
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
-        return { ...data, uid: v.uid, ip: v.ip, port: v.port, hotkey: v.hotkey, stake: v.stake, incentive: v.incentive, emission: v.emission } as ValidatorHealth;
+        return { ...data, uid: v.uid, ip: v.ip, port: v.port, hotkey: v.hotkey, stake: v.stake, alphaStake: v.alphaStake, taoStake: v.taoStake, validatorTrust: v.validatorTrust, incentive: v.incentive, emission: v.emission } as ValidatorHealth;
       }),
     );
 
     return results.map((r, i) =>
       r.status === "fulfilled"
         ? r.value
-        : { uid: validators[i].uid, ip: validators[i].ip, port: validators[i].port, hotkey: validators[i].hotkey, stake: validators[i].stake, incentive: validators[i].incentive, emission: validators[i].emission, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, error: String((r as PromiseRejectedResult).reason) },
+        : { uid: validators[i].uid, ip: validators[i].ip, port: validators[i].port, hotkey: validators[i].hotkey, stake: validators[i].stake, alphaStake: validators[i].alphaStake, taoStake: validators[i].taoStake, validatorTrust: validators[i].validatorTrust, incentive: validators[i].incentive, emission: validators[i].emission, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, error: String((r as PromiseRejectedResult).reason) },
     );
   } catch {
     return [];
@@ -2015,14 +2036,14 @@ async function fetchMinerHealth(): Promise<MinerHealth[]> {
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
-        return { ...data, uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey, stake: m.stake, incentive: m.incentive, emission: m.emission } as MinerHealth;
+        return { ...data, uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey, stake: m.stake, alphaStake: m.alphaStake, taoStake: m.taoStake, incentive: m.incentive, emission: m.emission } as MinerHealth;
       }),
     );
 
     return results.map((r, i) =>
       r.status === "fulfilled"
         ? r.value
-        : { uid: miners[i].uid, ip: miners[i].ip, port: miners[i].port, hotkey: miners[i].hotkey, stake: miners[i].stake, incentive: miners[i].incentive, emission: miners[i].emission, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
+        : { uid: miners[i].uid, ip: miners[i].ip, port: miners[i].port, hotkey: miners[i].hotkey, stake: miners[i].stake, alphaStake: miners[i].alphaStake, taoStake: miners[i].taoStake, incentive: miners[i].incentive, emission: miners[i].emission, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
     );
   } catch {
     return [];

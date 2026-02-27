@@ -17,8 +17,8 @@ export async function GET() {
     const pool = withPermit.length > 0 ? withPermit : reachable;
 
     const validators = pool
-      .sort((a, b) => (b.stake > a.stake ? 1 : b.stake < a.stake ? -1 : 0))
-      .map((n) => ({ uid: n.uid, ip: n.ip, port: n.port, hotkey: n.hotkey, stake: n.stake.toString(), incentive: n.incentive, emission: n.emission.toString(), consensus: n.consensus, trust: n.trust, validatorTrust: n.validatorTrust, dividends: n.dividends, rank: n.rank }));
+      .sort((a, b) => (b.totalStake > a.totalStake ? 1 : b.totalStake < a.totalStake ? -1 : 0))
+      .map((n) => ({ uid: n.uid, ip: n.ip, port: n.port, hotkey: n.hotkey, stake: n.totalStake.toString(), alphaStake: n.alphaStake.toString(), taoStake: n.taoStake.toString(), incentive: n.incentive, emission: n.emission.toString(), consensus: n.consensus, trust: n.trust, validatorTrust: n.validatorTrust, dividends: n.dividends, rank: n.rank }));
 
     return NextResponse.json({ validators }, {
       headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" },

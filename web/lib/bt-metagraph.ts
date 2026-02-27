@@ -39,7 +39,10 @@ export interface DiscoveredNode {
   ip: string;
   port: number;
   isValidator: boolean;
-  stake: bigint;
+  stake: bigint; // alpha stake from NeuronInfoLite (rao)
+  alphaStake: bigint; // alpha stake from SubnetState (rao)
+  taoStake: bigint; // tao stake from SubnetState (rao)
+  totalStake: bigint; // weighted alpha + tao from SubnetState (rao)
   rank: number;
   emission: bigint;
   incentive: number;
@@ -133,6 +136,9 @@ function decodeNeuronsLite(bytes: Uint8Array): DiscoveredNode[] {
       port,
       isValidator: validatorPermit,
       stake: totalStake,
+      alphaStake: totalStake, // fallback; overwritten by SubnetState if available
+      taoStake: 0n,
+      totalStake: totalStake,
       rank,
       emission,
       incentive,
@@ -144,6 +150,73 @@ function decodeNeuronsLite(bytes: Uint8Array): DiscoveredNode[] {
   }
 
   return nodes;
+}
+
+// ---------------------------------------------------------------------------
+// SCALE decoding — SubnetState (stake arrays)
+// ---------------------------------------------------------------------------
+
+/**
+ * Decode per-UID stake arrays from `SubnetInfoRuntimeApi_get_subnet_state`.
+ *
+ * SubnetState field order:
+ *   netuid, hotkeys, coldkeys, active, validator_permit,
+ *   pruning_score, last_update, emission, dividends, incentives, consensus,
+ *   trust, rank, block_at_registration,
+ *   alpha_stake, tao_stake, total_stake, emission_history
+ *
+ * We skip through all preceding fields to reach the three stake arrays.
+ */
+function decodeSubnetStateStakes(
+  bytes: Uint8Array,
+): { alphaStake: bigint[]; taoStake: bigint[]; totalStake: bigint[] } | null {
+  const r = new ScaleReader(bytes);
+
+  // Option<SubnetState>: 0x01 = Some
+  const optionTag = r.readU8();
+  if (optionTag !== 1) return null;
+
+  r.readCompact(); // netuid
+
+  // hotkeys: Vec<AccountId>
+  const nHotkeys = r.readVecLength();
+  r.skip(nHotkeys * 32);
+
+  // coldkeys: Vec<AccountId>
+  const nColdkeys = r.readVecLength();
+  r.skip(nColdkeys * 32);
+
+  // active: Vec<bool>
+  const nActive = r.readVecLength();
+  r.skip(nActive);
+
+  // validator_permit: Vec<bool>
+  const nPermit = r.readVecLength();
+  r.skip(nPermit);
+
+  // Skip compact Vec arrays: pruning_score, last_update, emission,
+  // dividends, incentives, consensus, trust, rank, block_at_registration
+  for (let f = 0; f < 9; f++) {
+    const len = r.readVecLength();
+    for (let i = 0; i < len; i++) r.readCompact();
+  }
+
+  // alpha_stake: Vec<Compact<u64>>
+  const nAlpha = r.readVecLength();
+  const alphaStake: bigint[] = [];
+  for (let i = 0; i < nAlpha; i++) alphaStake.push(r.readCompact());
+
+  // tao_stake: Vec<Compact<u64>>
+  const nTao = r.readVecLength();
+  const taoStake: bigint[] = [];
+  for (let i = 0; i < nTao; i++) taoStake.push(r.readCompact());
+
+  // total_stake: Vec<Compact<u64>>
+  const nTotal = r.readVecLength();
+  const totalStake: bigint[] = [];
+  for (let i = 0; i < nTotal; i++) totalStake.push(r.readCompact());
+
+  return { alphaStake, taoStake, totalStake };
 }
 
 function ipIntToString(ipInt: bigint, ipType: number): string {
@@ -196,12 +269,42 @@ async function fetchNeurons(netuid: number, rpcUrl: string): Promise<DiscoveredN
   const hi = (netuid >> 8) & 0xff;
   const callData = "0x" + lo.toString(16).padStart(2, "0") + hi.toString(16).padStart(2, "0");
 
-  const result = await callRpc(rpcUrl, "state_call", [
-    "NeuronInfoRuntimeApi_get_neurons_lite",
-    callData,
+  // Fetch neurons and subnet state in parallel
+  const [neuronsResult, stateResult] = await Promise.all([
+    callRpc(rpcUrl, "state_call", [
+      "NeuronInfoRuntimeApi_get_neurons_lite",
+      callData,
+    ]),
+    callRpc(rpcUrl, "state_call", [
+      "SubnetInfoRuntimeApi_get_subnet_state",
+      callData,
+    ]).catch((err) => {
+      console.warn("[bt-metagraph] SubnetState fetch failed, using alpha-only stakes:", err);
+      return null;
+    }),
   ]);
 
-  return decodeNeuronsLite(hexToBytes(result));
+  const nodes = decodeNeuronsLite(hexToBytes(neuronsResult));
+
+  // Merge SubnetState stake data if available
+  if (stateResult) {
+    try {
+      const stakes = decodeSubnetStateStakes(hexToBytes(stateResult));
+      if (stakes) {
+        for (const node of nodes) {
+          if (node.uid < stakes.alphaStake.length) {
+            node.alphaStake = stakes.alphaStake[node.uid];
+            node.taoStake = stakes.taoStake[node.uid];
+            node.totalStake = stakes.totalStake[node.uid];
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[bt-metagraph] SubnetState decode failed:", err);
+    }
+  }
+
+  return nodes;
 }
 
 // ---------------------------------------------------------------------------
@@ -233,7 +336,7 @@ export async function discoverValidatorUrl(): Promise<string | null> {
   const { nodes } = await discoverMetagraph();
   const validators = nodes
     .filter((n) => n.isValidator && n.port > 0 && isPublicIp(n.ip))
-    .sort((a, b) => (b.stake > a.stake ? 1 : b.stake < a.stake ? -1 : 0));
+    .sort((a, b) => (b.totalStake > a.totalStake ? 1 : b.totalStake < a.totalStake ? -1 : 0));
 
   if (validators.length === 0) return null;
   return `http://${validators[0].ip}:${validators[0].port}`;
@@ -247,7 +350,7 @@ export async function discoverValidatorUrls(): Promise<string[]> {
   const { nodes } = await discoverMetagraph();
   return nodes
     .filter((n) => n.isValidator && n.port > 0 && isPublicIp(n.ip))
-    .sort((a, b) => (b.stake > a.stake ? 1 : b.stake < a.stake ? -1 : 0))
+    .sort((a, b) => (b.totalStake > a.totalStake ? 1 : b.totalStake < a.totalStake ? -1 : 0))
     .map((n) => `http://${n.ip}:${n.port}`);
 }
 
