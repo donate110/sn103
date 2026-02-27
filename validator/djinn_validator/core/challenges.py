@@ -260,14 +260,15 @@ async def _query_one(
                 return resp
 
             data = http_resp.json()
-            resp.available_indices = set(data.get("available_indices", []))
+            raw_indices = data.get("available_indices", [])
+            resp.available_indices = {int(i) for i in raw_indices if isinstance(i, (int, float, str))}
             resp.query_id = data.get("query_id")
             resp.success = True
             return resp
 
-        except httpx.HTTPError as e:
+        except Exception as e:
             resp.latency = time.perf_counter() - start
-            resp.error = str(e)
+            resp.error = str(e)[:200]
             return resp
 
 
@@ -804,14 +805,14 @@ async def challenge_miners_attestation(
                     log.info("attest_challenge_scored", uid=uid, proof_valid=proof_valid, latency_s=round(latency, 3))
                     return True, proof_valid
 
-                except httpx.HTTPError as e:
+                except Exception as e:
                     latency = time.perf_counter() - start
                     metrics.record_attestation(latency=latency, proof_valid=False)
                     mr["latency"] = round(latency, 1)
                     mr["error"] = str(e)[:80]
                     mr["valid"] = False
                     per_miner.append(mr)
-                    log.debug("attest_challenge_unreachable", uid=uid, err=str(e))
+                    log.debug("attest_challenge_error", uid=uid, err=str(e))
                     return True, False
 
         results = await asyncio.gather(*[_challenge_one(a) for a in capable])
