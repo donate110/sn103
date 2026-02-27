@@ -9,7 +9,7 @@ export async function GET() {
   try {
     const nodes = await discoverMiners();
 
-    const miners = nodes.map((n) => ({ uid: n.uid, ip: n.ip, port: n.port, hotkey: n.hotkey, stake: n.stake.toString() }));
+    const miners = nodes.map((n) => ({ uid: n.uid, ip: n.ip, port: n.port, hotkey: n.hotkey, stake: n.stake.toString(), incentive: n.incentive, emission: n.emission.toString(), rank: n.rank }));
 
     return NextResponse.json({ miners }, {
       headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" },

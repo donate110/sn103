@@ -34,6 +34,13 @@ interface ValidatorNode {
   port: number;
   hotkey?: string;
   stake?: string;
+  incentive?: number;
+  emission?: string;
+  consensus?: number;
+  trust?: number;
+  validatorTrust?: number;
+  dividends?: number;
+  rank?: number;
 }
 
 interface MinerNode {
@@ -42,6 +49,9 @@ interface MinerNode {
   port: number;
   hotkey?: string;
   stake?: string;
+  incentive?: number;
+  emission?: string;
+  rank?: number;
 }
 
 interface ValidatorHealth {
@@ -50,6 +60,8 @@ interface ValidatorHealth {
   port: number;
   hotkey?: string;
   stake?: string;
+  incentive?: number;
+  emission?: string;
   status: string;
   version: string;
   shares_held: number;
@@ -64,6 +76,8 @@ interface MinerHealth {
   port: number;
   hotkey?: string;
   stake?: string;
+  incentive?: number;
+  emission?: string;
   status: string;
   version: string;
   odds_api_connected: boolean;
@@ -415,6 +429,8 @@ export default function AdminDashboard() {
                     <th className="px-4 py-3 text-left font-medium">Name</th>
                     <th className="px-4 py-3 text-left font-medium">IP</th>
                     <th className="px-4 py-3 text-right font-medium">Stake</th>
+                    <th className="px-4 py-3 text-right font-medium">Incentive</th>
+                    <th className="px-4 py-3 text-right font-medium">Emission</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Version</th>
                     <th className="px-4 py-3 text-right font-medium">Shares</th>
@@ -425,7 +441,7 @@ export default function AdminDashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {validators.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={11} className="px-4 py-8 text-center text-slate-400">
                         No validators discovered
                       </td>
                     </tr>
@@ -442,6 +458,8 @@ export default function AdminDashboard() {
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{v.ip}:{v.port}</td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatStake(v.stake)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatU16Pct(v.incentive)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatEmission(v.emission)}</td>
                       <td className="px-4 py-3">
                         {v.error ? (
                           <span className="inline-flex items-center gap-1 text-red-600">
@@ -495,6 +513,8 @@ export default function AdminDashboard() {
                     <th className="px-4 py-3 text-left font-medium">Name</th>
                     <th className="px-4 py-3 text-left font-medium">IP</th>
                     <th className="px-4 py-3 text-right font-medium">Stake</th>
+                    <th className="px-4 py-3 text-right font-medium">Incentive</th>
+                    <th className="px-4 py-3 text-right font-medium">Emission</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Version</th>
                     <th className="px-4 py-3 text-center font-medium">Odds API</th>
@@ -505,7 +525,7 @@ export default function AdminDashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {miners.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={11} className="px-4 py-8 text-center text-slate-400">
                         No miners discovered
                       </td>
                     </tr>
@@ -522,6 +542,8 @@ export default function AdminDashboard() {
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.ip}:{m.port}</td>
                       <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatStake(m.stake)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatU16Pct(m.incentive)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatEmission(m.emission)}</td>
                       <td className="px-4 py-3">
                         {m.error ? (
                           <span className="inline-flex items-center gap-1 text-red-600">
@@ -684,6 +706,7 @@ export default function AdminDashboard() {
         <AttestationsTab
           attestations={attestations}
           loading={loading}
+          validators={validators}
         />
       )}
 
@@ -723,8 +746,134 @@ const CATEGORY_LABELS: Record<string, string> = {
   share_stored: "Shares",
 };
 
+function EventDetailPanel({ event }: { event: NetworkEvent }) {
+  const d = event.details || {};
+  const cat = event.category;
+
+  if (cat === "health_check") {
+    return (
+      <div className="mx-4 mb-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div>
+            <span className="text-green-600 font-medium block">Responded</span>
+            <span className="text-green-900">{formatDetailValue(d.responded)}/{formatDetailValue(d.total)}</span>
+          </div>
+          <div>
+            <span className="text-green-600 font-medium block">Time</span>
+            <span className="text-green-900">{formatTimeAgo(event.timestamp)}</span>
+          </div>
+          {d.duration_s !== undefined && (
+            <div>
+              <span className="text-green-600 font-medium block">Duration</span>
+              <span className="text-green-900">{formatDetailValue(d.duration_s)}s</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (cat === "weight_set") {
+    return (
+      <div className="mx-4 mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          {d.burn_pct !== undefined && (
+            <div>
+              <span className="text-amber-600 font-medium block">Burn %</span>
+              <span className="text-amber-900">{formatDetailValue(d.burn_pct)}</span>
+            </div>
+          )}
+          {d.miners !== undefined && (
+            <div>
+              <span className="text-amber-600 font-medium block">Miners</span>
+              <span className="text-amber-900">{formatDetailValue(d.miners)}</span>
+            </div>
+          )}
+          {d.is_active !== undefined && (
+            <div>
+              <span className="text-amber-600 font-medium block">Active</span>
+              <span className="text-amber-900">{formatDetailValue(d.is_active)}</span>
+            </div>
+          )}
+          {d.success !== undefined && (
+            <div>
+              <span className="text-amber-600 font-medium block">Success</span>
+              <span className="text-amber-900">{formatDetailValue(d.success)}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (cat === "attestation_challenge") {
+    return (
+      <div className="mx-4 mb-3 p-3 bg-cyan-50 border border-cyan-200 rounded-lg">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          {d.challenged !== undefined && (
+            <div>
+              <span className="text-cyan-600 font-medium block">Challenged</span>
+              <span className="text-cyan-900">{formatDetailValue(d.challenged)}</span>
+            </div>
+          )}
+          {d.verified !== undefined && (
+            <div>
+              <span className="text-cyan-600 font-medium block">Verified</span>
+              <span className="text-cyan-900">{formatDetailValue(d.verified)}</span>
+            </div>
+          )}
+          {d.capable !== undefined && (
+            <div>
+              <span className="text-cyan-600 font-medium block">Capable</span>
+              <span className="text-cyan-900">{formatDetailValue(d.capable)}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (cat === "challenge_round") {
+    return (
+      <div className="mx-4 mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          {d.miners_challenged !== undefined && (
+            <div>
+              <span className="text-blue-600 font-medium block">Miners Challenged</span>
+              <span className="text-blue-900">{formatDetailValue(d.miners_challenged)}</span>
+            </div>
+          )}
+          {d.total_miners !== undefined && (
+            <div>
+              <span className="text-blue-600 font-medium block">Total Miners</span>
+              <span className="text-blue-900">{formatDetailValue(d.total_miners)}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Generic fallback: key-value grid
+  const entries = Object.entries(d);
+  if (entries.length === 0) return null;
+  return (
+    <div className="mx-4 mb-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+        {entries.map(([k, v]) => (
+          <div key={k}>
+            <span className="text-slate-500 font-medium block">{k.replace(/_/g, " ")}</span>
+            <span className="text-slate-800 font-mono">{formatDetailValue(v)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function NetworkActivityTab({ events, loading, diag }: { events: NetworkEvent[]; loading: boolean; diag: { discovered: number; responded: number; error?: string } | null }) {
   const [filter, setFilter] = useState<string | null>(null);
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   if (loading && events.length === 0) {
     return <div className="text-center text-slate-400 py-12">Loading network activity...</div>;
@@ -785,37 +934,43 @@ function NetworkActivityTab({ events, loading, diag }: { events: NetworkEvent[];
         </div>
       ) : (
         <div className="divide-y divide-slate-100 max-h-[700px] overflow-y-auto">
-          {filtered.map((event, i) => (
-            <div key={i} className="px-4 py-3 hover:bg-slate-50">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <span
-                    className={`inline-block px-1.5 py-0.5 text-[10px] font-medium rounded whitespace-nowrap ${
-                      CATEGORY_COLORS[event.category] || "bg-slate-100 text-slate-600"
-                    }`}
-                  >
-                    {event.category.replace(/_/g, " ")}
-                  </span>
-                  <span className="text-sm text-slate-700 truncate">{event.summary}</span>
-                  {event.validatorUid !== undefined && (
-                    <span className="text-[10px] text-slate-400 font-mono">v{event.validatorUid}</span>
-                  )}
-                </div>
-                <span className="text-[10px] text-slate-400 whitespace-nowrap">
-                  {formatEventTime(event.timestamp)}
-                </span>
-              </div>
-              {Object.keys(event.details || {}).length > 0 && (
-                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-                  {Object.entries(event.details).map(([k, v]) => (
-                    <span key={k} className="text-[10px] text-slate-400 font-mono">
-                      {k}={String(v)}
+          {filtered.map((event, i) => {
+            const isExpanded = expandedIdx === i;
+            const hasDetails = Object.keys(event.details || {}).length > 0;
+            return (
+              <div key={i} className="hover:bg-slate-50">
+                <button
+                  onClick={() => hasDetails && setExpandedIdx(isExpanded ? null : i)}
+                  className={`w-full px-4 py-3 text-left ${hasDetails ? "cursor-pointer" : "cursor-default"}`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      {hasDetails && (
+                        <span className={`text-slate-400 text-[10px] transition-transform ${isExpanded ? "rotate-90" : ""}`}>
+                          &#9654;
+                        </span>
+                      )}
+                      <span
+                        className={`inline-block px-1.5 py-0.5 text-[10px] font-medium rounded whitespace-nowrap ${
+                          CATEGORY_COLORS[event.category] || "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {event.category.replace(/_/g, " ")}
+                      </span>
+                      <span className="text-sm text-slate-700 truncate">{event.summary}</span>
+                      {event.validatorUid !== undefined && (
+                        <span className="text-[10px] text-slate-400 font-mono">v{event.validatorUid}</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                      {formatTimeAgo(event.timestamp)}
                     </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+                  </div>
+                </button>
+                {isExpanded && <EventDetailPanel event={event} />}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -902,19 +1057,63 @@ function ProtocolActivityTab({
 // Attestations Tab
 // ---------------------------------------------------------------------------
 
+interface TestAttestResult {
+  success: boolean;
+  verified?: boolean;
+  miner_uid?: number;
+  server_name?: string;
+  elapsed_s?: number;
+  error?: string;
+}
+
 function AttestationsTab({
   attestations,
   loading,
+  validators,
 }: {
   attestations: AttestationEntry[];
   loading: boolean;
+  validators: ValidatorHealth[];
 }) {
+  const [testUrl, setTestUrl] = useState("");
+  const [testUid, setTestUid] = useState<number | "">("");
+  const [testRunning, setTestRunning] = useState(false);
+  const [testResult, setTestResult] = useState<TestAttestResult | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+
+  const runTest = async () => {
+    if (!testUrl || testUid === "" || testRunning) return;
+    setTestRunning(true);
+    setTestResult(null);
+    setTestError(null);
+    const requestId = `admin-test-${Date.now()}`;
+    try {
+      const res = await fetch(`/api/validators/${testUid}/v1/attest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: testUrl, request_id: requestId }),
+        signal: AbortSignal.timeout(300_000), // 5 min
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setTestError(data.error || `HTTP ${res.status}`);
+      } else {
+        setTestResult(data);
+      }
+    } catch (err) {
+      setTestError(String(err));
+    } finally {
+      setTestRunning(false);
+    }
+  };
+
   if (loading && attestations.length === 0) {
     return <div className="text-center text-slate-400 py-12">Loading attestation data...</div>;
   }
 
   const successCount = attestations.filter((a) => a.success).length;
   const verifiedCount = attestations.filter((a) => a.verified).length;
+  const reachableValidators = validators.filter((v) => !v.error);
 
   return (
     <div className="space-y-8">
@@ -939,6 +1138,97 @@ function AttestationsTab({
               ? `${((successCount / attestations.length) * 100).toFixed(0)}%`
               : "\u2014"}
           </div>
+        </div>
+      </div>
+
+      {/* Test Attestation Panel */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+          <h3 className="text-sm font-medium text-slate-700">Test Attestation</h3>
+          <p className="text-[11px] text-slate-400 mt-0.5">Send a test attestation request to a validator. The validator will pick a miner to generate a TLSNotary proof.</p>
+        </div>
+        <div className="p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="url"
+              value={testUrl}
+              onChange={(e) => setTestUrl(e.target.value)}
+              placeholder="https://example.com/page-to-attest"
+              className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            <select
+              value={testUid}
+              onChange={(e) => setTestUid(e.target.value ? Number(e.target.value) : "")}
+              className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">Select validator...</option>
+              {reachableValidators.map((v) => (
+                <option key={v.uid} value={v.uid}>
+                  UID {v.uid} ({v.ip}:{v.port}) {v.version ? `v${v.version}` : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={runTest}
+              disabled={!testUrl || testUid === "" || testRunning}
+              className="px-4 py-2 text-sm font-medium bg-cyan-600 text-white rounded-lg hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              {testRunning ? "Running..." : "Run Test"}
+            </button>
+          </div>
+
+          {testRunning && (
+            <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-lg text-xs text-cyan-700">
+              Attestation in progress... This may take up to 2 minutes while the miner generates a TLSNotary proof.
+            </div>
+          )}
+
+          {testResult && (
+            <div className={`p-3 rounded-lg border text-xs ${testResult.success ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold ${testResult.success ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                  {testResult.success ? "SUCCESS" : "FAILED"}
+                </span>
+                {testResult.success && testResult.verified !== undefined && (
+                  <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold ${testResult.verified ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
+                    {testResult.verified ? "VERIFIED" : "UNVERIFIED"}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {testResult.miner_uid !== undefined && (
+                  <div>
+                    <span className="text-slate-500 block">Miner</span>
+                    <span className="text-slate-800 font-mono">UID {testResult.miner_uid}</span>
+                  </div>
+                )}
+                {testResult.server_name && (
+                  <div>
+                    <span className="text-slate-500 block">Server</span>
+                    <span className="text-slate-800 font-mono">{testResult.server_name}</span>
+                  </div>
+                )}
+                {testResult.elapsed_s !== undefined && (
+                  <div>
+                    <span className="text-slate-500 block">Latency</span>
+                    <span className="text-slate-800 font-mono">{testResult.elapsed_s}s</span>
+                  </div>
+                )}
+                {testResult.error && (
+                  <div className="col-span-2">
+                    <span className="text-red-500 block">Error</span>
+                    <span className="text-red-700 font-mono">{testResult.error}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {testError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+              {testError}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1357,6 +1647,36 @@ function formatUptime(seconds: number): string {
   return `${h}h ${m}m`;
 }
 
+function formatU16Pct(raw?: number): string {
+  if (raw === undefined || raw === null) return "-";
+  return `${((raw / 65535) * 100).toFixed(2)}%`;
+}
+
+function formatEmission(raw?: string): string {
+  if (!raw) return "-";
+  const rao = BigInt(raw);
+  const taoPerBlock = Number(rao) / 1e9;
+  const taoPerDay = taoPerBlock * 7200; // ~12s blocks, 7200 blocks/day
+  if (taoPerDay >= 1) return `${taoPerDay.toFixed(2)}/d`;
+  if (taoPerDay >= 0.01) return `${taoPerDay.toFixed(4)}/d`;
+  return `${taoPerDay.toFixed(6)}/d`;
+}
+
+function formatTimeAgo(ts: number): string {
+  const seconds = Math.floor(Date.now() / 1000 - ts);
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+function formatDetailValue(v: unknown): string {
+  if (v === null || v === undefined) return "-";
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (typeof v === "number") return v.toLocaleString();
+  return String(v);
+}
+
 // ---------------------------------------------------------------------------
 // Data fetching
 // ---------------------------------------------------------------------------
@@ -1374,14 +1694,14 @@ async function fetchValidatorHealth(): Promise<ValidatorHealth[]> {
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
-        return { ...data, uid: v.uid, ip: v.ip, port: v.port, hotkey: v.hotkey, stake: v.stake } as ValidatorHealth;
+        return { ...data, uid: v.uid, ip: v.ip, port: v.port, hotkey: v.hotkey, stake: v.stake, incentive: v.incentive, emission: v.emission } as ValidatorHealth;
       }),
     );
 
     return results.map((r, i) =>
       r.status === "fulfilled"
         ? r.value
-        : { uid: validators[i].uid, ip: validators[i].ip, port: validators[i].port, hotkey: validators[i].hotkey, stake: validators[i].stake, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, error: String((r as PromiseRejectedResult).reason) },
+        : { uid: validators[i].uid, ip: validators[i].ip, port: validators[i].port, hotkey: validators[i].hotkey, stake: validators[i].stake, incentive: validators[i].incentive, emission: validators[i].emission, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, error: String((r as PromiseRejectedResult).reason) },
     );
   } catch {
     return [];
@@ -1489,14 +1809,14 @@ async function fetchMinerHealth(): Promise<MinerHealth[]> {
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
-        return { ...data, uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey, stake: m.stake } as MinerHealth;
+        return { ...data, uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey, stake: m.stake, incentive: m.incentive, emission: m.emission } as MinerHealth;
       }),
     );
 
     return results.map((r, i) =>
       r.status === "fulfilled"
         ? r.value
-        : { uid: miners[i].uid, ip: miners[i].ip, port: miners[i].port, hotkey: miners[i].hotkey, stake: miners[i].stake, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
+        : { uid: miners[i].uid, ip: miners[i].ip, port: miners[i].port, hotkey: miners[i].hotkey, stake: miners[i].stake, incentive: miners[i].incentive, emission: miners[i].emission, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
     );
   } catch {
     return [];

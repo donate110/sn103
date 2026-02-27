@@ -40,6 +40,13 @@ export interface DiscoveredNode {
   port: number;
   isValidator: boolean;
   stake: bigint;
+  rank: number;
+  emission: bigint;
+  incentive: number;
+  consensus: number;
+  trust: number;
+  validatorTrust: number;
+  dividends: number;
 }
 
 interface MetagraphSnapshot {
@@ -105,13 +112,13 @@ function decodeNeuronsLite(bytes: Uint8Array): DiscoveredNode[] {
     }
 
     // rank, emission, incentive, consensus, trust, validator_trust, dividends
-    r.readCompact(); // rank
-    r.readCompact(); // emission
-    r.readCompact(); // incentive
-    r.readCompact(); // consensus
-    r.readCompact(); // trust
-    r.readCompact(); // validator_trust
-    r.readCompact(); // dividends
+    const rank = r.readCompactNumber();
+    const emission = r.readCompact();
+    const incentive = r.readCompactNumber();
+    const consensus = r.readCompactNumber();
+    const trust = r.readCompactNumber();
+    const validatorTrust = r.readCompactNumber();
+    const dividends = r.readCompactNumber();
 
     r.readCompact(); // last_update
     const validatorPermit = r.readBool();
@@ -126,6 +133,13 @@ function decodeNeuronsLite(bytes: Uint8Array): DiscoveredNode[] {
       port,
       isValidator: validatorPermit,
       stake: totalStake,
+      rank,
+      emission,
+      incentive,
+      consensus,
+      trust,
+      validatorTrust,
+      dividends,
     });
   }
 
