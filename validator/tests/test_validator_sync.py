@@ -25,13 +25,17 @@ def _make_neuron(validator_uids: list[int], axons: dict[int, tuple[str, int]], n
     # validator_permit: True for validator UIDs
     permits = []
     axon_list = []
+    stakes = []
     for uid in range(n):
         permits.append(uid in validator_uids)
         ip, port = axons.get(uid, ("0.0.0.0", 0))
         axon_list.append(_make_axon(ip, port))
+        # Validators get stake above _MIN_STAKE_ALPHA (1000), others get 0
+        stakes.append(5000 if uid in validator_uids else 0)
 
     metagraph.validator_permit = permits
     metagraph.axons = axon_list
+    metagraph.S = stakes
     neuron.metagraph = metagraph
     return neuron
 
