@@ -344,25 +344,25 @@ export default function AdminDashboard() {
   const totalShares = validators.reduce((sum, v) => sum + (v.shares_held || 0), 0);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-2 sm:px-4 py-4 sm:py-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Admin Dashboard</h1>
-          <p className="text-slate-500 mt-1">
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Admin Dashboard</h1>
+          <p className="text-slate-500 text-sm mt-1">
             Djinn Protocol infrastructure monitoring
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 flex-shrink-0">
           {lastRefresh && (
-            <span className="text-xs text-slate-400">
+            <span className="text-xs text-slate-400 hidden sm:inline">
               Last: {lastRefresh.toLocaleTimeString()}
             </span>
           )}
           <button
             onClick={refresh}
             disabled={loading}
-            className="px-4 py-2 text-sm font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50"
+            className="px-3 py-1.5 text-sm font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50"
           >
             {loading ? "Refreshing..." : "Refresh"}
           </button>
@@ -371,22 +371,22 @@ export default function AdminDashboard() {
               href={GRAFANA_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-4 py-2 text-sm font-medium bg-genius-600 text-white rounded-lg hover:bg-genius-500"
+              className="px-3 py-1.5 text-sm font-medium bg-genius-600 text-white rounded-lg hover:bg-genius-500"
             >
-              Open Grafana
+              Grafana
             </a>
           )}
         </div>
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex border-b border-slate-200 mb-8">
+      <div className="flex overflow-x-auto border-b border-slate-200 mb-8 -mx-4 px-4 sm:mx-0 sm:px-0 scrollbar-hide">
         {(
           [
             ["overview", "Overview"],
             ["network", "Network"],
             ["protocol", "Protocol"],
-            ["attestations", "Attestations"],
+            ["attestations", "Attest"],
             ["telemetry", "Telemetry"],
             ["feedback", "Feedback"],
           ] as const
@@ -398,7 +398,7 @@ export default function AdminDashboard() {
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`relative px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+              className={`relative flex-shrink-0 px-3 sm:px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab
                   ? "border-slate-900 text-slate-900"
                   : "border-transparent text-slate-400 hover:text-slate-600"
@@ -459,22 +459,22 @@ export default function AdminDashboard() {
           {/* Validator Grid */}
           <div className="mb-8">
             <h2 className="text-xl font-semibold text-slate-900 mb-4">Validators</h2>
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <table className="w-full text-sm">
+            <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+              <table className="w-full text-sm min-w-[900px]">
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
-                    <th className="px-4 py-3 text-left font-medium">UID</th>
-                    <th className="px-4 py-3 text-left font-medium">Name</th>
-                    <th className="px-4 py-3 text-left font-medium">IP</th>
-                    <th className="px-4 py-3 text-right font-medium">Stake</th>
-                    <th className="px-4 py-3 text-right font-medium">VTrust</th>
-                    <th className="px-4 py-3 text-right font-medium">Incentive</th>
-                    <th className="px-4 py-3 text-right font-medium">Emission</th>
-                    <th className="px-4 py-3 text-left font-medium">Status</th>
-                    <th className="px-4 py-3 text-left font-medium">Version</th>
-                    <th className="px-4 py-3 text-right font-medium">Shares</th>
-                    <th className="px-4 py-3 text-center font-medium">Chain</th>
-                    <th className="px-4 py-3 text-center font-medium">Bittensor</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium">UID</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium">Name</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium">IP</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Stake</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium">VTrust</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Incentive</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Emission</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium">Status</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium">Version</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Shares</th>
+                    <th className="px-2 sm:px-4 py-3 text-center font-medium">Chain</th>
+                    <th className="px-2 sm:px-4 py-3 text-center font-medium">BT</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -487,20 +487,20 @@ export default function AdminDashboard() {
                   )}
                   {validators.map((v) => (
                     <tr key={v.uid} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 font-mono text-slate-700">{v.uid}</td>
-                      <td className="px-4 py-3 text-xs" title={v.hotkey || ""}>
+                      <td className="px-2 sm:px-4 py-2 font-mono text-slate-700">{v.uid}</td>
+                      <td className="px-2 sm:px-4 py-2 text-xs" title={v.hotkey || ""}>
                         {v.hotkey && delegateNames[v.hotkey] ? (
                           <span className="font-semibold text-slate-700">{delegateNames[v.hotkey]}</span>
                         ) : (
                           <span className="font-mono text-slate-400">{truncateHotkey(v.hotkey)}</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-500">{v.ip}:{v.port}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700" title={stakeTooltip(v.alphaStake, v.taoStake)}>{formatStake(v.stake)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatVTrust(v.validatorTrust)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatU16Pct(v.incentive)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatEmission(v.emission)}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-2 sm:px-4 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{v.ip}:{v.port}</td>
+                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700" title={stakeTooltip(v.alphaStake, v.taoStake)}>{formatStake(v.stake)}</td>
+                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700">{formatVTrust(v.validatorTrust)}</td>
+                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700">{formatU16Pct(v.incentive)}</td>
+                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700">{formatEmission(v.emission)}</td>
+                      <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
                         {v.error ? (
                           <span className="inline-flex items-center gap-1 text-red-600">
                             <Dot color="red" /> Unreachable
@@ -515,24 +515,24 @@ export default function AdminDashboard() {
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-500">
+                      <td className="px-2 sm:px-4 py-2 font-mono text-xs text-slate-500">
                         {v.version || "-"}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-slate-700">
+                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-slate-700">
                         {v.error ? "-" : v.shares_held}
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-2 sm:px-4 py-2 text-center whitespace-nowrap">
                         {v.error ? "-" : v.chain_connected ? (
-                          <span className="text-green-500">connected</span>
+                          <span className="text-green-500">ok</span>
                         ) : (
-                          <span className="text-red-500">disconnected</span>
+                          <span className="text-red-500">no</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-2 sm:px-4 py-2 text-center whitespace-nowrap">
                         {v.error ? "-" : v.bt_connected ? (
-                          <span className="text-green-500">connected</span>
+                          <span className="text-green-500">ok</span>
                         ) : (
-                          <span className="text-red-500">disconnected</span>
+                          <span className="text-red-500">no</span>
                         )}
                       </td>
                     </tr>
@@ -545,21 +545,21 @@ export default function AdminDashboard() {
           {/* Miners Grid */}
           <div className="mb-8">
             <h2 className="text-xl font-semibold text-slate-900 mb-4">Miners</h2>
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <table className="w-full text-sm">
+            <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+              <table className="w-full text-sm min-w-[800px]">
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
-                    <th className="px-4 py-3 text-left font-medium">UID</th>
-                    <th className="px-4 py-3 text-left font-medium">Name</th>
-                    <th className="px-4 py-3 text-left font-medium">IP</th>
-                    <th className="px-4 py-3 text-right font-medium">Stake</th>
-                    <th className="px-4 py-3 text-right font-medium">Incentive</th>
-                    <th className="px-4 py-3 text-right font-medium">Emission</th>
-                    <th className="px-4 py-3 text-left font-medium">Status</th>
-                    <th className="px-4 py-3 text-left font-medium">Version</th>
-                    <th className="px-4 py-3 text-center font-medium">Odds API</th>
-                    <th className="px-4 py-3 text-center font-medium">Bittensor</th>
-                    <th className="px-4 py-3 text-right font-medium">Uptime</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium">UID</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium">Name</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium">IP</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Stake</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Incentive</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Emission</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium">Status</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium">Version</th>
+                    <th className="px-2 sm:px-4 py-3 text-center font-medium">Odds</th>
+                    <th className="px-2 sm:px-4 py-3 text-center font-medium">BT</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Uptime</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -572,19 +572,19 @@ export default function AdminDashboard() {
                   )}
                   {miners.map((m) => (
                     <tr key={m.uid} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 font-mono text-slate-700">{m.uid}</td>
-                      <td className="px-4 py-3 text-xs" title={m.hotkey || ""}>
+                      <td className="px-2 sm:px-4 py-2 font-mono text-slate-700">{m.uid}</td>
+                      <td className="px-2 sm:px-4 py-2 text-xs" title={m.hotkey || ""}>
                         {m.hotkey && delegateNames[m.hotkey] ? (
                           <span className="font-semibold text-slate-700">{delegateNames[m.hotkey]}</span>
                         ) : (
                           <span className="font-mono text-slate-400">{truncateHotkey(m.hotkey)}</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.ip}:{m.port}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700" title={stakeTooltip(m.alphaStake, m.taoStake)}>{formatStake(m.stake)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatU16Pct(m.incentive)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-slate-700">{formatEmission(m.emission)}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-2 sm:px-4 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{m.ip}:{m.port}</td>
+                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700" title={stakeTooltip(m.alphaStake, m.taoStake)}>{formatStake(m.stake)}</td>
+                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700">{formatU16Pct(m.incentive)}</td>
+                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700">{formatEmission(m.emission)}</td>
+                      <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
                         {m.error ? (
                           <span className="inline-flex items-center gap-1 text-red-600">
                             <Dot color="red" /> Unreachable
@@ -599,24 +599,24 @@ export default function AdminDashboard() {
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-500">
+                      <td className="px-2 sm:px-4 py-2 font-mono text-xs text-slate-500">
                         {m.version || "-"}
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-2 sm:px-4 py-2 text-center whitespace-nowrap">
                         {m.error ? "-" : m.odds_api_connected ? (
-                          <span className="text-green-500">connected</span>
+                          <span className="text-green-500">ok</span>
                         ) : (
-                          <span className="text-red-500">disconnected</span>
+                          <span className="text-red-500">no</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-2 sm:px-4 py-2 text-center whitespace-nowrap">
                         {m.error ? "-" : m.bt_connected ? (
-                          <span className="text-green-500">connected</span>
+                          <span className="text-green-500">ok</span>
                         ) : (
-                          <span className="text-red-500">disconnected</span>
+                          <span className="text-red-500">no</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-sm text-slate-700">
+                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-sm text-slate-700 whitespace-nowrap">
                         {m.error ? "-" : formatUptime(m.uptime_seconds)}
                       </td>
                     </tr>
@@ -630,7 +630,7 @@ export default function AdminDashboard() {
           {stats && (
             <div className="mb-8">
               <h2 className="text-xl font-semibold text-slate-900 mb-4">Protocol Statistics</h2>
-              <div className="bg-white rounded-xl border border-slate-200 p-6 grid grid-cols-3 gap-6">
+              <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 grid grid-cols-2 sm:grid-cols-3 gap-4 sm:gap-6">
                 <div>
                   <span className="text-xs text-slate-400 block mb-1">Unique Geniuses</span>
                   <span className="text-2xl font-bold text-slate-900">{stats.uniqueGeniuses}</span>
