@@ -751,8 +751,8 @@ def create_app(
             for uid, axon in list(axon_by_uid.items())[:5]:
                 candidates.append((axon, "unproven"))
 
-        # Last resort: configured fallback miner URL
-        if not candidates and fallback_miner_url:
+        # Always append fallback miner so it's tried after scorer picks fail
+        if fallback_miner_url:
             candidates.append((
                 {"uid": -1, "ip": "", "port": 0, "hotkey": "fallback",
                  "_url": fallback_miner_url.rstrip("/") + "/v1/attest"},
