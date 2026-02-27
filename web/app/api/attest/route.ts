@@ -163,7 +163,7 @@ export async function POST(request: NextRequest) {
   };
 
   const validators = await getValidatorUrls();
-  const attempts = Math.min(MAX_ATTEMPTS, validators.length);
+  const attempts = validators.length;
   let lastError = "No attestation services are currently available on the network. Please try again in a few minutes.";
   const startedAt = Date.now();
 
