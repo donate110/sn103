@@ -1954,7 +1954,12 @@ function formatTimeAgo(ts: number): string {
 function formatDetailValue(v: unknown): string {
   if (v === null || v === undefined) return "-";
   if (typeof v === "boolean") return v ? "Yes" : "No";
-  if (typeof v === "number") return v.toLocaleString();
+  if (typeof v === "number") {
+    if (v === 0) return "0";
+    if (Math.abs(v) < 0.01 && v !== 0) return v.toExponential(2);
+    if (Math.abs(v) < 1) return v.toPrecision(3);
+    return v.toLocaleString();
+  }
   return String(v);
 }
 
