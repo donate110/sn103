@@ -195,8 +195,10 @@ export async function POST(request: NextRequest) {
         }
         continue;
       }
-      // Non-200 = try next validator
-      if (res.status === 404) {
+      // Non-200 = try next validator.
+      // 404 = endpoint doesn't exist; 422 = different API schema (non-Djinn validator
+      // on the same subnet); 405 = method not allowed. All mean "skip this one".
+      if (res.status === 404 || res.status === 422 || res.status === 405) {
         lastError = "This validator doesn't support attestation yet. Trying others...";
       } else {
         lastError = `Attestation service returned an error (${res.status}). Tried ${i + 1} of ${attempts} services.`;
