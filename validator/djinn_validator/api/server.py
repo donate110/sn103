@@ -808,8 +808,8 @@ def create_app(
         for attempt, (axon, tier) in enumerate(candidates[:3]):
             attempt_start = _t.perf_counter()
             miner_url = axon.get("_url") or f"http://{axon['ip']}:{axon['port']}/v1/attest"
-            # Proven miners get full timeout; unproven get short timeout to fail fast
-            timeout = 210.0 if tier == "proven" else 120.0
+            # Proven miners get full timeout; unproven get medium; redemption get short
+            timeout = 210.0 if tier == "proven" else 60.0 if tier == "redemption" else 120.0
 
             log.info(
                 "attest_dispatching",

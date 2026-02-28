@@ -319,17 +319,24 @@ class MinerScorer:
     def select_attest_miners(self, candidate_uids: list[int], max_results: int = 5) -> list[tuple[int, str]]:
         """Select the best miners for attestation dispatch.
 
-        Returns list of (uid, tier) tuples where tier is "proven" or "unproven".
-        Proven miners produced at least one valid attestation proof.
-        Unproven miners respond to health checks but haven't been challenged yet.
-        Miners that were challenged and always failed are excluded.
+        Returns list of (uid, tier) tuples where tier is:
+        - "proven": produced at least one valid attestation proof
+        - "unproven": responds to health checks but hasn't been challenged yet
+        - "redemption": previously failed but gets a short-timeout retry chance
+
+        Miners cycle through tiers naturally: excluded miners get a redemption
+        slot (1 per dispatch, short timeout) so they can recover after fixing
+        issues like missing TLSNotary binaries.
 
         Args:
             candidate_uids: UIDs with valid axon info (IP/port).
             max_results: Maximum number of candidates to return.
         """
+        import random
+
         proven: list[tuple[int, float, float]] = []  # (uid, validity_score, median_latency)
         unproven: list[int] = []
+        excluded: list[int] = []
 
         for uid in candidate_uids:
             m = self._miners.get(uid)
@@ -343,10 +350,14 @@ class MinerScorer:
                 med_lat = sorted(m.attestation_latencies)[len(m.attestation_latencies) // 2] if m.attestation_latencies else 999.0
                 proven.append((uid, m.attestation_validity_score(), med_lat))
             elif m.attestations_total > 0:
-                # Tier 3: challenged but never succeeded — skip
-                continue
+                # Tier 3: challenged but never succeeded — track for redemption
+                excluded.append(uid)
             elif m.health_checks_responded > 0:
                 # Tier 2: responsive but never challenged for attestation
+                unproven.append(uid)
+            else:
+                # After epoch reset: all counters zero but entry exists.
+                # Treat same as unproven so miners aren't invisible.
                 unproven.append(uid)
 
         # Sort proven: highest validity first, then fastest
@@ -362,6 +373,14 @@ class MinerScorer:
         unproven_limit = min(2, max_results - len(result))
         for uid in unproven[:unproven_limit]:
             result.append((uid, "unproven"))
+
+        # Redemption: give 1 random excluded miner a retry chance.
+        # Short timeout (handled by caller via "redemption" tier) so it
+        # doesn't slow down dispatch if the miner is still broken.
+        if excluded and len(result) < max_results:
+            pick = random.choice(excluded)
+            result.append((pick, "redemption"))
+            log.info("attest_redemption_slot", uid=pick, excluded_count=len(excluded))
 
         return result
 
