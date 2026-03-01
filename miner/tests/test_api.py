@@ -707,3 +707,32 @@ class TestAttestEndpoint:
         data = resp.json()
         assert data["success"] is False
         assert "connection refused" in data["error"]
+
+    def test_attest_capacity_endpoint(self, app: TestClient) -> None:
+        """Capacity endpoint returns inflight/max/available."""
+        resp = app.get("/v1/attest/capacity")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["inflight"] == 0
+        assert data["max"] > 0
+        assert data["available"] == data["max"]
+
+    def test_attest_busy_when_at_capacity(self, app: TestClient) -> None:
+        """When max concurrent attestations are in-flight, new requests get busy response."""
+        import djinn_miner.api.server as server_mod
+
+        orig = server_mod._ATTEST_MAX_CONCURRENT
+        server_mod._ATTEST_MAX_CONCURRENT = 0  # force immediate busy
+        try:
+            with patch("djinn_miner.core.tlsn.is_available", return_value=True):
+                resp = app.post(
+                    "/v1/attest",
+                    json={"url": "https://example.com", "request_id": "test-busy"},
+                )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is False
+            assert data["busy"] is True
+            assert data["retry_after"] == 30
+        finally:
+            server_mod._ATTEST_MAX_CONCURRENT = orig

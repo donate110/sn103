@@ -48,6 +48,9 @@ if TYPE_CHECKING:
 log = structlog.get_logger()
 
 
+_ATTEST_MAX_CONCURRENT = int(os.getenv("ATTEST_MAX_CONCURRENT", "3"))
+
+
 def create_app(
     checker: LineChecker,
     proof_gen: ProofGenerator,
@@ -62,6 +65,8 @@ def create_app(
     from djinn_miner import __version__
 
     app = FastAPI(title="Djinn Miner", version=__version__)
+
+    _attest_inflight = 0
 
     # Catch unhandled exceptions — never leak stack traces to clients
     @app.exception_handler(Exception)
@@ -218,6 +223,16 @@ def create_app(
         log.info("proof_generated", query_id=request.query_id, status=result.status, type=proof_type)
         return result
 
+    @app.get("/v1/attest/capacity")
+    async def attest_miner_capacity() -> dict:
+        """Return current attestation capacity so validators can route around busy miners."""
+        nonlocal _attest_inflight
+        return {
+            "inflight": _attest_inflight,
+            "max": _ATTEST_MAX_CONCURRENT,
+            "available": max(0, _ATTEST_MAX_CONCURRENT - _attest_inflight),
+        }
+
     @app.post("/v1/attest", response_model=AttestResponse)
     async def attest_url(request: AttestRequest) -> AttestResponse:
         """Web Attestation: generate a TLSNotary proof for an arbitrary HTTPS URL.
@@ -225,9 +240,15 @@ def create_app(
         Part of the Web Attestation Service (whitepaper §15). Miners
         use the same TLSNotary infrastructure as sports proofs to attest
         arbitrary web content.
+
+        Concurrency is gated by a semaphore (ATTEST_MAX_CONCURRENT, default 3).
+        Requests beyond the limit get an immediate busy response so the
+        validator can try another miner without waiting.
         """
         from djinn_miner.core import tlsn as tlsn_module
         from djinn_miner.utils.watchtower import task_started, task_finished
+
+        nonlocal _attest_inflight
 
         start = time.perf_counter()
         timestamp = int(time.time())
@@ -245,6 +266,21 @@ def create_app(
                 error="TLSNotary prover binary not available",
             )
 
+        # Admission control: reject immediately if at capacity
+        if _attest_inflight >= _ATTEST_MAX_CONCURRENT:
+            ATTESTATION_REQUESTS.labels(status="busy").inc()
+            log.info("attest_busy", url=request.url, request_id=request.request_id, inflight=_attest_inflight)
+            return AttestResponse(
+                request_id=request.request_id,
+                url=request.url,
+                success=False,
+                timestamp=timestamp,
+                error="Miner at capacity",
+                busy=True,
+                retry_after=30,
+            )
+
+        _attest_inflight += 1
         task_started()
         try:
             result = await asyncio.wait_for(
@@ -271,6 +307,7 @@ def create_app(
                 content={"detail": "Service shutting down"},
             )
         finally:
+            _attest_inflight -= 1
             task_finished()
 
         elapsed = time.perf_counter() - start

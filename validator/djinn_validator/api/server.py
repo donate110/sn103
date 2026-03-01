@@ -831,7 +831,7 @@ def create_app(
             candidates=[(c[0]["uid"], c[1]) for c in candidates],
         )
 
-        # Try up to 3 miners sequentially
+        # Fan out to up to 3 miners in parallel — first success wins
         _body = _json.dumps({"url": req.url, "request_id": req.request_id}).encode()
         _auth_hdrs: dict[str, str] = {}
         if neuron and neuron.wallet:
@@ -843,10 +843,10 @@ def create_app(
         selected: dict | None = None
         proof_hex: str | None = None
 
-        for attempt, (axon, tier) in enumerate(candidates[:3]):
+        async def _try_miner(axon: dict, tier: str) -> tuple[dict, dict, str] | None:
+            """Try one miner. Returns (axon, data, proof_hex) on success, None on failure."""
             attempt_start = _t.perf_counter()
             miner_url = axon.get("_url") or f"http://{axon['ip']}:{axon['port']}/v1/attest"
-            # Proven miners get full timeout; unproven get medium; redemption get short
             timeout = 210.0 if tier == "proven" else 60.0 if tier == "redemption" else 120.0
 
             log.info(
@@ -855,7 +855,6 @@ def create_app(
                 request_id=req.request_id,
                 miner_uid=axon["uid"],
                 tier=tier,
-                attempt=attempt + 1,
                 timeout_s=timeout,
             )
 
@@ -867,47 +866,78 @@ def create_app(
                     timeout=timeout,
                 )
             except httpx.HTTPError as e:
-                attempt_elapsed = _t.perf_counter() - attempt_start
-                last_error = f"Miner {axon['uid']} unreachable: {e}"
-                log.warning("attest_miner_unreachable", miner_uid=axon["uid"], tier=tier, err=str(e), elapsed_s=round(attempt_elapsed, 1))
+                elapsed = _t.perf_counter() - attempt_start
+                log.warning("attest_miner_unreachable", miner_uid=axon["uid"], tier=tier, err=str(e), elapsed_s=round(elapsed, 1))
                 if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
-                    m.record_attestation(latency=attempt_elapsed, proof_valid=False)
-                continue
+                    m.record_attestation(latency=elapsed, proof_valid=False)
+                return None
 
             if resp.status_code != 200:
-                last_error = f"Miner {axon['uid']} returned status {resp.status_code}"
                 log.warning("attest_miner_error", miner_uid=axon["uid"], status=resp.status_code)
                 if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
-                continue
+                return None
 
             try:
-                miner_data = resp.json()
+                data = resp.json()
             except Exception:
-                last_error = f"Miner {axon['uid']} returned malformed response"
                 log.error("miner_malformed_json", miner_uid=axon["uid"])
-                continue
+                return None
 
-            if not miner_data.get("success"):
-                last_error = miner_data.get("error", f"Miner {axon['uid']} attestation failed")
+            # Miner busy — skip without penalising
+            if data.get("busy"):
+                log.info("attest_miner_busy", miner_uid=axon["uid"])
+                return None
+
+            if not data.get("success"):
+                err = data.get("error", f"Miner {axon['uid']} attestation failed")
                 if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
-                log.warning("attest_miner_failed", miner_uid=axon["uid"], error=last_error)
-                miner_data = None
-                continue
+                log.warning("attest_miner_failed", miner_uid=axon["uid"], error=err)
+                return None
 
-            proof_hex = miner_data.get("proof_hex")
-            if not proof_hex:
-                last_error = f"Miner {axon['uid']} returned no proof data"
-                miner_data = None
-                continue
+            phex = data.get("proof_hex")
+            if not phex:
+                return None
 
-            # Success — we have a proof
-            selected = axon
-            break
+            return (axon, data, phex)
+
+        # Launch parallel tasks for all candidates (up to 3)
+        import asyncio as _aio
+
+        pick = candidates[:3]
+        tasks = [_aio.create_task(_try_miner(axon, tier)) for axon, tier in pick]
+
+        # Process results as they complete — first success wins
+        for coro in _aio.as_completed(tasks):
+            try:
+                result = await coro
+            except _aio.CancelledError:
+                continue
+            except Exception as e:
+                log.warning("attest_miner_task_error", error=str(e))
+                continue
+            if result is not None:
+                selected, miner_data, proof_hex = result
+                # Cancel remaining tasks
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+                break
+            else:
+                last_error = "All attempted miners failed or were busy"
+
+        # Suppress CancelledError from cancelled tasks
+        for t in tasks:
+            if t.cancelled():
+                continue
+            try:
+                await t
+            except (_aio.CancelledError, Exception):
+                pass
 
         # All attempts failed
         if selected is None or miner_data is None or proof_hex is None:

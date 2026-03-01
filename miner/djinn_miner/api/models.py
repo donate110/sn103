@@ -170,3 +170,5 @@ class AttestResponse(BaseModel):
     server_name: str | None = Field(default=None, description="TLS server identity")
     timestamp: int = Field(description="Unix timestamp of attestation")
     error: str | None = None
+    busy: bool = False
+    retry_after: int | None = Field(default=None, description="Seconds to wait before retrying")
