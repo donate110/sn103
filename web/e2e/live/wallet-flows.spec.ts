@@ -21,15 +21,13 @@ import { baseSepolia } from "viem/chains";
 
 const BASE_URL = process.env.BASE_URL ?? "https://www.djinn.gg";
 const RPC_URL = "https://sepolia.base.org";
-const BETA_PASSWORD = "djinnybaby";
+const BETA_PASSWORD = process.env.E2E_BETA_PASSWORD || "";
 
 // Deployer key — same one that deployed contracts, has USDC minting rights
-const DEPLOYER_KEY =
-  "0x080d556e20862f645dc2235cda802aeb22145047c2f5352e506aea140a9a6663" as `0x${string}`;
+const DEPLOYER_KEY = (process.env.E2E_DEPLOYER_KEY || "") as `0x${string}`;
 
 // E2E test genius key
-const GENIUS_KEY =
-  "0x7bdee6a417b39392bfc78a3cf75cc2e726d4d42c7de68f91cd40654740232471" as `0x${string}`;
+const GENIUS_KEY = (process.env.E2E_GENIUS_KEY || "") as `0x${string}`;
 
 // Derive a fresh idiot key per run to avoid cycle limits
 const IDIOT_KEY = (() => {

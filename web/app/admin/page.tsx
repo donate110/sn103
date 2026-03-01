@@ -186,6 +186,7 @@ export default function AdminDashboard() {
   const [errorReports, setErrorReports] = useState<ErrorReport[]>([]);
   const [errorTotal, setErrorTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshStep, setRefreshStep] = useState("");
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [authed, setAuthed] = useState(false);
   const [password, setPassword] = useState("");
@@ -243,6 +244,23 @@ export default function AdminDashboard() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setRefreshStep("metagraph");
+
+    // Helper to track completion of each fetch
+    let done = 0;
+    const total = 12;
+    const labels = [
+      "validators", "miners", "subgraph", "errors",
+      "network", "signals", "purchases", "audits",
+      "attestations", "telemetry", "feedback", "delegates",
+    ];
+    function track<T>(idx: number, p: Promise<T>): Promise<T> {
+      return p.finally(() => {
+        done++;
+        const remaining = labels.filter((_, i) => i >= done);
+        setRefreshStep(done < total ? (remaining[0] || `${done}/${total}`) : "done");
+      });
+    }
 
     // Fetch all data in parallel so badge counts are always available
     const [
@@ -259,18 +277,18 @@ export default function AdminDashboard() {
       feedbackRes,
       delegatesRes,
     ] = await Promise.allSettled([
-      fetchValidatorHealth(),       // 0
-      fetchMinerHealth(),           // 1
-      fetchProtocolStats(),         // 2
-      fetchErrorReports(),          // 3
-      fetchNetworkActivity((status) => setValidatorFetchStatus(status)),       // 4
-      fetchRecentSignals(50),       // 5
-      fetchRecentPurchases(50),     // 6
-      fetchRecentAudits(50),        // 7
-      fetchAttestationData(),       // 8
-      fetchTelemetry(),             // 9
-      fetchFeedback(feedbackFilter),// 10
-      fetchDelegateNames(),         // 11
+      track(0, fetchValidatorHealth()),       // 0
+      track(1, fetchMinerHealth()),           // 1
+      track(2, fetchProtocolStats()),         // 2
+      track(3, fetchErrorReports()),          // 3
+      track(4, fetchNetworkActivity((status) => setValidatorFetchStatus(status))),       // 4
+      track(5, fetchRecentSignals(50)),       // 5
+      track(6, fetchRecentPurchases(50)),     // 6
+      track(7, fetchRecentAudits(50)),        // 7
+      track(8, fetchAttestationData()),       // 8
+      track(9, fetchTelemetry()),             // 9
+      track(10, fetchFeedback(feedbackFilter)),// 10
+      track(11, fetchDelegateNames()),         // 11
     ]);
 
     if (validatorRes.status === "fulfilled") setValidators(validatorRes.value as ValidatorHealth[]);
@@ -305,6 +323,7 @@ export default function AdminDashboard() {
     }
 
     setLastRefresh(new Date());
+    setRefreshStep("");
     setLoading(false);
   }, [feedbackFilter]);
 
@@ -368,7 +387,7 @@ export default function AdminDashboard() {
             disabled={loading}
             className="px-3 py-1.5 text-sm font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50"
           >
-            {loading ? "Refreshing..." : "Refresh"}
+            {loading ? `${refreshStep || "loading"}...` : "Refresh"}
           </button>
           {GRAFANA_URL && (
             <a

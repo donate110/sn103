@@ -21,8 +21,7 @@ const ADDRESSES = {
   audit: "0x95002b53f4f53a27a060502fe1f026f74e9110e9",
 };
 
-const E2E_PRIVATE_KEY =
-  "0x7bdee6a417b39392bfc78a3cf75cc2e726d4d42c7de68f91cd40654740232471";
+const E2E_PRIVATE_KEY = process.env.E2E_GENIUS_KEY || "";
 
 let provider: ethers.JsonRpcProvider;
 let wallet: ethers.Wallet;

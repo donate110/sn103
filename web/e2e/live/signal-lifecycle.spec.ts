@@ -26,8 +26,7 @@ const ADDRESSES = {
 
 // Dedicated E2E test wallets on Base Sepolia
 // Genius wallet — creates signals
-const E2E_PRIVATE_KEY =
-  "0x7bdee6a417b39392bfc78a3cf75cc2e726d4d42c7de68f91cd40654740232471";
+const E2E_PRIVATE_KEY = process.env.E2E_GENIUS_KEY || "";
 
 // Use a unique signal ID per run to avoid collisions
 const SIGNAL_ID = BigInt(Math.floor(Date.now() / 1000) * 1000 + Math.floor(Math.random() * 1000));
