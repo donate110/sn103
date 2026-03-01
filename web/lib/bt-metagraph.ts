@@ -64,6 +64,11 @@ interface MetagraphSnapshot {
 const CACHE_TTL_MS = 60_000;
 let cached: MetagraphSnapshot | null = null;
 
+/** Force-clear the in-memory metagraph cache. */
+export function clearMetagraphCache(): void {
+  cached = null;
+}
+
 // ---------------------------------------------------------------------------
 // SCALE decoding — NeuronInfoLite
 // ---------------------------------------------------------------------------
