@@ -23,8 +23,13 @@ class AttestationLog:
     Follows the same pattern as ShareStore for SQLite lifecycle management.
     """
 
+    _PRUNE_THRESHOLD = 10_000
+    _PRUNE_AGE_SECONDS = 30 * 24 * 3600  # 30 days
+    _PRUNE_CHECK_INTERVAL = 100  # check every N inserts
+
     def __init__(self, db_path: str | Path | None = None) -> None:
         self._lock = threading.Lock()
+        self._insert_count = 0
         if db_path is not None:
             path = Path(db_path)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,6 +84,21 @@ class AttestationLog:
                 ),
             )
             self._conn.commit()
+            self._maybe_prune()
+
+    def _maybe_prune(self) -> None:
+        """Lazy pruning: delete rows >30d when count >10k. Caller holds _lock."""
+        self._insert_count += 1
+        if self._insert_count % self._PRUNE_CHECK_INTERVAL != 0:
+            return
+        try:
+            row = self._conn.execute("SELECT COUNT(*) FROM attestation_log").fetchone()
+            if row and row[0] > self._PRUNE_THRESHOLD:
+                cutoff = int(time.time()) - self._PRUNE_AGE_SECONDS
+                self._conn.execute("DELETE FROM attestation_log WHERE created_at < ?", (cutoff,))
+                self._conn.commit()
+        except Exception:
+            pass
 
     def recent_attestations(self, limit: int = 50) -> list[dict]:
         """Return recent attestation requests, newest first."""

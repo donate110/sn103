@@ -1,5 +1,7 @@
 """Tests for the AttestationLog — SQLite attestation request tracking."""
 
+import time
+
 import pytest
 
 from djinn_validator.core.attestation_log import AttestationLog
@@ -69,3 +71,63 @@ class TestAttestationLog:
 
     def test_empty(self, log: AttestationLog) -> None:
         assert log.recent_attestations(10) == []
+
+    def test_lazy_pruning_fires_above_threshold(self, log: AttestationLog) -> None:
+        log._PRUNE_THRESHOLD = 50
+        log._PRUNE_CHECK_INTERVAL = 10
+
+        old_ts = int(time.time()) - (31 * 24 * 3600)  # 31 days ago
+
+        # Insert 40 old rows directly
+        for i in range(40):
+            log._conn.execute(
+                "INSERT INTO attestation_log "
+                "(url, request_id, success, verified, created_at) "
+                "VALUES (?, ?, 1, 1, ?)",
+                (f"https://old.com/{i}", f"old-{i}", old_ts),
+            )
+        log._conn.commit()
+
+        # Insert 20 new rows via log_attestation to trigger prune checks
+        for i in range(20):
+            log.log_attestation(
+                url=f"https://new.com/{i}",
+                request_id=f"new-{i}",
+                success=True,
+                verified=True,
+            )
+
+        entries = log.recent_attestations(100)
+        old_entries = [e for e in entries if "old.com" in e["url"]]
+        new_entries = [e for e in entries if "new.com" in e["url"]]
+        assert len(old_entries) == 0, f"Expected 0 old entries, got {len(old_entries)}"
+        assert len(new_entries) == 20
+
+    def test_lazy_pruning_skips_below_threshold(self, log: AttestationLog) -> None:
+        log._PRUNE_THRESHOLD = 100
+        log._PRUNE_CHECK_INTERVAL = 5
+
+        old_ts = int(time.time()) - (31 * 24 * 3600)
+
+        # Insert 10 old rows — below threshold
+        for i in range(10):
+            log._conn.execute(
+                "INSERT INTO attestation_log "
+                "(url, request_id, success, verified, created_at) "
+                "VALUES (?, ?, 1, 1, ?)",
+                (f"https://old.com/{i}", f"old-{i}", old_ts),
+            )
+        log._conn.commit()
+
+        # Insert 10 new rows
+        for i in range(10):
+            log.log_attestation(
+                url=f"https://new.com/{i}",
+                request_id=f"new-{i}",
+                success=True,
+                verified=True,
+            )
+
+        entries = log.recent_attestations(100)
+        old_entries = [e for e in entries if "old.com" in e["url"]]
+        assert len(old_entries) == 10, "Old entries should NOT be pruned below threshold"

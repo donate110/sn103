@@ -128,6 +128,13 @@ async def epoch_loop(
                     responded=responded, total=len(miner_uids),
                     failed_uids=failed_uids[:50],  # Cap to avoid huge payloads
                 )
+            if telemetry and miner_uids:
+                telemetry.record(
+                    "health_check",
+                    f"{responded}/{len(miner_uids)} miners responded",
+                    responded=responded, total=len(miner_uids),
+                    failed_uids=failed_uids[:50],
+                )
 
             # Challenge miners for accuracy scoring (throttled)
             epoch_count += 1

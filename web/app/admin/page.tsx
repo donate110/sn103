@@ -2065,7 +2065,7 @@ async function fetchNetworkActivity(
     const results = await Promise.allSettled(
       validators.map(async (v) => {
         try {
-          const res = await fetch(`/api/validators/${v.uid}/v1/activity?limit=100`, {
+          const res = await fetch(`/api/validators/${v.uid}/v1/telemetry?limit=200`, {
             signal: AbortSignal.timeout(15000),
           });
           if (!res.ok) {

@@ -23,9 +23,14 @@ from typing import Any
 class TelemetryStore:
     """Thread-safe, SQLite-backed event store."""
 
+    _PRUNE_THRESHOLD = 10_000
+    _PRUNE_AGE_SECONDS = 30 * 24 * 3600  # 30 days
+    _PRUNE_CHECK_INTERVAL = 100  # check every N inserts
+
     def __init__(self, db_path: str | Path = "telemetry.db") -> None:
         self._db_path = str(db_path)
         self._local = threading.local()
+        self._insert_count = 0
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -65,8 +70,23 @@ class TelemetryStore:
                 (ts, category, summary, details_json),
             )
             conn.commit()
+            self._maybe_prune(conn)
         except Exception:
             pass  # Fire-and-forget — never disrupt the caller
+
+    def _maybe_prune(self, conn: sqlite3.Connection) -> None:
+        """Lazy pruning: delete rows >30d when count >10k. Runs every N inserts."""
+        self._insert_count += 1
+        if self._insert_count % self._PRUNE_CHECK_INTERVAL != 0:
+            return
+        try:
+            row = conn.execute("SELECT COUNT(*) FROM events").fetchone()
+            if row and row[0] > self._PRUNE_THRESHOLD:
+                cutoff = time.time() - self._PRUNE_AGE_SECONDS
+                conn.execute("DELETE FROM events WHERE timestamp < ?", (cutoff,))
+                conn.commit()
+        except Exception:
+            pass
 
     def query(
         self,
