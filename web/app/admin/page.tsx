@@ -502,7 +502,7 @@ export default function AdminDashboard() {
                       <td className="px-2 sm:px-4 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{v.ip}:{v.port}</td>
                       <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700" title={stakeTooltip(v.alphaStake, v.taoStake)}>{formatStake(v.stake)}</td>
                       <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700">{formatVTrust(v.validatorTrust)}</td>
-                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700"><SmallValue raw={v.incentive} formatter={formatU16Pct} /></td>
+                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700">{formatU16Pct(v.incentive)}</td>
                       <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700">{formatEmission(v.emission)}</td>
                       <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
                         {v.error ? (
@@ -586,7 +586,7 @@ export default function AdminDashboard() {
                       </td>
                       <td className="px-2 sm:px-4 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{m.ip}:{m.port}</td>
                       <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700" title={stakeTooltip(m.alphaStake, m.taoStake)}>{formatStake(m.stake)}</td>
-                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700"><SmallValue raw={m.incentive} formatter={formatU16Pct} /></td>
+                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700">{formatU16Pct(m.incentive)}</td>
                       <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700">{formatEmission(m.emission)}</td>
                       <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
                         {m.error ? (
@@ -2189,26 +2189,6 @@ function formatU16Pct(raw?: number): string {
   return `${pct.toFixed(4)}%`;
 }
 
-function SmallValue({ raw, formatter }: { raw: number | string | undefined | null; formatter: (v: never) => string }) {
-  const display = (formatter as (v: unknown) => string)(raw);
-  if (display === "-" || display === "0" || display === "0%") {
-    return <span>{display}</span>;
-  }
-  const isNearZero =
-    (typeof raw === "number" && raw > 0 && raw < 100) ||
-    (typeof raw === "string" && raw !== "0" && BigInt(raw) > 0n && BigInt(raw) < 1_000_000_000n);
-  if (!isNearZero) {
-    return <span>{display}</span>;
-  }
-  return (
-    <span className="cursor-help group relative">
-      <span className="text-slate-400">{"ε"}</span>
-      <span className="invisible group-hover:visible absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-slate-800 text-white text-[10px] rounded whitespace-nowrap z-10">
-        {display}
-      </span>
-    </span>
-  );
-}
 
 function formatEmission(raw?: string): string {
   if (!raw) return "-";
