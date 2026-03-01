@@ -1123,21 +1123,24 @@ function EventDetailPanel({ event }: { event: NetworkEvent }) {
 
 function NetworkActivityTab({ events, loading, diag }: { events: NetworkEvent[]; loading: boolean; diag: { discovered: number; responded: number; error?: string } | null }) {
   const [filter, setFilter] = useState<string | null>(null);
+  const [validatorFilter, setValidatorFilter] = useState<number | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   if (loading && events.length === 0) {
     return <div className="text-center text-slate-400 py-12">Loading network activity...</div>;
   }
 
-  const filtered = filter ? events.filter((e) => e.category === filter) : events;
+  const afterValidator = validatorFilter !== null ? events.filter((e) => e.validatorUid === validatorFilter) : events;
+  const filtered = filter ? afterValidator.filter((e) => e.category === filter) : afterValidator;
   const categories = [...new Set(events.map((e) => e.category))];
+  const validatorUids = [...new Set(events.map((e) => e.validatorUid).filter((u) => u !== undefined))].sort((a, b) => (a as number) - (b as number));
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
         <h3 className="text-sm font-medium text-slate-700">
           Validator &amp; Miner Activity
-          <span className="ml-2 text-xs text-slate-400">({filtered.length}{filter ? ` of ${events.length}` : ""} events)</span>
+          <span className="ml-2 text-xs text-slate-400">({filtered.length}{filter || validatorFilter !== null ? ` of ${events.length}` : ""} events)</span>
         </h3>
         {diag && (
           <p className="text-[11px] text-slate-400 mt-1">
@@ -1166,6 +1169,30 @@ function NetworkActivityTab({ events, loading, diag }: { events: NetworkEvent[];
                 }`}
               >
                 {CATEGORY_LABELS[cat] || cat.replace(/_/g, " ")}
+              </button>
+            ))}
+          </div>
+        )}
+        {validatorUids.length > 1 && (
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            <span className="text-[10px] text-slate-400 py-0.5">Validator:</span>
+            <button
+              onClick={() => setValidatorFilter(null)}
+              className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors ${
+                validatorFilter === null ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-500 hover:bg-slate-300"
+              }`}
+            >
+              All
+            </button>
+            {validatorUids.map((uid) => (
+              <button
+                key={uid}
+                onClick={() => setValidatorFilter(validatorFilter === uid ? null : (uid as number))}
+                className={`px-2 py-0.5 text-[10px] font-medium font-mono rounded transition-colors ${
+                  validatorFilter === uid ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-500 hover:bg-slate-300"
+                }`}
+              >
+                v{uid}
               </button>
             ))}
           </div>
@@ -1976,7 +2003,7 @@ async function fetchValidatorHealth(): Promise<ValidatorHealth[]> {
     const results = await Promise.allSettled(
       validators.map(async (v) => {
         const res = await fetch(`/api/validators/${v.uid}/health`, {
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(15000),
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
@@ -2014,7 +2041,7 @@ async function fetchNetworkActivity(): Promise<NetworkActivityResult> {
     const results = await Promise.allSettled(
       validators.map(async (v) => {
         const res = await fetch(`/api/validators/${v.uid}/v1/activity?limit=100`, {
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(15000),
         });
         if (!res.ok) return [];
         const data = await res.json();
@@ -2058,7 +2085,7 @@ async function fetchAttestationData(): Promise<AttestationEntry[]> {
 
     const v = validators[0];
     const res = await fetch(`/api/validators/${v.uid}/v1/admin/attestations?limit=50`, {
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) return [];
     const data = await res.json();
@@ -2091,7 +2118,7 @@ async function fetchMinerHealth(): Promise<MinerHealth[]> {
     const results = await Promise.allSettled(
       miners.map(async (m) => {
         const res = await fetch(`/api/miners/${m.uid}/health`, {
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(15000),
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
