@@ -706,16 +706,54 @@ def create_app(
     # Web Attestation (whitepaper §15 — pure Bittensor)
     # ------------------------------------------------------------------
 
+    import os as _os
+    _ATTEST_MAX_CONCURRENT = int(_os.environ.get("ATTEST_MAX_CONCURRENT", "15"))
+    _attest_inflight = 0
+
+    @app.get("/v1/attest/capacity")
+    async def attest_capacity() -> dict:
+        """Return current attestation capacity for admission control."""
+        return {
+            "inflight": _attest_inflight,
+            "max": _ATTEST_MAX_CONCURRENT,
+            "available": max(0, _ATTEST_MAX_CONCURRENT - _attest_inflight),
+        }
+
     @app.post("/v1/attest", response_model=AttestResponse)
     async def attest_url(req: AttestRequest) -> AttestResponse:
         """Dispatch a TLSNotary attestation request to a miner and verify the proof.
 
         Flow:
-        1. Rank miners by attestation track record (proven > unproven > failed)
-        2. Try up to 3 miners sequentially with short timeouts
-        3. Verify the returned TLSNotary proof
-        4. Return the verified proof to the caller
+        1. Check admission control — reject immediately if at capacity
+        2. Rank miners by attestation track record (proven > unproven > failed)
+        3. Try up to 3 miners sequentially with short timeouts
+        4. Verify the returned TLSNotary proof
+        5. Return the verified proof to the caller
         """
+        import json as _json
+        import time as _t
+        import httpx
+
+        nonlocal _attest_inflight
+
+        # Admission control: reject immediately if at capacity
+        if _attest_inflight >= _ATTEST_MAX_CONCURRENT:
+            return AttestResponse(
+                request_id=req.request_id,
+                url=req.url,
+                success=False,
+                error="Validator at capacity — try another validator",
+                busy=True,
+                retry_after=30,
+            )
+
+        _attest_inflight += 1
+        try:
+            return await _attest_url_inner(req)
+        finally:
+            _attest_inflight -= 1
+
+    async def _attest_url_inner(req: AttestRequest) -> AttestResponse:
         import json as _json
         import time as _t
         import httpx

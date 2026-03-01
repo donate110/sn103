@@ -78,9 +78,12 @@ function humanizeError(raw: string): string {
   if (lower.includes("status 500") || lower.includes("internal server error")) {
     return "The attestation miner encountered an internal error. This is usually temporary — please try again.";
   }
-  // Miner busy / 503
+  // Miner busy / 503 / at capacity
   if (lower.includes("service shutting down") || lower.includes("503")) {
     return "The attestation service is temporarily busy. Please try again in a minute.";
+  }
+  if (lower.includes("at capacity")) {
+    return "The attestation network is busy right now. Please wait about 30 seconds and try again.";
   }
   // No miners/validators
   if (lower.includes("no reachable miners") || lower.includes("no validators")) {
@@ -165,6 +168,7 @@ export async function POST(request: NextRequest) {
   const validators = await getValidatorUrls();
   const attempts = validators.length;
   let lastError = "No attestation services are currently available on the network. Please try again in a few minutes.";
+  let busyCount = 0;
   const startedAt = Date.now();
 
   for (let i = 0; i < attempts; i++) {
@@ -189,6 +193,11 @@ export async function POST(request: NextRequest) {
           // Successful attestation — return immediately
           return NextResponse.json(data);
         }
+        // Validator at capacity — skip immediately, try next
+        if (data && data.busy) {
+          busyCount++;
+          continue;
+        }
         // Validator returned 200 but attestation failed — try next validator
         if (data && data.error) {
           lastError = humanizeError(data.error);
@@ -210,6 +219,14 @@ export async function POST(request: NextRequest) {
         lastError = `Could not reach attestation service (tried ${i + 1} of ${attempts}). The network may be temporarily unavailable.`;
       }
     }
+  }
+
+  // All validators busy — give a clear, fast message with Retry-After
+  if (busyCount > 0 && busyCount >= attempts) {
+    return NextResponse.json(
+      { error: "The attestation network is currently at capacity. Please try again in about 30 seconds." },
+      { status: 503, headers: { "Retry-After": "30" } },
+    );
   }
 
   return NextResponse.json({ error: lastError }, { status: 502 });

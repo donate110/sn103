@@ -523,3 +523,5 @@ class AttestResponse(BaseModel):
     server_name: str | None = None
     timestamp: int = Field(default=0, description="Unix timestamp of attestation")
     error: str | None = None
+    busy: bool = False
+    retry_after: int | None = Field(default=None, description="Seconds to wait before retrying")
