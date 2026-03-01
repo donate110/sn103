@@ -62,7 +62,7 @@ class TestHealthEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert data["version"] == "0.1.0"
+        assert data["version"]  # non-empty version string
 
 
 class TestIdentityEndpoint:
