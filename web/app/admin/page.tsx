@@ -2365,22 +2365,31 @@ async function fetchMinerHealth(): Promise<MinerHealth[]> {
     if (!discoverRes.ok) return [];
     const { miners } = (await discoverRes.json()) as { miners: MinerNode[] };
 
-    const results = await Promise.allSettled(
-      miners.map(async (m) => {
-        const res = await fetch(`/api/miners/${m.uid}/health`, {
-          signal: AbortSignal.timeout(5000),
-        });
-        if (!res.ok) throw new Error(`${res.status}`);
-        const data = await res.json();
-        return { ...data, uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey, stake: m.stake, alphaStake: m.alphaStake, taoStake: m.taoStake, incentive: m.incentive, emission: m.emission } as MinerHealth;
-      }),
-    );
-
-    return results.map((r, i) =>
-      r.status === "fulfilled"
-        ? r.value
-        : { uid: miners[i].uid, ip: miners[i].ip, port: miners[i].port, hotkey: miners[i].hotkey, stake: miners[i].stake, alphaStake: miners[i].alphaStake, taoStake: miners[i].taoStake, incentive: miners[i].incentive, emission: miners[i].emission, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
-    );
+    // Probe health in batches of 20 to avoid overwhelming browser/serverless connections
+    const BATCH_SIZE = 20;
+    const all: MinerHealth[] = [];
+    for (let i = 0; i < miners.length; i += BATCH_SIZE) {
+      const batch = miners.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(async (m) => {
+          const res = await fetch(`/api/miners/${m.uid}/health`, {
+            signal: AbortSignal.timeout(5000),
+          });
+          if (!res.ok) throw new Error(`${res.status}`);
+          const data = await res.json();
+          return { ...data, uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey, stake: m.stake, alphaStake: m.alphaStake, taoStake: m.taoStake, incentive: m.incentive, emission: m.emission } as MinerHealth;
+        }),
+      );
+      results.forEach((r, j) => {
+        const m = batch[j];
+        all.push(
+          r.status === "fulfilled"
+            ? r.value
+            : { uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey, stake: m.stake, alphaStake: m.alphaStake, taoStake: m.taoStake, incentive: m.incentive, emission: m.emission, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
+        );
+      });
+    }
+    return all;
   } catch {
     return [];
   }
@@ -2403,16 +2412,13 @@ async function fetchTelemetry(): Promise<TelemetryEvent[]> {
         ? ((await minRes.value.json()) as { miners: MinerNode[] }).miners
         : [];
 
+    // Only fetch telemetry from validators — miners rarely have useful telemetry
+    // and probing 250+ adds ~60s to refresh
     const fetches = [
       ...validators.map((v) => ({
         uid: v.uid,
         type: "validator" as const,
         url: `/api/validators/${v.uid}/v1/telemetry?limit=200`,
-      })),
-      ...miners.map((m) => ({
-        uid: m.uid,
-        type: "miner" as const,
-        url: `/api/miners/${m.uid}/v1/telemetry?limit=200`,
       })),
     ];
 
