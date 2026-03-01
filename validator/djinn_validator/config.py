@@ -28,7 +28,7 @@ def _float_env(key: str, default: str) -> float:
 
 @dataclass(frozen=True)
 class Config:
-    _REDACTED_FIELDS = frozenset({"base_validator_private_key", "sports_api_key"})
+    _REDACTED_FIELDS = frozenset({"base_validator_private_key", "sports_api_key", "admin_api_key"})
 
     def __repr__(self) -> str:
         fields = []
@@ -91,6 +91,9 @@ class Config:
 
     # Fallback miner URL for attestation when no miners on metagraph
     fallback_miner_url: str = os.getenv("FALLBACK_MINER_URL", "")
+
+    # Admin API key (optional — if set, admin/telemetry endpoints require Bearer token)
+    admin_api_key: str = os.getenv("ADMIN_API_KEY", "")
 
     # Data directory for SQLite databases (shares, attestations, purchases)
     data_dir: str = os.getenv("DATA_DIR", "data")

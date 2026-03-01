@@ -26,6 +26,7 @@ from djinn_miner.api.middleware import (
     RequestIdMiddleware,
     ValidatorAuthMiddleware,
     get_cors_origins,
+    require_admin_auth,
 )
 from djinn_miner.api.models import (
     AttestRequest,
@@ -119,6 +120,9 @@ def create_app(
 
     # Request ID tracing (outermost — must be added last)
     app.add_middleware(RequestIdMiddleware)
+
+    # Admin auth dependency — if ADMIN_API_KEY is set, require Bearer token
+    _admin_auth = require_admin_auth(os.getenv("ADMIN_API_KEY", ""))
 
     @app.post("/v1/check", response_model=CheckResponse)
     async def check_lines(request: CheckRequest) -> CheckResponse:
@@ -357,8 +361,6 @@ def create_app(
     async def health() -> HealthResponse:
         """Health check endpoint for validator pings."""
         health_tracker.record_ping()
-        if telemetry:
-            telemetry.record("health_ping", "Health check received")
         return health_tracker.get_status()
 
     # Cache Config for readiness checks (avoid re-loading dotenv on every probe)
@@ -391,7 +393,7 @@ def create_app(
             media_type="text/plain; version=0.0.4; charset=utf-8",
         )
 
-    @app.get("/v1/telemetry")
+    @app.get("/v1/telemetry", dependencies=[_admin_auth])
     async def get_telemetry(
         limit: int = 200,
         since: float | None = None,

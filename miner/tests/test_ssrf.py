@@ -94,13 +94,13 @@ class TestSSRFAllowedURLs:
         req = AttestRequest(url="https://93.184.216.34/page", request_id="test-ok-2")
         assert "93.184.216.34" in req.url
 
-    def test_dns_failure_still_passes(self) -> None:
-        """DNS resolution failure should not block — will fail at request time."""
+    def test_dns_failure_rejects(self) -> None:
+        """DNS resolution failure should reject the URL at validation time."""
         import socket
 
         with patch("socket.getaddrinfo", side_effect=socket.gaierror("DNS failed")):
-            req = AttestRequest(url="https://nonexistent.example.com/page", request_id="test-ok-3")
-            assert req.url.startswith("https://")
+            with pytest.raises(ValidationError, match="could not be resolved"):
+                AttestRequest(url="https://nonexistent.example.com/page", request_id="test-ok-3")
 
 
 class TestAttestRequestBasicValidation:

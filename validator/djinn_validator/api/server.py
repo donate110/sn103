@@ -50,6 +50,7 @@ from djinn_validator.api.middleware import (
     RateLimitMiddleware,
     RequestIdMiddleware,
     get_cors_origins,
+    require_admin_auth,
     validate_signed_request,
 )
 from djinn_validator.api.models import (
@@ -322,6 +323,9 @@ def create_app(
 
     # Request ID tracing (outermost — must be added last)
     app.add_middleware(RequestIdMiddleware)
+
+    # Admin auth dependency — if ADMIN_API_KEY is set, require Bearer token
+    _admin_auth = require_admin_auth(os.getenv("ADMIN_API_KEY", ""))
 
     _ETH_ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
@@ -1057,12 +1061,12 @@ def create_app(
             error=verify_result.error if not verify_result.verified else None,
         )
 
-    @app.get("/v1/admin/attestations")
+    @app.get("/v1/admin/attestations", dependencies=[_admin_auth])
     async def admin_attestations(limit: int = 50) -> dict:
         """Recent attestation requests with full details."""
         if attestation_log is None:
             return {"attestations": []}
-        return {"attestations": attestation_log.recent_attestations(min(limit, 200))}
+        return {"attestations": attestation_log.recent_attestations(max(1, min(limit, 200)))}
 
     @app.post("/v1/analytics/attempt")
     async def analytics(req: AnalyticsRequest) -> dict:
@@ -1177,7 +1181,7 @@ def create_app(
     # Activity log
     # ------------------------------------------------------------------
 
-    @app.get("/v1/activity")
+    @app.get("/v1/activity", dependencies=[_admin_auth])
     async def get_activity(
         limit: int = 100,
         category: str | None = None,
@@ -1189,7 +1193,7 @@ def create_app(
         events = activity_buffer.recent(limit=safe_limit, category=category)
         return {"events": events, "total": len(events)}
 
-    @app.get("/v1/telemetry")
+    @app.get("/v1/telemetry", dependencies=[_admin_auth])
     async def get_telemetry(
         limit: int = 200,
         since: float | None = None,
@@ -1207,7 +1211,7 @@ def create_app(
     # Miner score lookup
     # ------------------------------------------------------------------
 
-    @app.get("/v1/miner/{uid}/scores")
+    @app.get("/v1/miner/{uid}/scores", dependencies=[_admin_auth])
     async def miner_scores(uid: int) -> dict:
         """Return current live scoring metrics for a specific miner UID."""
         if scorer is None:

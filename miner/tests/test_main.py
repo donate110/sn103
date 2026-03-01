@@ -24,8 +24,6 @@ class TestBtSyncLoop:
 
         call_count = 0
 
-        original_sync = neuron.sync_metagraph
-
         def counting_sync():
             nonlocal call_count
             call_count += 1
@@ -33,7 +31,8 @@ class TestBtSyncLoop:
                 raise asyncio.CancelledError()
 
         neuron.sync_metagraph = counting_sync
-        await bt_sync_loop(neuron, health)
+        with patch("djinn_miner.main.asyncio.sleep", new_callable=AsyncMock):
+            await bt_sync_loop(neuron, health)
         assert health.get_status().bt_connected is True
 
     @pytest.mark.asyncio
@@ -52,7 +51,8 @@ class TestBtSyncLoop:
                 raise asyncio.CancelledError()
 
         neuron.sync_metagraph = counting_sync
-        await bt_sync_loop(neuron, health)
+        with patch("djinn_miner.main.asyncio.sleep", new_callable=AsyncMock):
+            await bt_sync_loop(neuron, health)
         assert health.get_status().bt_connected is False
 
     @pytest.mark.asyncio
@@ -87,7 +87,8 @@ class TestBtSyncLoop:
         neuron.sync_metagraph.side_effect = asyncio.CancelledError()
         health = HealthTracker()
 
-        await bt_sync_loop(neuron, health)  # Should not raise
+        with patch("djinn_miner.main.asyncio.sleep", new_callable=AsyncMock):
+            await bt_sync_loop(neuron, health)  # Should not raise
 
     @pytest.mark.asyncio
     async def test_sync_loop_refreshes_uid(self) -> None:
@@ -106,7 +107,8 @@ class TestBtSyncLoop:
                 raise asyncio.CancelledError()
 
         neuron.sync_metagraph = counting_sync
-        await bt_sync_loop(neuron, health)
+        with patch("djinn_miner.main.asyncio.sleep", new_callable=AsyncMock):
+            await bt_sync_loop(neuron, health)
         assert health.get_status().uid == 99
 
     @pytest.mark.asyncio

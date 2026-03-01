@@ -500,7 +500,7 @@ class TestEndpointTimeouts:
         import asyncio
 
         async def slow_proof(*args, **kwargs):
-            await asyncio.sleep(100)
+            raise asyncio.TimeoutError()
 
         mock_checker = AsyncMock()
         mock_checker.check.return_value = []

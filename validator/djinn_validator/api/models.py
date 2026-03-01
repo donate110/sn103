@@ -169,14 +169,14 @@ class IdentityResponse(BaseModel):
 
     base_address: str = ""
     hotkey: str = ""
-    version: str = "0.1.0"
+    version: str = ""
 
 
 class HealthResponse(BaseModel):
     """GET /health — Validator health check."""
 
     status: str
-    version: str = "0.1.0"
+    version: str = ""
     uid: int | None = None
     shares_held: int = 0
     pending_outcomes: int = 0

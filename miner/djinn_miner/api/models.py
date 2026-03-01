@@ -103,7 +103,7 @@ class HealthResponse(BaseModel):
     """GET /health — Miner health check."""
 
     status: str
-    version: str = "0.1.0"  # Default; overridden by HealthTracker
+    version: str = ""  # Overridden by HealthTracker at runtime
     uid: int | None = None
     odds_api_connected: bool = False
     bt_connected: bool = False
@@ -153,7 +153,7 @@ class AttestRequest(BaseModel):
                     if not addr.is_global:
                         raise ValueError("URL must not point to private/internal addresses")
             except socket.gaierror:
-                pass  # DNS resolution failed — will fail at request time anyway
+                raise ValueError("URL hostname could not be resolved")
         else:
             if not addr.is_global:
                 raise ValueError("URL must not point to private/internal addresses")

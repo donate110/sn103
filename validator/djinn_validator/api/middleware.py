@@ -69,7 +69,8 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+        raw_id = request.headers.get("x-request-id") or ""
+        request_id = re.sub(r"[\x00-\x1f\x7f]", "", raw_id)[:128] if raw_id else uuid.uuid4().hex
         structlog.contextvars.bind_contextvars(request_id=request_id)
         start = time.monotonic()
         try:
@@ -405,6 +406,31 @@ def create_signed_headers(
     }
 
 
+def require_admin_auth(admin_api_key: str) -> Callable:
+    """Create a FastAPI dependency that checks Bearer token auth for admin endpoints.
+
+    If admin_api_key is empty, returns a no-op dependency (endpoints remain open).
+    """
+    from fastapi import Depends, Header
+
+    if not admin_api_key:
+        async def _noop() -> None:
+            return None
+        return Depends(_noop)
+
+    async def _check_admin_token(authorization: str = Header(default="")) -> None:
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Admin API key required")
+        parts = authorization.split(" ", 1)
+        if len(parts) != 2 or parts[0].lower() != "bearer":
+            raise HTTPException(status_code=401, detail="Expected 'Bearer <token>' format")
+        import hmac
+        if not hmac.compare_digest(parts[1], admin_api_key):
+            raise HTTPException(status_code=403, detail="Invalid admin API key")
+
+    return Depends(_check_admin_token)
+
+
 def get_cors_origins(env_value: str = "", bt_network: str = "") -> list[str]:
     """Parse CORS origins from environment variable.
 
@@ -419,4 +445,7 @@ def get_cors_origins(env_value: str = "", bt_network: str = "") -> list[str]:
             )
         log.warning("cors_wildcard", msg="CORS_ORIGINS not set — using wildcard. Set CORS_ORIGINS in production.")
         return ["*"]
-    return [o.strip() for o in env_value.split(",") if o.strip()]
+    origins = [o.strip() for o in env_value.split(",") if o.strip()]
+    if bt_network in ("finney", "mainnet") and "*" in origins:
+        raise ValueError("Wildcard CORS origin ('*') is not allowed in production")
+    return origins
