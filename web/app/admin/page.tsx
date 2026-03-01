@@ -195,6 +195,7 @@ export default function AdminDashboard() {
   // Network tab data
   const [networkEvents, setNetworkEvents] = useState<NetworkEvent[]>([]);
   const [networkDiag, setNetworkDiag] = useState<{ discovered: number; responded: number; error?: string } | null>(null);
+  const [validatorFetchStatus, setValidatorFetchStatus] = useState<Record<number, "pending" | "success" | "error">>({});
 
   // Protocol tab data
   const [recentSignals, setRecentSignals] = useState<SubgraphRecentSignal[]>([]);
@@ -262,7 +263,7 @@ export default function AdminDashboard() {
       fetchMinerHealth(),           // 1
       fetchProtocolStats(),         // 2
       fetchErrorReports(),          // 3
-      fetchNetworkActivity(),       // 4
+      fetchNetworkActivity((status) => setValidatorFetchStatus(status)),       // 4
       fetchRecentSignals(50),       // 5
       fetchRecentPurchases(50),     // 6
       fetchRecentAudits(50),        // 7
@@ -729,7 +730,7 @@ export default function AdminDashboard() {
 
       {/* ── Network Tab (Miners & Validators Activity) ── */}
       {activeTab === "network" && (
-        <NetworkActivityTab events={networkEvents} loading={loading} diag={networkDiag} />
+        <NetworkActivityTab events={networkEvents} loading={loading} diag={networkDiag} fetchStatus={validatorFetchStatus} />
       )}
 
       {/* ── Protocol Tab (Geniuses & Idiots Activity) ── */}
@@ -1121,7 +1122,7 @@ function EventDetailPanel({ event }: { event: NetworkEvent }) {
   );
 }
 
-function NetworkActivityTab({ events, loading, diag }: { events: NetworkEvent[]; loading: boolean; diag: { discovered: number; responded: number; error?: string } | null }) {
+function NetworkActivityTab({ events, loading, diag, fetchStatus }: { events: NetworkEvent[]; loading: boolean; diag: { discovered: number; responded: number; error?: string } | null; fetchStatus: Record<number, "pending" | "success" | "error"> }) {
   const [filter, setFilter] = useState<string | null>(null);
   const [validatorFilter, setValidatorFilter] = useState<number | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
@@ -1147,6 +1148,22 @@ function NetworkActivityTab({ events, loading, diag }: { events: NetworkEvent[];
             {diag.discovered} validator{diag.discovered !== 1 ? "s" : ""} discovered, {diag.responded} responded
             {diag.error && <span className="text-red-400 ml-2">{diag.error}</span>}
           </p>
+        )}
+        {Object.keys(fetchStatus).length > 0 && (
+          <div className="flex items-center gap-2 mt-1.5">
+            {Object.entries(fetchStatus)
+              .sort(([a], [b]) => Number(a) - Number(b))
+              .map(([uid, st]) => (
+                <div key={uid} className="flex items-center gap-1" title={`v${uid}: ${st}`}>
+                  <span className={`inline-block w-2 h-2 rounded-full ${
+                    st === "success" ? "bg-green-500" : st === "error" ? "bg-red-500" : "bg-amber-400 animate-pulse"
+                  }`} />
+                  <span className={`text-[10px] font-mono ${st === "pending" ? "text-amber-600" : "text-slate-400"}`}>
+                    {uid}
+                  </span>
+                </div>
+              ))}
+          </div>
         )}
         {categories.length > 1 && (
           <div className="flex flex-wrap gap-1.5 mt-2">
@@ -2028,7 +2045,9 @@ interface NetworkActivityResult {
   error?: string;
 }
 
-async function fetchNetworkActivity(): Promise<NetworkActivityResult> {
+async function fetchNetworkActivity(
+  onStatus?: (status: Record<number, "pending" | "success" | "error">) => void,
+): Promise<NetworkActivityResult> {
   try {
     const discoverRes = await fetch("/api/validators/discover");
     if (!discoverRes.ok) return { events: [], validatorsDiscovered: 0, validatorsResponded: 0, error: `Discovery failed (${discoverRes.status})` };
@@ -2038,21 +2057,38 @@ async function fetchNetworkActivity(): Promise<NetworkActivityResult> {
       return { events: [], validatorsDiscovered: 0, validatorsResponded: 0, error: "No validators found in metagraph" };
     }
 
+    // Initialize all validators as pending
+    const status: Record<number, "pending" | "success" | "error"> = {};
+    for (const v of validators) status[v.uid] = "pending";
+    onStatus?.({ ...status });
+
     const results = await Promise.allSettled(
       validators.map(async (v) => {
-        const res = await fetch(`/api/validators/${v.uid}/v1/activity?limit=100`, {
-          signal: AbortSignal.timeout(15000),
-        });
-        if (!res.ok) return [];
-        const data = await res.json();
-        return ((data.events || []) as NetworkEvent[]).map((e) => ({
-          ...e,
-          validatorUid: v.uid,
-        }));
+        try {
+          const res = await fetch(`/api/validators/${v.uid}/v1/activity?limit=100`, {
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!res.ok) {
+            status[v.uid] = "error";
+            onStatus?.({ ...status });
+            return [];
+          }
+          const data = await res.json();
+          status[v.uid] = "success";
+          onStatus?.({ ...status });
+          return ((data.events || []) as NetworkEvent[]).map((e) => ({
+            ...e,
+            validatorUid: v.uid,
+          }));
+        } catch {
+          status[v.uid] = "error";
+          onStatus?.({ ...status });
+          return [];
+        }
       }),
     );
 
-    const responded = results.filter((r) => r.status === "fulfilled" && (r.value as NetworkEvent[]).length >= 0).length;
+    const responded = Object.values(status).filter((s) => s === "success").length;
     const all: NetworkEvent[] = results
       .filter((r) => r.status === "fulfilled")
       .flatMap((r) => (r as PromiseFulfilledResult<NetworkEvent[]>).value);
