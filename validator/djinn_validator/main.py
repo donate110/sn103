@@ -311,21 +311,36 @@ async def epoch_loop(
             # Compute and set weights — only reset metrics AFTER weights are set
             # so that challenge data accumulates across the full interval
             if neuron.should_set_weights():
-                weights = scorer.compute_weights(is_active)
+                weights, breakdowns = scorer.compute_weights_detailed(is_active)
                 weights = neuron.apply_burn(weights or {}, burn_fraction)
                 n_miners = len(weights) - 1  # exclude UID 0 burn entry
                 success = neuron.set_weights(weights)
                 if success:
                     neuron.record_weight_set()
-                    # Top 20 miners by weight (excluding UID 0 burn)
+                    # All miners by weight (excluding UID 0 burn), capped at 50
                     sorted_w = sorted(
                         ((uid, w) for uid, w in weights.items() if uid != 0),
                         key=lambda x: x[1], reverse=True,
                     )
-                    top_miners = [
-                        {"uid": uid, "weight": round(w, 6)}
-                        for uid, w in sorted_w[:20]
-                    ]
+                    top_miners = []
+                    for uid, w in sorted_w[:50]:
+                        bd = breakdowns.get(uid, {})
+                        top_miners.append({
+                            "uid": uid,
+                            "weight": round(w, 6),
+                            "accuracy": round(bd.get("accuracy", 0), 4),
+                            "speed": round(bd.get("speed", 0), 4),
+                            "coverage": round(bd.get("coverage", 0), 4),
+                            "uptime": round(bd.get("uptime", 0), 4),
+                            "attest_validity": round(bd.get("attest_validity", 0), 4),
+                            "attest_speed": round(bd.get("attest_speed", 0), 4),
+                            "sports_score": round(bd.get("sports_score", 0), 4),
+                            "attestation_score": round(bd.get("attestation_score", 0), 4),
+                            "queries_total": bd.get("queries_total", 0),
+                            "attestations_total": bd.get("attestations_total", 0),
+                            "health_responded": bd.get("health_checks_responded", 0),
+                            "consecutive_epochs": bd.get("consecutive_epochs", 0),
+                        })
                     if activity is not None:
                         activity.record(
                             ActivityCategory.WEIGHT_SET,
@@ -333,6 +348,7 @@ async def epoch_loop(
                             n_miners=n_miners, is_active=is_active,
                             burn_fraction=burn_fraction,
                             top_miners=top_miners,
+                            total_miners=len(sorted_w),
                         )
                     if telemetry:
                         telemetry.record(
@@ -341,6 +357,7 @@ async def epoch_loop(
                             n_miners=n_miners, is_active=is_active,
                             burn_fraction=burn_fraction,
                             top_miners=top_miners,
+                            total_miners=len(sorted_w),
                             success=True,
                         )
                 else:

@@ -186,36 +186,74 @@ class MinerScorer:
         Returns:
             Mapping of miner UID -> weight (0.0 to 1.0), normalized to sum to 1.
         """
+        weights, _ = self.compute_weights_detailed(is_active_epoch)
+        return weights
+
+    def compute_weights_detailed(
+        self, is_active_epoch: bool
+    ) -> tuple[dict[int, float], dict[int, dict]]:
+        """Compute normalized weights with per-miner component breakdowns.
+
+        Returns:
+            (weights, breakdowns) where weights maps uid -> normalized weight,
+            and breakdowns maps uid -> component scores dict.
+        """
         if not self._miners:
-            return {}
+            return {}, {}
 
         if is_active_epoch:
-            return self._compute_active_weights()
-        return self._compute_empty_weights()
+            return self._compute_active_weights_detailed()
+        return self._compute_empty_weights_detailed()
 
     def _compute_active_weights(self) -> dict[int, float]:
+        weights, _ = self._compute_active_weights_detailed()
+        return weights
+
+    def _compute_active_weights_detailed(
+        self,
+    ) -> tuple[dict[int, float], dict[int, dict]]:
         miners = list(self._miners.values())
 
         sports_scores = self._compute_sports_scores(miners)
         attestation_scores = self._compute_attestation_scores(miners)
+        sports_speed = self._normalize_speed(miners, use_attestation=False)
+        attest_speed = self._normalize_speed(miners, use_attestation=True)
 
         has_attestation_data = any(m.attestations_total > 0 for m in miners)
 
         raw: dict[int, float] = {}
+        breakdowns: dict[int, dict] = {}
         for m in miners:
             sports = sports_scores.get(m.uid, 0.0)
+            attest = attestation_scores.get(m.uid, 0.0) if has_attestation_data else 0.0
             if has_attestation_data:
-                attest = attestation_scores.get(m.uid, 0.0)
                 score = (
                     (1.0 - self.W_ATTESTATION_BLEND) * sports
                     + self.W_ATTESTATION_BLEND * attest
                 )
             else:
-                # No attestation challenges this epoch — pure sports scoring
                 score = sports
             raw[m.uid] = score
+            breakdowns[m.uid] = {
+                "accuracy": m.accuracy_score(),
+                "speed": sports_speed.get(m.uid, 0.0),
+                "coverage": m.coverage_score(),
+                "uptime": m.uptime_score(),
+                "sports_score": sports,
+                "attest_validity": m.attestation_validity_score(),
+                "attest_speed": attest_speed.get(m.uid, 0.0),
+                "attestation_score": attest,
+                "raw_score": score,
+                "queries_total": m.queries_total,
+                "queries_correct": m.queries_correct,
+                "attestations_total": m.attestations_total,
+                "attestations_valid": m.attestations_valid,
+                "health_checks_total": m.health_checks_total,
+                "health_checks_responded": m.health_checks_responded,
+                "consecutive_epochs": m.consecutive_epochs,
+            }
 
-        return self._normalize(raw)
+        return self._normalize(raw), breakdowns
 
     def _compute_sports_scores(self, miners: list[MinerMetrics]) -> dict[int, float]:
         """Compute per-miner sports scores (unnormalized 0-1 range)."""
@@ -252,17 +290,42 @@ class MinerScorer:
         return scores
 
     def _compute_empty_weights(self) -> dict[int, float]:
+        weights, _ = self._compute_empty_weights_detailed()
+        return weights
+
+    def _compute_empty_weights_detailed(
+        self,
+    ) -> tuple[dict[int, float], dict[int, dict]]:
         miners = list(self._miners.values())
         max_history = max((m.consecutive_epochs for m in miners), default=1)
 
         raw: dict[int, float] = {}
+        breakdowns: dict[int, dict] = {}
         for m in miners:
-            # Log-scaled history: log(1 + epochs) / log(1 + max_epochs)
             history = math.log1p(m.consecutive_epochs) / math.log1p(max_history) if max_history > 0 else 0.0
             score = self.W_EMPTY_UPTIME * m.uptime_score() + self.W_EMPTY_HISTORY * history
             raw[m.uid] = score
+            breakdowns[m.uid] = {
+                "accuracy": 0.0,
+                "speed": 0.0,
+                "coverage": 0.0,
+                "uptime": m.uptime_score(),
+                "sports_score": 0.0,
+                "attest_validity": 0.0,
+                "attest_speed": 0.0,
+                "attestation_score": 0.0,
+                "history": round(history, 4),
+                "raw_score": score,
+                "queries_total": m.queries_total,
+                "queries_correct": m.queries_correct,
+                "attestations_total": m.attestations_total,
+                "attestations_valid": m.attestations_valid,
+                "health_checks_total": m.health_checks_total,
+                "health_checks_responded": m.health_checks_responded,
+                "consecutive_epochs": m.consecutive_epochs,
+            }
 
-        return self._normalize(raw)
+        return self._normalize(raw), breakdowns
 
     def _normalize_speed(
         self, miners: list[MinerMetrics], *, use_attestation: bool = False

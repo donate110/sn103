@@ -1134,6 +1134,36 @@ def create_app(
         return {"events": events, "total": total}
 
     # ------------------------------------------------------------------
+    # Miner score lookup
+    # ------------------------------------------------------------------
+
+    @app.get("/v1/miner/{uid}/scores")
+    async def miner_scores(uid: int) -> dict:
+        """Return current live scoring metrics for a specific miner UID."""
+        if scorer is None:
+            return {"uid": uid, "found": False}
+        m = scorer.get(uid)
+        if m is None:
+            return {"uid": uid, "found": False}
+        return {
+            "uid": uid,
+            "found": True,
+            "hotkey": m.hotkey,
+            "accuracy": round(m.accuracy_score(), 4),
+            "coverage": round(m.coverage_score(), 4),
+            "uptime": round(m.uptime_score(), 4),
+            "attest_validity": round(m.attestation_validity_score(), 4),
+            "queries_total": m.queries_total,
+            "queries_correct": m.queries_correct,
+            "proofs_submitted": m.proofs_submitted,
+            "attestations_total": m.attestations_total,
+            "attestations_valid": m.attestations_valid,
+            "health_checks_total": m.health_checks_total,
+            "health_checks_responded": m.health_checks_responded,
+            "consecutive_epochs": m.consecutive_epochs,
+        }
+
+    # ------------------------------------------------------------------
     # Shared HTTP client for attestation dispatch (connection reuse)
     # ------------------------------------------------------------------
     _attest_client = httpx.AsyncClient(

@@ -725,6 +725,9 @@ export default function AdminDashboard() {
               </div>
             </div>
           )}
+
+          {/* Miner Lookup */}
+          <MinerLookup />
         </>
       )}
 
@@ -849,6 +852,254 @@ function DetailGrid({ details, skip, color }: { details: Record<string, unknown>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Miner Lookup — query all validators for a miner's live scoring metrics
+// ---------------------------------------------------------------------------
+
+interface MinerScoreResult {
+  validatorUid: number;
+  found: boolean;
+  hotkey?: string;
+  accuracy?: number;
+  coverage?: number;
+  uptime?: number;
+  attest_validity?: number;
+  queries_total?: number;
+  queries_correct?: number;
+  proofs_submitted?: number;
+  attestations_total?: number;
+  attestations_valid?: number;
+  health_checks_total?: number;
+  health_checks_responded?: number;
+  consecutive_epochs?: number;
+}
+
+function MinerLookup() {
+  const [uid, setUid] = useState("");
+  const [results, setResults] = useState<MinerScoreResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+
+  async function lookup() {
+    const parsed = parseInt(uid.trim(), 10);
+    if (isNaN(parsed) || parsed < 0) return;
+    setSearching(true);
+    setSearched(true);
+    try {
+      const discoverRes = await fetch("/api/validators/discover");
+      if (!discoverRes.ok) { setResults([]); return; }
+      const { validators } = (await discoverRes.json()) as { validators: ValidatorNode[] };
+      const fetches = await Promise.allSettled(
+        validators.map(async (v) => {
+          const res = await fetch(`/api/validators/${v.uid}/v1/miner/${parsed}/scores`, {
+            signal: AbortSignal.timeout(10000),
+          });
+          if (!res.ok) return { validatorUid: v.uid, found: false } as MinerScoreResult;
+          const data = await res.json();
+          return { ...data, validatorUid: v.uid } as MinerScoreResult;
+        }),
+      );
+      setResults(
+        fetches
+          .filter((r) => r.status === "fulfilled")
+          .map((r) => (r as PromiseFulfilledResult<MinerScoreResult>).value),
+      );
+    } catch {
+      setResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  const found = results.filter((r) => r.found);
+
+  return (
+    <div>
+      <h2 className="text-xl font-semibold text-slate-900 mb-4">Miner Lookup</h2>
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Enter miner UID"
+              value={uid}
+              onChange={(e) => setUid(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && lookup()}
+              className="px-3 py-1.5 text-sm font-mono border border-slate-300 rounded-lg bg-white w-32 focus:outline-none focus:ring-2 focus:ring-slate-400"
+            />
+            <button
+              onClick={lookup}
+              disabled={searching || !uid.trim()}
+              className="px-3 py-1.5 text-sm font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {searching ? "Searching..." : "Lookup"}
+            </button>
+            <span className="text-xs text-slate-400">Queries all validators for live miner metrics</span>
+          </div>
+        </div>
+        {searched && (
+          <div className="p-4">
+            {found.length === 0 ? (
+              <div className="text-sm text-slate-400 text-center py-4">
+                {searching ? "Querying validators..." : `No validator has metrics for UID ${uid}`}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-slate-500 border-b border-slate-200">
+                      <th className="px-2 py-1.5 text-left font-medium">Validator</th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="Accuracy (sports)">Acc</th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="Coverage (sports)">Cov</th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="Uptime">Up</th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="Attestation validity">A.Val</th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="Queries correct / total">Queries</th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="Attestations valid / total">Attests</th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="Health checks responded / total">Health</th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="Consecutive epochs">Epochs</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {found.map((r) => (
+                      <tr key={r.validatorUid}>
+                        <td className="px-2 py-1.5 font-mono text-slate-700">v{r.validatorUid}</td>
+                        <td className="px-2 py-1.5 font-mono text-right text-slate-700">{fmtPct(r.accuracy)}</td>
+                        <td className="px-2 py-1.5 font-mono text-right text-slate-700">{fmtPct(r.coverage)}</td>
+                        <td className="px-2 py-1.5 font-mono text-right text-slate-700">{fmtPct(r.uptime)}</td>
+                        <td className="px-2 py-1.5 font-mono text-right text-slate-700">{fmtPct(r.attest_validity)}</td>
+                        <td className="px-2 py-1.5 font-mono text-right text-slate-400">{r.queries_correct}/{r.queries_total}</td>
+                        <td className="px-2 py-1.5 font-mono text-right text-slate-400">{r.attestations_valid}/{r.attestations_total}</td>
+                        <td className="px-2 py-1.5 font-mono text-right text-slate-400">{r.health_checks_responded}/{r.health_checks_total}</td>
+                        <td className="px-2 py-1.5 font-mono text-right text-slate-400">{r.consecutive_epochs}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {found[0]?.hotkey && (
+                  <div className="mt-2 text-[10px] text-slate-400 font-mono truncate">
+                    Hotkey: {found[0].hotkey}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WeightSetDetail({ event }: { event: NetworkEvent }) {
+  const d = event.details || {};
+  const topMiners = (d.top_miners as Array<Record<string, unknown>>) || [];
+  const totalMiners = (d.total_miners as number) || topMiners.length;
+  const burnStr = d.burn_fraction !== undefined
+    ? `${(Number(d.burn_fraction) * 100).toFixed(0)}%`
+    : parseBurnFromSummary(event.summary);
+  const [uidFilter, setUidFilter] = useState("");
+
+  // Check if we have component breakdowns (new format)
+  const hasBreakdown = topMiners.length > 0 && topMiners[0].accuracy !== undefined;
+
+  const filtered = uidFilter.trim()
+    ? topMiners.filter((m) => String(m.uid) === uidFilter.trim())
+    : topMiners;
+
+  return (
+    <div className="mx-4 mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2">
+        <div>
+          <span className="text-amber-600 font-medium block">Miners</span>
+          <span className="text-amber-900 font-mono">{formatDetailValue(d.n_miners)}</span>
+        </div>
+        <div>
+          <span className="text-amber-600 font-medium block">Burn</span>
+          <span className="text-amber-900 font-mono">{burnStr || "-"}</span>
+        </div>
+        <div>
+          <span className="text-amber-600 font-medium block">Active Signals</span>
+          <span className={`font-mono ${d.is_active ? "text-green-700" : "text-amber-900"}`}>{d.is_active ? "Yes" : "No"}</span>
+        </div>
+        <div>
+          <span className="text-amber-600 font-medium block">Time</span>
+          <span className="text-amber-900">{formatTimeAgo(event.timestamp)}</span>
+        </div>
+      </div>
+      {topMiners.length > 0 ? (
+        <>
+          <div className="flex items-center gap-2 mb-2">
+            <input
+              type="text"
+              placeholder="Search UID..."
+              value={uidFilter}
+              onChange={(e) => setUidFilter(e.target.value)}
+              className="px-2 py-1 text-[11px] font-mono border border-amber-300 rounded bg-white w-24 focus:outline-none focus:ring-1 focus:ring-amber-400"
+            />
+            <span className="text-[10px] text-slate-400">
+              Showing {filtered.length} of {topMiners.length}{totalMiners > topMiners.length ? ` (${totalMiners} total)` : ""}
+            </span>
+          </div>
+          {hasBreakdown ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="text-slate-500">
+                    <th className="px-2 py-1 text-left font-medium">UID</th>
+                    <th className="px-2 py-1 text-right font-medium">Weight</th>
+                    <th className="px-2 py-1 text-right font-medium" title="Accuracy (sports)">Acc</th>
+                    <th className="px-2 py-1 text-right font-medium" title="Speed (sports)">Spd</th>
+                    <th className="px-2 py-1 text-right font-medium" title="Coverage (sports)">Cov</th>
+                    <th className="px-2 py-1 text-right font-medium" title="Uptime">Up</th>
+                    <th className="px-2 py-1 text-right font-medium" title="Attestation validity">A.Val</th>
+                    <th className="px-2 py-1 text-right font-medium" title="Queries total">Q</th>
+                    <th className="px-2 py-1 text-right font-medium" title="Attestations total">Att</th>
+                    <th className="px-2 py-1 text-right font-medium" title="Health checks responded">HC</th>
+                    <th className="px-2 py-1 text-right font-medium" title="Consecutive epochs">Ep</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100/50">
+                  {filtered.map((m, i) => {
+                    const hasActivity = Number(m.queries_total) > 0 || Number(m.attestations_total) > 0;
+                    return (
+                      <tr key={i} className={hasActivity ? "bg-amber-100/30" : ""}>
+                        <td className="px-2 py-1 font-mono text-slate-700">{formatDetailValue(m.uid)}</td>
+                        <td className="px-2 py-1 font-mono text-right text-slate-700">{formatDetailValue(m.weight)}</td>
+                        <td className="px-2 py-1 font-mono text-right text-slate-700">{fmtPct(m.accuracy)}</td>
+                        <td className="px-2 py-1 font-mono text-right text-slate-700">{fmtPct(m.speed)}</td>
+                        <td className="px-2 py-1 font-mono text-right text-slate-700">{fmtPct(m.coverage)}</td>
+                        <td className="px-2 py-1 font-mono text-right text-slate-700">{fmtPct(m.uptime)}</td>
+                        <td className="px-2 py-1 font-mono text-right text-slate-700">{fmtPct(m.attest_validity)}</td>
+                        <td className="px-2 py-1 font-mono text-right text-slate-400">{formatDetailValue(m.queries_total)}</td>
+                        <td className="px-2 py-1 font-mono text-right text-slate-400">{formatDetailValue(m.attestations_total)}</td>
+                        <td className="px-2 py-1 font-mono text-right text-slate-400">{formatDetailValue(m.health_responded)}</td>
+                        <td className="px-2 py-1 font-mono text-right text-slate-400">{formatDetailValue(m.consecutive_epochs)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <MinerResultTable miners={filtered} columns={[
+              { key: "uid", label: "UID" },
+              { key: "weight", label: "Weight", align: "right" },
+            ]} />
+          )}
+        </>
+      ) : (
+        <div className="text-[10px] text-slate-400 italic">Validator update required for per-miner weight breakdown</div>
+      )}
+    </div>
+  );
+}
+
+/** Format a 0-1 score as percentage, showing "-" for zero */
+function fmtPct(v: unknown): string {
+  const n = Number(v);
+  if (!n || isNaN(n)) return "-";
+  return `${(n * 100).toFixed(1)}%`;
+}
+
 function EventDetailPanel({ event }: { event: NetworkEvent }) {
   const d = event.details || {};
   const cat = event.category;
@@ -896,40 +1147,7 @@ function EventDetailPanel({ event }: { event: NetworkEvent }) {
   }
 
   if (cat === "weight_set") {
-    const topMiners = (d.top_miners as Array<Record<string, unknown>>) || [];
-    const burnStr = d.burn_fraction !== undefined
-      ? `${(Number(d.burn_fraction) * 100).toFixed(0)}%`
-      : parseBurnFromSummary(event.summary);
-    return (
-      <div className="mx-4 mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2">
-          <div>
-            <span className="text-amber-600 font-medium block">Miners</span>
-            <span className="text-amber-900 font-mono">{formatDetailValue(d.n_miners)}</span>
-          </div>
-          <div>
-            <span className="text-amber-600 font-medium block">Burn</span>
-            <span className="text-amber-900 font-mono">{burnStr || "-"}</span>
-          </div>
-          <div>
-            <span className="text-amber-600 font-medium block">Active Signals</span>
-            <span className={`font-mono ${d.is_active ? "text-green-700" : "text-amber-900"}`}>{d.is_active ? "Yes" : "No"}</span>
-          </div>
-          <div>
-            <span className="text-amber-600 font-medium block">Time</span>
-            <span className="text-amber-900">{formatTimeAgo(event.timestamp)}</span>
-          </div>
-        </div>
-        {topMiners.length > 0 ? (
-          <MinerResultTable miners={topMiners} columns={[
-            { key: "uid", label: "UID" },
-            { key: "weight", label: "Weight", align: "right" },
-          ]} />
-        ) : (
-          <div className="text-[10px] text-slate-400 italic">Validator update required for per-miner weight breakdown</div>
-        )}
-      </div>
-    );
+    return <WeightSetDetail event={event} />;
   }
 
   if (cat === "attestation_challenge") {
@@ -2065,7 +2283,7 @@ async function fetchNetworkActivity(
     const results = await Promise.allSettled(
       validators.map(async (v) => {
         try {
-          const res = await fetch(`/api/validators/${v.uid}/v1/telemetry?limit=200`, {
+          const res = await fetch(`/api/validators/${v.uid}/v1/telemetry?limit=500`, {
             signal: AbortSignal.timeout(15000),
           });
           if (!res.ok) {

@@ -425,3 +425,104 @@ class TestSplitScoring:
         for w in weights.values():
             assert 0.0 <= w <= 1.0
             assert math.isfinite(w)
+
+
+class TestComputeWeightsDetailed:
+    """Tests for compute_weights_detailed returning component breakdowns."""
+
+    def test_returns_breakdowns_for_all_miners(self) -> None:
+        scorer = MinerScorer()
+        for uid in range(3):
+            m = scorer.get_or_create(uid, f"h{uid}")
+            m.record_query(correct=True, latency=0.1 * (uid + 1), proof_submitted=True)
+            m.record_health_check(responded=True)
+
+        weights, breakdowns = scorer.compute_weights_detailed(is_active_epoch=True)
+        assert len(weights) == 3
+        assert len(breakdowns) == 3
+        assert sum(weights.values()) == pytest.approx(1.0)
+
+    def test_breakdown_contains_expected_keys(self) -> None:
+        scorer = MinerScorer()
+        m = scorer.get_or_create(0, "h0")
+        m.record_query(correct=True, latency=0.1, proof_submitted=True)
+        m.record_health_check(responded=True)
+
+        _, breakdowns = scorer.compute_weights_detailed(is_active_epoch=True)
+        bd = breakdowns[0]
+        expected_keys = {
+            "accuracy", "speed", "coverage", "uptime",
+            "sports_score", "attest_validity", "attest_speed",
+            "attestation_score", "raw_score",
+            "queries_total", "queries_correct",
+            "attestations_total", "attestations_valid",
+            "health_checks_total", "health_checks_responded",
+            "consecutive_epochs",
+        }
+        assert expected_keys.issubset(bd.keys())
+
+    def test_breakdown_values_match_metrics(self) -> None:
+        scorer = MinerScorer()
+        m = scorer.get_or_create(0, "h0")
+        m.record_query(correct=True, latency=0.1, proof_submitted=True)
+        m.record_query(correct=False, latency=0.2, proof_submitted=False)
+        m.record_health_check(responded=True)
+        m.record_health_check(responded=False)
+
+        _, breakdowns = scorer.compute_weights_detailed(is_active_epoch=True)
+        bd = breakdowns[0]
+        assert bd["accuracy"] == pytest.approx(0.5)
+        assert bd["coverage"] == pytest.approx(0.5)
+        assert bd["uptime"] == pytest.approx(0.5)
+        assert bd["queries_total"] == 2
+        assert bd["queries_correct"] == 1
+        assert bd["health_checks_total"] == 2
+        assert bd["health_checks_responded"] == 1
+
+    def test_attestation_breakdown_populated(self) -> None:
+        scorer = MinerScorer()
+        m = scorer.get_or_create(0, "h0")
+        m.record_query(correct=True, latency=0.1, proof_submitted=True)
+        m.record_attestation(latency=30.0, proof_valid=True)
+        m.record_attestation(latency=40.0, proof_valid=False)
+        m.record_health_check(responded=True)
+
+        _, breakdowns = scorer.compute_weights_detailed(is_active_epoch=True)
+        bd = breakdowns[0]
+        assert bd["attest_validity"] == pytest.approx(0.5)
+        assert bd["attestations_total"] == 2
+        assert bd["attestations_valid"] == 1
+        assert bd["attestation_score"] > 0.0
+
+    def test_empty_epoch_breakdowns(self) -> None:
+        scorer = MinerScorer()
+        m = scorer.get_or_create(0, "h0")
+        m.record_health_check(responded=True)
+        m.consecutive_epochs = 5
+
+        weights, breakdowns = scorer.compute_weights_detailed(is_active_epoch=False)
+        bd = breakdowns[0]
+        assert bd["uptime"] == pytest.approx(1.0)
+        assert bd["consecutive_epochs"] == 5
+        assert "history" in bd
+        assert bd["sports_score"] == 0.0
+
+    def test_empty_scorer_returns_empty(self) -> None:
+        scorer = MinerScorer()
+        weights, breakdowns = scorer.compute_weights_detailed(is_active_epoch=True)
+        assert weights == {}
+        assert breakdowns == {}
+
+    def test_weights_match_between_detailed_and_regular(self) -> None:
+        """compute_weights and compute_weights_detailed should produce identical weights."""
+        scorer = MinerScorer()
+        for uid in range(5):
+            m = scorer.get_or_create(uid, f"h{uid}")
+            m.record_query(correct=uid % 2 == 0, latency=0.1 * (uid + 1), proof_submitted=True)
+            m.record_attestation(latency=30.0 + uid * 10, proof_valid=uid < 3)
+            m.record_health_check(responded=True)
+
+        weights_detailed, _ = scorer.compute_weights_detailed(is_active_epoch=True)
+        # compute_weights internally calls compute_weights_detailed now
+        weights_regular = scorer.compute_weights(is_active_epoch=True)
+        assert weights_detailed == weights_regular
