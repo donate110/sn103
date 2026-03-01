@@ -467,18 +467,18 @@ export default function AdminDashboard() {
               <table className="w-full text-sm min-w-[900px]">
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
-                    <th className="px-2 sm:px-4 py-3 text-left font-medium">UID</th>
-                    <th className="px-2 sm:px-4 py-3 text-left font-medium">Name</th>
-                    <th className="px-2 sm:px-4 py-3 text-left font-medium">IP</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Stake</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium">VTrust</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Incentive</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Emission</th>
-                    <th className="px-2 sm:px-4 py-3 text-left font-medium">Status</th>
-                    <th className="px-2 sm:px-4 py-3 text-left font-medium">Version</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Shares</th>
-                    <th className="px-2 sm:px-4 py-3 text-center font-medium">Chain</th>
-                    <th className="px-2 sm:px-4 py-3 text-center font-medium">BT</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Unique identifier on the subnet">UID</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Delegate name or hotkey prefix">Name</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Axon IP address and port registered on-chain">IP</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Total alpha staked on this validator (alpha TAO)">Stake</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Validator trust — consensus agreement with other validators on miner weights">VTrust</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Fraction of miner-side emission earned — typically 0 for validators who earn via dividends instead">Incentive</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="TAO earned per day from subnet emission">Emission</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Health check result — Healthy if /health responds OK">Status</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Software version reported by /health endpoint">Version</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Shamir key shares held for signal encryption">Shares</th>
+                    <th className="px-2 sm:px-4 py-3 text-center font-medium" title="Connected to Base chain for settlement">Chain</th>
+                    <th className="px-2 sm:px-4 py-3 text-center font-medium" title="Connected to Bittensor network">BT</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -553,17 +553,17 @@ export default function AdminDashboard() {
               <table className="w-full text-sm min-w-[800px]">
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
-                    <th className="px-2 sm:px-4 py-3 text-left font-medium">UID</th>
-                    <th className="px-2 sm:px-4 py-3 text-left font-medium">Name</th>
-                    <th className="px-2 sm:px-4 py-3 text-left font-medium">IP</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Stake</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Incentive</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Emission</th>
-                    <th className="px-2 sm:px-4 py-3 text-left font-medium">Status</th>
-                    <th className="px-2 sm:px-4 py-3 text-left font-medium">Version</th>
-                    <th className="px-2 sm:px-4 py-3 text-center font-medium">Odds</th>
-                    <th className="px-2 sm:px-4 py-3 text-center font-medium">BT</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium">Uptime</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Unique identifier on the subnet">UID</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Delegate name or hotkey prefix">Name</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Axon IP address and port registered on-chain">IP</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Total alpha staked on this miner (alpha TAO)">Stake</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Fraction of miner-side emission earned based on validator weight consensus">Incentive</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="TAO earned per day from subnet emission">Emission</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Health check result — Healthy if /health responds OK">Status</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Software version reported by /health endpoint">Version</th>
+                    <th className="px-2 sm:px-4 py-3 text-center font-medium" title="Connected to The Odds API for live sports data">Odds</th>
+                    <th className="px-2 sm:px-4 py-3 text-center font-medium" title="Connected to Bittensor network">BT</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Time since miner process started">Uptime</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
