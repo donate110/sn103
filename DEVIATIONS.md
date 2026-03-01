@@ -1,6 +1,7 @@
 # Deviations from Whitepaper
 
 Append-only log. Each entry documents where implementation diverges from `docs/whitepaper.md`.
+See the whitepaper for design intent.
 
 ---
 
