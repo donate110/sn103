@@ -1100,8 +1100,10 @@ def create_app(
             except Exception as e:
                 log.warning("chain_health_check_failed", error=str(e))
 
+        from djinn_validator import __version__
         return HealthResponse(
             status="ok",
+            version=__version__,
             uid=neuron.uid if neuron else None,
             shares_held=share_store.count,
             pending_outcomes=len(outcome_attestor.get_pending_signals()),

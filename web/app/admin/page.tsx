@@ -2254,7 +2254,7 @@ async function fetchValidatorHealth(): Promise<ValidatorHealth[]> {
     const results = await Promise.allSettled(
       validators.map(async (v) => {
         const res = await fetch(`/api/validators/${v.uid}/health`, {
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(5000),
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
@@ -2300,7 +2300,7 @@ async function fetchNetworkActivity(
       validators.map(async (v) => {
         try {
           const res = await fetch(`/api/validators/${v.uid}/v1/telemetry?limit=500`, {
-            signal: AbortSignal.timeout(15000),
+            signal: AbortSignal.timeout(5000),
           });
           if (!res.ok) {
             status[v.uid] = "error";
@@ -2355,7 +2355,7 @@ async function fetchAttestationData(): Promise<AttestationEntry[]> {
 
     const v = validators[0];
     const res = await fetch(`/api/validators/${v.uid}/v1/admin/attestations?limit=50`, {
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return [];
     const data = await res.json();
@@ -2388,7 +2388,7 @@ async function fetchMinerHealth(): Promise<MinerHealth[]> {
     const results = await Promise.allSettled(
       miners.map(async (m) => {
         const res = await fetch(`/api/miners/${m.uid}/health`, {
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(5000),
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
@@ -2438,7 +2438,7 @@ async function fetchTelemetry(): Promise<TelemetryEvent[]> {
 
     const results = await Promise.allSettled(
       fetches.map(async (f) => {
-        const res = await fetch(f.url, { signal: AbortSignal.timeout(8000) });
+        const res = await fetch(f.url, { signal: AbortSignal.timeout(5000) });
         if (!res.ok) return [];
         const data = await res.json();
         return ((data.events || []) as Array<{ id: number; timestamp: number; category: string; summary: string; details: Record<string, unknown> }>).map(
