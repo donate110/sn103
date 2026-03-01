@@ -1063,7 +1063,7 @@ function WeightSetDetail({ event }: { event: NetworkEvent }) {
                     return (
                       <tr key={i} className={hasActivity ? "bg-amber-100/30" : ""}>
                         <td className="px-2 py-1 font-mono text-slate-700">{formatDetailValue(m.uid)}</td>
-                        <td className="px-2 py-1 font-mono text-right text-slate-700">{formatDetailValue(m.weight)}</td>
+                        <td className="px-2 py-1 font-mono text-right text-slate-700">{fmtWeight(m.weight)}</td>
                         <td className="px-2 py-1 font-mono text-right text-slate-700">{fmtPct(m.accuracy)}</td>
                         <td className="px-2 py-1 font-mono text-right text-slate-700">{fmtPct(m.speed)}</td>
                         <td className="px-2 py-1 font-mono text-right text-slate-700">{fmtPct(m.coverage)}</td>
@@ -1098,6 +1098,19 @@ function fmtPct(v: unknown): string {
   const n = Number(v);
   if (!n || isNaN(n)) return "-";
   return `${(n * 100).toFixed(1)}%`;
+}
+
+/** Format a weight value. Shows "1/N" when the reciprocal is a clean integer. */
+function fmtWeight(v: unknown): string {
+  const n = Number(v);
+  if (!n || isNaN(n)) return "-";
+  const recip = 1 / n;
+  const rounded = Math.round(recip);
+  // If reciprocal is close to an integer (within 1%), show as fraction
+  if (rounded >= 2 && Math.abs(recip - rounded) / rounded < 0.01) {
+    return `1/${rounded}`;
+  }
+  return formatDetailValue(v);
 }
 
 function EventDetailPanel({ event }: { event: NetworkEvent }) {
