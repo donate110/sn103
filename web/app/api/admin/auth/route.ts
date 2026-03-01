@@ -8,7 +8,7 @@ import { createToken, verifyToken } from "@/lib/admin-auth";
  */
 export async function GET(request: NextRequest) {
   const token = request.cookies.get("djinn_admin_token")?.value;
-  if (token && verifyToken(token)) {
+  if (token && (await verifyToken(token))) {
     return NextResponse.json({ authenticated: true });
   }
   return NextResponse.json({ authenticated: false }, { status: 401 });
@@ -21,8 +21,6 @@ export async function GET(request: NextRequest) {
  * Returns an HMAC-signed session token stored as an httpOnly cookie.
  */
 export async function POST(request: NextRequest) {
-  const { timingSafeEqual } = await import("crypto");
-
   const expected = process.env.ADMIN_PASSWORD;
   if (!expected) {
     return NextResponse.json(
@@ -41,12 +39,12 @@ export async function POST(request: NextRequest) {
   if (
     !body.password ||
     body.password.length !== expected.length ||
-    !timingSafeEqual(Buffer.from(body.password), Buffer.from(expected))
+    !constantTimeEqual(body.password, expected)
   ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const token = createToken();
+  const token = await createToken();
 
   const response = NextResponse.json({ ok: true });
   response.cookies.set("djinn_admin_token", token, {
@@ -58,4 +56,16 @@ export async function POST(request: NextRequest) {
   });
 
   return response;
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) {
+    diff |= ab[i] ^ bb[i];
+  }
+  return diff === 0;
 }

@@ -12,7 +12,7 @@ const GITHUB_REPO = process.env.ERROR_REPORT_REPO || "djinn-inc/error-reports";
 const GITHUB_TOKEN = process.env.GITHUB_ERROR_TOKEN || "";
 
 export async function GET(request: NextRequest) {
-  if (!verifyAdminRequest(request)) {
+  if (!(await verifyAdminRequest(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { storeError } from "@/lib/error-store";
 
 /**
  * POST /api/report-error
  *
  * Accepts error reports from the web client. Two actions:
- * 1. Stores in a local JSON-lines file for admin dashboard viewing
+ * 1. Stores in an in-memory ring buffer for admin dashboard viewing
  * 2. Creates a GitHub issue in a private repo (if GITHUB_ERROR_TOKEN is set)
  *
  * No authentication required — users don't need a GitHub account.
@@ -107,18 +108,8 @@ export async function POST(request: NextRequest) {
     ip: ip.slice(0, 45), // truncated for privacy
   };
 
-  // 1. Store locally for admin dashboard
-  try {
-    const { appendFile, mkdir } = await import("fs/promises");
-    const dir = process.env.ERROR_REPORT_DIR || "/tmp/djinn-error-reports";
-    await mkdir(dir, { recursive: true });
-    await appendFile(
-      `${dir}/errors.jsonl`,
-      JSON.stringify(report) + "\n",
-    );
-  } catch (err) {
-    console.error("[report-error] Failed to write local log:", err);
-  }
+  // 1. Store in memory for admin dashboard
+  storeError(report);
 
   // 2. Create GitHub issue (non-blocking)
   if (GITHUB_TOKEN) {
