@@ -503,7 +503,7 @@ export default function AdminDashboard() {
                       <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700" title={stakeTooltip(v.alphaStake, v.taoStake)}>{formatStake(v.stake)}</td>
                       <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700">{formatVTrust(v.validatorTrust)}</td>
                       <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700"><SmallValue raw={v.incentive} formatter={formatU16Pct} /></td>
-                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700"><SmallValue raw={v.emission} formatter={formatEmission} /></td>
+                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700">{formatEmission(v.emission)}</td>
                       <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
                         {v.error ? (
                           <span className="inline-flex items-center gap-1 text-red-600">
@@ -587,7 +587,7 @@ export default function AdminDashboard() {
                       <td className="px-2 sm:px-4 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{m.ip}:{m.port}</td>
                       <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700" title={stakeTooltip(m.alphaStake, m.taoStake)}>{formatStake(m.stake)}</td>
                       <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700"><SmallValue raw={m.incentive} formatter={formatU16Pct} /></td>
-                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700"><SmallValue raw={m.emission} formatter={formatEmission} /></td>
+                      <td className="px-2 sm:px-4 py-2 text-right font-mono text-xs text-slate-700">{formatEmission(m.emission)}</td>
                       <td className="px-2 sm:px-4 py-2 whitespace-nowrap">
                         {m.error ? (
                           <span className="inline-flex items-center gap-1 text-red-600">
