@@ -526,3 +526,118 @@ class TestComputeWeightsDetailed:
         # compute_weights internally calls compute_weights_detailed now
         weights_regular = scorer.compute_weights(is_active_epoch=True)
         assert weights_detailed == weights_regular
+
+
+class TestAttestationWeightFairness:
+    """Tests that attestation work is properly rewarded — miners doing
+    attestations must get more weight than idle miners."""
+
+    def test_no_free_attestation_speed_credit(self) -> None:
+        """Miners with 0 attestations must get 0 attestation score, not
+        free speed credit from the median fallback."""
+        scorer = MinerScorer()
+        # Miner 0: does attestation work
+        m0 = scorer.get_or_create(0, "worker")
+        m0.record_attestation(latency=30.0, proof_valid=True)
+        m0.record_health_check(responded=True)
+
+        # Miner 1: no attestation work at all
+        m1 = scorer.get_or_create(1, "idle")
+        m1.record_health_check(responded=True)
+
+        miners = list(scorer._miners.values())
+        scores = scorer._compute_attestation_scores(miners)
+        assert scores[0] > 0.0, "Working miner must have positive attestation score"
+        assert scores[1] == 0.0, "Idle miner must have 0 attestation score"
+
+    def test_attestation_miner_gets_more_weight_active_epoch(self) -> None:
+        """In active epochs, the only miner doing attestations should get
+        more weight than miners that don't."""
+        scorer = MinerScorer()
+        # All miners: same sports performance + uptime
+        for uid in range(3):
+            m = scorer.get_or_create(uid, f"h{uid}")
+            m.record_query(correct=True, latency=0.5, proof_submitted=True)
+            m.record_health_check(responded=True)
+
+        # Only miner 0 does attestation
+        scorer._miners[0].record_attestation(latency=30.0, proof_valid=True)
+
+        weights = scorer.compute_weights(is_active_epoch=True)
+        assert weights[0] > weights[1], "Attesting miner must outweigh non-attesting"
+        assert weights[0] > weights[2], "Attesting miner must outweigh non-attesting"
+        # Non-attesting miners should be equal
+        assert weights[1] == pytest.approx(weights[2])
+
+    def test_attestation_miner_gets_more_weight_empty_epoch(self) -> None:
+        """In empty epochs (no sports signals), attestation work must still
+        differentiate miners instead of being ignored."""
+        scorer = MinerScorer()
+        # Both miners: same uptime and history
+        for uid in range(2):
+            m = scorer.get_or_create(uid, f"h{uid}")
+            m.record_health_check(responded=True)
+            m.consecutive_epochs = 5
+
+        # Only miner 0 does attestation
+        scorer._miners[0].record_attestation(latency=30.0, proof_valid=True)
+
+        weights = scorer.compute_weights(is_active_epoch=False)
+        assert weights[0] > weights[1], (
+            "Attesting miner must get more weight in empty epochs"
+        )
+
+    def test_empty_epoch_no_attestation_unchanged(self) -> None:
+        """Empty epochs without any attestation data use original 50/50 formula."""
+        scorer = MinerScorer()
+        m0 = scorer.get_or_create(0, "h0")
+        m0.record_health_check(responded=True)
+        m0.consecutive_epochs = 10
+
+        m1 = scorer.get_or_create(1, "h1")
+        m1.record_health_check(responded=True)
+        m1.consecutive_epochs = 1
+
+        weights = scorer.compute_weights(is_active_epoch=False)
+        # Veteran should still beat newcomer (history matters)
+        assert weights[0] > weights[1]
+        assert sum(weights.values()) == pytest.approx(1.0)
+
+    def test_empty_epoch_attestation_breakdowns_populated(self) -> None:
+        """Empty epoch breakdowns should show attestation scores when data exists."""
+        scorer = MinerScorer()
+        m = scorer.get_or_create(0, "h0")
+        m.record_health_check(responded=True)
+        m.record_attestation(latency=30.0, proof_valid=True)
+        m.consecutive_epochs = 3
+
+        _, breakdowns = scorer.compute_weights_detailed(is_active_epoch=False)
+        bd = breakdowns[0]
+        assert bd["attest_validity"] == pytest.approx(1.0)
+        assert bd["attestation_score"] > 0.0
+
+    def test_only_attester_among_many_gets_differentiated(self) -> None:
+        """Reproduces the original bug: 1 attesting miner among many idle
+        miners should NOT get equal weight."""
+        scorer = MinerScorer()
+        # 10 miners, all with identical uptime
+        for uid in range(10):
+            m = scorer.get_or_create(uid, f"h{uid}")
+            m.record_health_check(responded=True)
+            m.consecutive_epochs = 3
+
+        # Only miner 0 does attestations
+        scorer._miners[0].record_attestation(latency=30.0, proof_valid=True)
+        scorer._miners[0].record_attestation(latency=35.0, proof_valid=True)
+
+        weights_active = scorer.compute_weights(is_active_epoch=True)
+        weights_empty = scorer.compute_weights(is_active_epoch=False)
+
+        # In both modes, miner 0 must get more weight
+        for uid in range(1, 10):
+            assert weights_active[0] > weights_active[uid], (
+                f"Active: attester (uid=0) must beat idle (uid={uid})"
+            )
+            assert weights_empty[0] > weights_empty[uid], (
+                f"Empty: attester (uid=0) must beat idle (uid={uid})"
+            )

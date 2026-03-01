@@ -11,12 +11,17 @@ Attestation challenge weights (web attestation via TLSNotary, mandatory):
   - Speed:          40%  (Attestation latency, normalized independently)
 
 Blending: final_score = (1 - W_ATTESTATION) * sports + W_ATTESTATION * attestation
-Default W_ATTESTATION = 0.20 — tuned so attestation miners recoup the ~$0.02
-burn cost in equilibrium via emission share.
+Default W_ATTESTATION = 0.30 — raised from 0.20 for early subnet where sports
+data is sparse and attestation is the primary differentiator.
 
 Empty epoch weights (no active signals):
+  Without attestation data:
   - Uptime:  50%
   - History: 50%  (Consecutive participation, log-scaled)
+  With attestation data:
+  - Uptime:      35%
+  - History:     30%
+  - Attestation: 35%  (Same attestation scoring as active epochs)
 """
 
 from __future__ import annotations
@@ -135,13 +140,18 @@ class MinerScorer:
     W_ATTEST_SPEED = 0.40     # Normalized attestation latency
 
     # ── Blend weight: how much attestation contributes to final score ──
-    # 20% attestation / 80% sports. Tuned so miners doing attestation work
-    # recoup the ~$0.02 alpha burn in emission share at equilibrium.
-    W_ATTESTATION_BLEND = 0.20
+    # 30% attestation / 70% sports. Raised from 0.20 for early subnet where
+    # sports data is sparse and attestation is the primary differentiator.
+    W_ATTESTATION_BLEND = 0.30
 
-    # ── Empty epoch weights ──
+    # ── Empty epoch weights (no attestation data) ──
     W_EMPTY_UPTIME = 0.50
     W_EMPTY_HISTORY = 0.50
+
+    # ── Empty epoch weights (with attestation data) ──
+    W_EMPTY_UPTIME_A = 0.35
+    W_EMPTY_HISTORY_A = 0.30
+    W_EMPTY_ATTESTATION = 0.35
 
     def __init__(self, attestation_blend: float | None = None) -> None:
         self._miners: dict[int, MinerMetrics] = {}
@@ -256,17 +266,24 @@ class MinerScorer:
         return self._normalize(raw), breakdowns
 
     def _compute_sports_scores(self, miners: list[MinerMetrics]) -> dict[int, float]:
-        """Compute per-miner sports scores (unnormalized 0-1 range)."""
+        """Compute per-miner sports scores (unnormalized 0-1 range).
+
+        Miners with no sports queries get 0 — no free speed credit for
+        miners that haven't been challenged or haven't responded.
+        """
         speed_scores = self._normalize_speed(miners, use_attestation=False)
 
         scores: dict[int, float] = {}
         for m in miners:
-            scores[m.uid] = (
-                self.W_ACCURACY * m.accuracy_score()
-                + self.W_SPEED * speed_scores.get(m.uid, 0.0)
-                + self.W_COVERAGE * m.coverage_score()
-                + self.W_UPTIME * m.uptime_score()
-            )
+            if m.queries_total == 0:
+                scores[m.uid] = self.W_UPTIME * m.uptime_score()
+            else:
+                scores[m.uid] = (
+                    self.W_ACCURACY * m.accuracy_score()
+                    + self.W_SPEED * speed_scores.get(m.uid, 0.0)
+                    + self.W_COVERAGE * m.coverage_score()
+                    + self.W_UPTIME * m.uptime_score()
+                )
         return scores
 
     def _compute_attestation_scores(self, miners: list[MinerMetrics]) -> dict[int, float]:
@@ -277,16 +294,20 @@ class MinerScorer:
         - Speed (40%): how fast was the attestation?
 
         TLSNotary is mandatory for attestation (not optional like sports
-        coverage). A miner with no attestation challenges gets 0.
+        coverage). A miner with no attestation challenges gets 0 — no free
+        speed credit for miners that haven't done the work.
         """
         speed_scores = self._normalize_speed(miners, use_attestation=True)
 
         scores: dict[int, float] = {}
         for m in miners:
-            scores[m.uid] = (
-                self.W_ATTEST_VALIDITY * m.attestation_validity_score()
-                + self.W_ATTEST_SPEED * speed_scores.get(m.uid, 0.0)
-            )
+            if m.attestations_total == 0:
+                scores[m.uid] = 0.0
+            else:
+                scores[m.uid] = (
+                    self.W_ATTEST_VALIDITY * m.attestation_validity_score()
+                    + self.W_ATTEST_SPEED * speed_scores.get(m.uid, 0.0)
+                )
         return scores
 
     def _compute_empty_weights(self) -> dict[int, float]:
@@ -299,11 +320,24 @@ class MinerScorer:
         miners = list(self._miners.values())
         max_history = max((m.consecutive_epochs for m in miners), default=1)
 
+        has_attestation_data = any(m.attestations_total > 0 for m in miners)
+        attestation_scores = self._compute_attestation_scores(miners) if has_attestation_data else {}
+
+        attest_speed = self._normalize_speed(miners, use_attestation=True)
+
         raw: dict[int, float] = {}
         breakdowns: dict[int, dict] = {}
         for m in miners:
             history = math.log1p(m.consecutive_epochs) / math.log1p(max_history) if max_history > 0 else 0.0
-            score = self.W_EMPTY_UPTIME * m.uptime_score() + self.W_EMPTY_HISTORY * history
+            attest = attestation_scores.get(m.uid, 0.0)
+            if has_attestation_data:
+                score = (
+                    self.W_EMPTY_UPTIME_A * m.uptime_score()
+                    + self.W_EMPTY_HISTORY_A * history
+                    + self.W_EMPTY_ATTESTATION * attest
+                )
+            else:
+                score = self.W_EMPTY_UPTIME * m.uptime_score() + self.W_EMPTY_HISTORY * history
             raw[m.uid] = score
             breakdowns[m.uid] = {
                 "accuracy": 0.0,
@@ -311,9 +345,9 @@ class MinerScorer:
                 "coverage": 0.0,
                 "uptime": m.uptime_score(),
                 "sports_score": 0.0,
-                "attest_validity": 0.0,
-                "attest_speed": 0.0,
-                "attestation_score": 0.0,
+                "attest_validity": m.attestation_validity_score(),
+                "attest_speed": attest_speed.get(m.uid, 0.0),
+                "attestation_score": attest,
                 "history": round(history, 4),
                 "raw_score": score,
                 "queries_total": m.queries_total,
