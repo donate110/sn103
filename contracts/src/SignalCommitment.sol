@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {Signal, SignalStatus} from "./interfaces/IDjinn.sol";
 
 /// @title SignalCommitment
@@ -10,7 +12,7 @@ import {Signal, SignalStatus} from "./interfaces/IDjinn.sol";
 ///         A Genius commits an encrypted signal with 10 decoy lines (9 decoys + 1 real).
 ///         The real signal content remains hidden inside the AES-256-GCM encrypted blob.
 /// @dev Signal IDs are externally generated and must be globally unique.
-contract SignalCommitment is Ownable, Pausable {
+contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable {
     // ─── Types
     // ──────────────────────────────────────────────────────────
 
@@ -41,6 +43,9 @@ contract SignalCommitment is Ownable, Pausable {
     /// @dev address => whether it can call updateStatus
     mapping(address => bool) public authorizedCallers;
 
+    /// @notice Address authorized to pause this contract in emergencies
+    address public pauser;
+
     // ─── Events
     // ─────────────────────────────────────────────────────────
 
@@ -63,6 +68,9 @@ contract SignalCommitment is Ownable, Pausable {
 
     /// @notice Emitted when an authorized caller is added or removed
     event AuthorizedCallerSet(address indexed caller, bool authorized);
+
+    /// @notice Emitted when the pauser address is updated
+    event PauserUpdated(address indexed newPauser);
 
     // ─── Errors
     // ─────────────────────────────────────────────────────────
@@ -119,6 +127,9 @@ contract SignalCommitment is Ownable, Pausable {
     /// @notice minNotional must be <= maxNotional when maxNotional is set
     error InvalidNotionalRange(uint256 minNotional, uint256 maxNotional);
 
+    /// @notice Caller is not the pauser or the owner
+    error NotPauserOrOwner(address caller);
+
     /// @notice Maximum encrypted blob size (64 KB)
     uint256 public constant MAX_BLOB_SIZE = 65536;
 
@@ -152,12 +163,20 @@ contract SignalCommitment is Ownable, Pausable {
         }
     }
 
-    // ─── Constructor
+    // ─── Constructor / Initializer
     // ────────────────────────────────────────────────────
 
-    /// @notice Deploys the SignalCommitment contract
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /// @notice Initializes the SignalCommitment contract
     /// @param initialOwner Address that will own this contract and manage authorized callers
-    constructor(address initialOwner) Ownable(initialOwner) {}
+    function initialize(address initialOwner) public initializer {
+        __Ownable_init(initialOwner);
+        __Pausable_init();
+    }
 
     // ─── External Functions
     // ─────────────────────────────────────────────
@@ -316,8 +335,16 @@ contract SignalCommitment is Ownable, Pausable {
     // ─── Emergency pause
     // ─────────────────────────────────────────────
 
+    /// @notice Set the emergency pauser address
+    /// @param _pauser New pauser address (address(0) to disable)
+    function setPauser(address _pauser) external onlyOwner {
+        pauser = _pauser;
+        emit PauserUpdated(_pauser);
+    }
+
     /// @notice Pause signal commitment
-    function pause() external onlyOwner {
+    function pause() external {
+        if (msg.sender != pauser && msg.sender != owner()) revert NotPauserOrOwner(msg.sender);
         _pause();
     }
 
@@ -325,4 +352,7 @@ contract SignalCommitment is Ownable, Pausable {
     function unpause() external onlyOwner {
         _unpause();
     }
+
+    /// @dev Required by UUPSUpgradeable — restricts upgrades to the owner
+    function _authorizeUpgrade(address) internal override onlyOwner {}
 }

@@ -1,43 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {Purchase, Outcome, Signal, AccountState} from "./interfaces/IDjinn.sol";
-
-/// @notice Minimal interface for the Escrow contract
-interface IEscrowForAudit {
-    function getPurchase(uint256 purchaseId) external view returns (Purchase memory);
-    function feePool(address genius, address idiot, uint256 cycle) external view returns (uint256);
-    function refund(address genius, address idiot, uint256 cycle, uint256 amount) external;
-}
-
-/// @notice Minimal interface for the Collateral contract
-interface ICollateralForAudit {
-    function slash(address genius, uint256 amount, address recipient) external returns (uint256 slashAmount);
-    function release(uint256 signalId, address genius, uint256 amount) external;
-    function getSignalLock(address genius, uint256 signalId) external view returns (uint256);
-}
-
-/// @notice Minimal interface for the CreditLedger contract
-interface ICreditLedgerForAudit {
-    function mint(address to, uint256 amount) external;
-}
-
-/// @notice Minimal interface for the Account contract
-interface IAccountForAudit {
-    function isAuditReady(address genius, address idiot) external view returns (bool);
-    function getAccountState(address genius, address idiot) external view returns (AccountState memory);
-    function settleAudit(address genius, address idiot) external;
-    function getCurrentCycle(address genius, address idiot) external view returns (uint256);
-    function getOutcome(address genius, address idiot, uint256 purchaseId) external view returns (Outcome);
-}
-
-/// @notice Minimal interface for the SignalCommitment contract
-interface ISignalCommitmentForAudit {
-    function getSignal(uint256 signalId) external view returns (Signal memory);
-}
+import {IEscrow, ICollateral, ICreditLedger, IAccount, ISignalCommitment} from "./interfaces/IProtocol.sol";
 
 /// @notice Result of an audit settlement
 struct AuditResult {
@@ -53,7 +23,7 @@ struct AuditResult {
 ///         Computes the Quality Score per the whitepaper formula, distributes damages
 ///         across Tranche A (USDC refund) and Tranche B (Credits), collects a 0.5%
 ///         protocol fee on total notional, and releases remaining collateral locks.
-contract Audit is Ownable, Pausable, ReentrancyGuard {
+contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
     // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------
@@ -77,11 +47,11 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
     // -------------------------------------------------------------------------
 
     /// @notice Protocol contract references
-    IEscrowForAudit public escrow;
-    ICollateralForAudit public collateral;
-    ICreditLedgerForAudit public creditLedger;
-    IAccountForAudit public account;
-    ISignalCommitmentForAudit public signalCommitment;
+    IEscrow public escrow;
+    ICollateral public collateral;
+    ICreditLedger public creditLedger;
+    IAccount public account;
+    ISignalCommitment public signalCommitment;
 
     /// @notice Protocol treasury address that receives the 0.5% fee
     address public protocolTreasury;
@@ -91,6 +61,9 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
 
     /// @notice Stored audit results: genius -> idiot -> cycle -> AuditResult
     mapping(address => mapping(address => mapping(uint256 => AuditResult))) public auditResults;
+
+    /// @notice Address authorized to pause this contract in emergencies
+    address public pauser;
 
     // -------------------------------------------------------------------------
     // Events
@@ -121,6 +94,9 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
     /// @notice Emitted when the protocol treasury address is updated
     event TreasuryUpdated(address newTreasury);
 
+    /// @notice Emitted when the pauser address is updated
+    event PauserUpdated(address indexed newPauser);
+
     // -------------------------------------------------------------------------
     // Errors
     // -------------------------------------------------------------------------
@@ -135,13 +111,23 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
     error OutcomesNotFinalized(address genius, address idiot);
     error CallerNotOutcomeVoting(address caller);
     error QualityScoreOutOfBounds(int256 score, int256 maxAbsolute);
+    error NotPauserOrOwner(address caller);
 
     // -------------------------------------------------------------------------
     // Constructor
     // -------------------------------------------------------------------------
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /// @notice Initializes the Audit contract (replaces constructor for proxy pattern)
     /// @param _owner Address that will own this contract
-    constructor(address _owner) Ownable(_owner) {}
+    function initialize(address _owner) public initializer {
+        __Ownable_init(_owner);
+        __Pausable_init();
+    }
 
     // -------------------------------------------------------------------------
     // Admin -- set protocol contract addresses
@@ -151,7 +137,7 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
     /// @param _addr Escrow contract address
     function setEscrow(address _addr) external onlyOwner {
         if (_addr == address(0)) revert ZeroAddress();
-        escrow = IEscrowForAudit(_addr);
+        escrow = IEscrow(_addr);
         emit ContractAddressUpdated("Escrow", _addr);
     }
 
@@ -159,7 +145,7 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
     /// @param _addr Collateral contract address
     function setCollateral(address _addr) external onlyOwner {
         if (_addr == address(0)) revert ZeroAddress();
-        collateral = ICollateralForAudit(_addr);
+        collateral = ICollateral(_addr);
         emit ContractAddressUpdated("Collateral", _addr);
     }
 
@@ -167,7 +153,7 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
     /// @param _addr CreditLedger contract address
     function setCreditLedger(address _addr) external onlyOwner {
         if (_addr == address(0)) revert ZeroAddress();
-        creditLedger = ICreditLedgerForAudit(_addr);
+        creditLedger = ICreditLedger(_addr);
         emit ContractAddressUpdated("CreditLedger", _addr);
     }
 
@@ -175,7 +161,7 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
     /// @param _addr Account contract address
     function setAccount(address _addr) external onlyOwner {
         if (_addr == address(0)) revert ZeroAddress();
-        account = IAccountForAudit(_addr);
+        account = IAccount(_addr);
         emit ContractAddressUpdated("Account", _addr);
     }
 
@@ -183,7 +169,7 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
     /// @param _addr SignalCommitment contract address
     function setSignalCommitment(address _addr) external onlyOwner {
         if (_addr == address(0)) revert ZeroAddress();
-        signalCommitment = ISignalCommitmentForAudit(_addr);
+        signalCommitment = ISignalCommitment(_addr);
         emit ContractAddressUpdated("SignalCommitment", _addr);
     }
 
@@ -398,6 +384,51 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
     }
 
     // -------------------------------------------------------------------------
+    // Owner-only emergency settlement
+    // -------------------------------------------------------------------------
+
+    /// @notice Owner-only emergency settlement for stuck/orphaned cycles.
+    ///         Always settles as early exit (damages in Credits only, not USDC)
+    ///         regardless of signal count. Use this when a cycle cannot reach
+    ///         10 signals and needs to be cleaned up.
+    /// @param genius The Genius address
+    /// @param idiot The Idiot address
+    /// @param qualityScore The owner-determined quality score
+    function forceSettle(address genius, address idiot, int256 qualityScore)
+        external
+        onlyOwner
+        whenNotPaused
+        nonReentrant
+    {
+        if (qualityScore > MAX_QUALITY_SCORE || qualityScore < -MAX_QUALITY_SCORE) {
+            revert QualityScoreOutOfBounds(qualityScore, MAX_QUALITY_SCORE);
+        }
+        _validateDependencies();
+
+        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        if (auditResults[genius][idiot][cycle].timestamp != 0) {
+            revert AlreadySettled(genius, idiot, cycle);
+        }
+
+        AccountState memory state = account.getAccountState(genius, idiot);
+        uint256[] memory purchaseIds = state.purchaseIds;
+        if (purchaseIds.length == 0) {
+            revert NoPurchasesInCycle(genius, idiot, cycle);
+        }
+
+        // Aggregate without void filtering (outcomes may be incomplete)
+        uint256 totalNotional;
+        uint256 totalUsdcFeesPaid;
+        for (uint256 i; i < purchaseIds.length; ++i) {
+            Purchase memory p = escrow.getPurchase(purchaseIds[i]);
+            totalNotional += p.notional;
+            totalUsdcFeesPaid += p.usdcPaid;
+        }
+
+        _settleCommon(genius, idiot, cycle, qualityScore, true, totalNotional, totalUsdcFeesPaid, purchaseIds);
+    }
+
+    // -------------------------------------------------------------------------
     // Internal settlement logic
     // -------------------------------------------------------------------------
 
@@ -485,18 +516,45 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
         }
     }
 
-    /// @dev Core settlement logic shared by trigger/settle and earlyExit.
-    /// @param genius The Genius address
-    /// @param idiot The Idiot address
-    /// @param cycle The current audit cycle
-    /// @param score The computed Quality Score
-    /// @param isEarlyExit If true, all damages paid as Credits only
+    /// @dev On-chain settlement: uses _aggregatePurchases (filters voids) then shared logic.
     function _settle(address genius, address idiot, uint256 cycle, int256 score, bool isEarlyExit) internal {
         AccountState memory state = account.getAccountState(genius, idiot);
         uint256[] memory purchaseIds = state.purchaseIds;
-
         (uint256 totalNotional, uint256 totalUsdcFeesPaid) = _aggregatePurchases(genius, idiot, purchaseIds);
+        _settleCommon(genius, idiot, cycle, score, isEarlyExit, totalNotional, totalUsdcFeesPaid, purchaseIds);
+    }
 
+    /// @dev Voted settlement: aggregates all purchases without void filtering
+    ///      (individual outcomes are never written on-chain in the voted path).
+    function _settleVoted(address genius, address idiot, uint256 cycle, int256 score, bool isEarlyExit) internal {
+        AccountState memory state = account.getAccountState(genius, idiot);
+        uint256[] memory purchaseIds = state.purchaseIds;
+        if (purchaseIds.length == 0) {
+            revert NoPurchasesInCycle(genius, idiot, cycle);
+        }
+        uint256 totalNotional;
+        uint256 totalUsdcFeesPaid;
+        for (uint256 i; i < purchaseIds.length; ++i) {
+            Purchase memory p = escrow.getPurchase(purchaseIds[i]);
+            totalNotional += p.notional;
+            totalUsdcFeesPaid += p.usdcPaid;
+        }
+        _settleCommon(genius, idiot, cycle, score, isEarlyExit, totalNotional, totalUsdcFeesPaid, purchaseIds);
+    }
+
+    /// @dev Core settlement logic shared by all settlement paths.
+    ///      Distributes damages, releases collateral locks, charges protocol fee,
+    ///      stores audit result, and advances the cycle.
+    function _settleCommon(
+        address genius,
+        address idiot,
+        uint256 cycle,
+        int256 score,
+        bool isEarlyExit,
+        uint256 totalNotional,
+        uint256 totalUsdcFeesPaid,
+        uint256[] memory purchaseIds
+    ) internal {
         // Protocol fee: 0.5% of total notional
         uint256 protocolFee = (totalNotional * PROTOCOL_FEE_BPS) / BPS_DENOMINATOR;
 
@@ -516,84 +574,10 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
         // If score >= 0 and not early exit: Genius keeps all fees, no damages
 
         // Release signal locks FIRST so freed collateral covers the slashes below.
-        // The locks belong to this cycle's settled signals and should be released
-        // before any slashing to avoid undercollateralizing other active signal locks.
         _releaseSignalLocks(genius, purchaseIds);
 
         // Protocol fee -- slash from genius collateral to treasury.
         // Charged on ALL settlements including early exits to prevent fee dodging.
-        // Record actual slashed amount (may be less if collateral insufficient).
-        if (protocolFee > 0) {
-            protocolFee = collateral.slash(genius, protocolFee, protocolTreasury);
-        }
-
-        // Store audit result
-        auditResults[genius][idiot][cycle] = AuditResult({
-            qualityScore: score,
-            trancheA: trancheA,
-            trancheB: trancheB,
-            protocolFee: protocolFee,
-            timestamp: block.timestamp
-        });
-
-        // Mark account as settled, start new cycle
-        account.settleAudit(genius, idiot);
-
-        if (isEarlyExit) {
-            emit EarlyExitSettled(genius, idiot, cycle, score, trancheB);
-        } else {
-            emit AuditSettled(genius, idiot, cycle, score, trancheA, trancheB, protocolFee);
-        }
-    }
-
-    /// @dev Voted settlement: aggregates all purchases (no void filtering since individual
-    ///      outcomes are never written on-chain in the voted path). The quality score was
-    ///      already computed by validators via MPC and agreed upon through on-chain voting.
-    /// @param genius The Genius address
-    /// @param idiot The Idiot address
-    /// @param cycle The current audit cycle
-    /// @param score The voted quality score
-    /// @param isEarlyExit If true, all damages paid as Credits only
-    function _settleVoted(address genius, address idiot, uint256 cycle, int256 score, bool isEarlyExit) internal {
-        AccountState memory state = account.getAccountState(genius, idiot);
-        uint256[] memory purchaseIds = state.purchaseIds;
-
-        if (purchaseIds.length == 0) {
-            revert NoPurchasesInCycle(genius, idiot, cycle);
-        }
-
-        // Aggregate all purchases — no void filtering (outcomes are off-chain)
-        uint256 totalNotional;
-        uint256 totalUsdcFeesPaid;
-        for (uint256 i; i < purchaseIds.length; ++i) {
-            Purchase memory p = escrow.getPurchase(purchaseIds[i]);
-            totalNotional += p.notional;
-            totalUsdcFeesPaid += p.usdcPaid;
-        }
-
-        // Protocol fee: 0.5% of total notional
-        uint256 protocolFee = (totalNotional * PROTOCOL_FEE_BPS) / BPS_DENOMINATOR;
-
-        uint256 trancheA;
-        uint256 trancheB;
-
-        if (isEarlyExit) {
-            // Early exit: all damages as Credits, no USDC movement
-            if (score < 0) {
-                trancheB = uint256(-score);
-                creditLedger.mint(idiot, trancheB);
-            }
-        } else if (score < 0) {
-            // Standard settlement with negative score
-            (trancheA, trancheB) = _distributeDamages(genius, idiot, cycle, uint256(-score), totalUsdcFeesPaid);
-        }
-
-        // Release signal locks before slashing
-        _releaseSignalLocks(genius, purchaseIds);
-
-        // Protocol fee -- slash from genius collateral to treasury.
-        // Charged on ALL settlements including early exits to prevent fee dodging.
-        // Record actual slashed amount (may be less if collateral insufficient).
         if (protocolFee > 0) {
             protocolFee = collateral.slash(genius, protocolFee, protocolTreasury);
         }
@@ -659,13 +643,29 @@ contract Audit is Ownable, Pausable, ReentrancyGuard {
     // Emergency pause
     // -------------------------------------------------------------------------
 
+    /// @notice Set the emergency pauser address
+    /// @param _pauser New pauser address (address(0) to disable)
+    function setPauser(address _pauser) external onlyOwner {
+        pauser = _pauser;
+        emit PauserUpdated(_pauser);
+    }
+
     /// @notice Pause audit trigger, settlement, and early exit
-    function pause() external onlyOwner {
+    function pause() external {
+        if (msg.sender != pauser && msg.sender != owner()) revert NotPauserOrOwner(msg.sender);
         _pause();
     }
 
     /// @notice Unpause audit trigger, settlement, and early exit
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    /// @dev Owner can authorize upgrades only when all active audit pairs are settled
+    function _authorizeUpgrade(address) internal override onlyOwner {
+        require(
+            address(account) == address(0) || account.activePairCount() == 0,
+            "Audit: active pairs must be settled"
+        );
     }
 }

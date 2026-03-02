@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {AccountState, Outcome} from "./interfaces/IDjinn.sol";
 
 /// @title Account
@@ -10,7 +12,7 @@ import {AccountState, Outcome} from "./interfaces/IDjinn.sol";
 ///         This contract records signal counts, purchase IDs, outcomes, and cycle progression.
 /// @dev The (genius, idiot) pair is the primary key. Each pair progresses through independent
 ///      audit cycles of 10 signals each.
-contract Account is Ownable {
+contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     // ─── Constants
     // ──────────────────────────────────────────────────────
 
@@ -34,6 +36,10 @@ contract Account is Ownable {
 
     /// @dev address => whether it can call mutating functions
     mapping(address => bool) public authorizedCallers;
+
+    /// @notice Count of genius-idiot pairs with an active (unsettled) audit cycle
+    /// @dev Incremented when signalCount goes 0→1; decremented on settleAudit/startNewCycle
+    uint256 public activePairCount;
 
     // ─── Events
     // ─────────────────────────────────────────────────────────
@@ -97,20 +103,24 @@ contract Account is Ownable {
         _;
     }
 
-    // ─── Constructor
+    // ─── Constructor / Initializer
     // ────────────────────────────────────────────────────
 
-    /// @notice Deploys the Account contract
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /// @notice Initializes the Account contract (replaces constructor for proxy pattern)
     /// @param initialOwner Address that will own this contract and manage authorized callers
-    constructor(address initialOwner) Ownable(initialOwner) {}
+    function initialize(address initialOwner) public initializer {
+        __Ownable_init(initialOwner);
+    }
 
     // ─── External Functions
     // ─────────────────────────────────────────────
 
     /// @notice Record a purchase for a Genius-Idiot pair
-    /// @dev Called by the Escrow contract when a purchase happens. Increments signalCount
-    ///      and appends the purchaseId to the current cycle's list. Initializes the account
-    ///      on first interaction.
     /// @param genius The Genius address
     /// @param idiot The Idiot (buyer) address
     /// @param purchaseId The unique purchase identifier
@@ -132,6 +142,11 @@ contract Account is Ownable {
             revert PurchaseAlreadyRecorded(genius, idiot, purchaseId);
         }
 
+        // Track new active pair (first purchase in this cycle)
+        if (acct.signalCount == 0) {
+            activePairCount++;
+        }
+
         _purchaseRecorded[key][purchaseId] = true;
         unchecked {
             acct.signalCount++;
@@ -142,7 +157,6 @@ contract Account is Ownable {
     }
 
     /// @notice Record the outcome of a specific purchase within an account
-    /// @dev Called by the authorized oracle/validator contract after a game settles.
     /// @param genius The Genius address
     /// @param idiot The Idiot (buyer) address
     /// @param purchaseId The purchase to record an outcome for
@@ -174,8 +188,6 @@ contract Account is Ownable {
     }
 
     /// @notice Start a new audit cycle for a Genius-Idiot pair
-    /// @dev Called by the Audit contract after settlement. Increments the cycle counter,
-    ///      resets signalCount to zero, clears purchaseIds, and resets settled to false.
     /// @param genius The Genius address
     /// @param idiot The Idiot (buyer) address
     function startNewCycle(address genius, address idiot) external onlyAuthorized {
@@ -183,6 +195,11 @@ contract Account is Ownable {
 
         bytes32 key = _accountKey(genius, idiot);
         AccountState storage acct = _accounts[key];
+
+        // Decrement active pair count before resetting
+        if (acct.signalCount > 0) {
+            activePairCount--;
+        }
 
         // Clear purchase recorded flags for the current cycle
         uint256 len = acct.purchaseIds.length;
@@ -205,7 +222,6 @@ contract Account is Ownable {
     }
 
     /// @notice Set the settled flag for a Genius-Idiot pair
-    /// @dev Called by the Audit contract during or after settlement.
     /// @param genius The Genius address
     /// @param idiot The Idiot (buyer) address
     /// @param settled Whether the current cycle has been settled
@@ -219,8 +235,6 @@ contract Account is Ownable {
     }
 
     /// @notice Settle an audit for a Genius-Idiot pair: marks as settled and starts a new cycle
-    /// @dev Called by the Audit contract after settlement. Combines setSettled + startNewCycle
-    ///      into a single call for the IAccountForAudit interface.
     /// @param genius The Genius address
     /// @param idiot The Idiot (buyer) address
     function settleAudit(address genius, address idiot) external onlyAuthorized {
@@ -228,6 +242,11 @@ contract Account is Ownable {
 
         bytes32 key = _accountKey(genius, idiot);
         AccountState storage acct = _accounts[key];
+
+        // Decrement active pair count before resetting
+        if (acct.signalCount > 0) {
+            activePairCount--;
+        }
 
         // Mark current cycle as settled
         acct.settled = true;
@@ -255,7 +274,6 @@ contract Account is Ownable {
     }
 
     /// @notice Authorize or deauthorize a contract to call mutating functions
-    /// @dev Only the contract owner can manage authorized callers.
     /// @param caller The address to authorize or deauthorize
     /// @param authorized Whether the address should be authorized
     function setAuthorizedCaller(address caller, bool authorized) external onlyOwner {
@@ -269,14 +287,6 @@ contract Account is Ownable {
     // ─────────────────────────────────────────────────
 
     /// @notice Returns the full account state for a Genius-Idiot pair
-    /// @param genius The Genius address
-    /// @param idiot The Idiot (buyer) address
-    /// @return state The AccountState struct for this pair
-    function getAccount(address genius, address idiot) external view returns (AccountState memory state) {
-        return _accounts[_accountKey(genius, idiot)];
-    }
-
-    /// @notice Returns the full account state for a Genius-Idiot pair (alias for IAccountForAudit)
     /// @param genius The Genius address
     /// @param idiot The Idiot (buyer) address
     /// @return state The AccountState struct for this pair
@@ -329,18 +339,16 @@ contract Account is Ownable {
     // ─────────────────────────────────────────────
 
     /// @dev Computes the storage key for a Genius-Idiot pair
-    /// @param genius The Genius address
-    /// @param idiot The Idiot address
-    /// @return key The keccak256 hash of the pair
     function _accountKey(address genius, address idiot) internal pure returns (bytes32 key) {
         return keccak256(abi.encode(genius, idiot));
     }
 
     /// @dev Validates that genius and idiot addresses are non-zero
-    /// @param genius The Genius address
-    /// @param idiot The Idiot address
     function _validatePair(address genius, address idiot) internal pure {
         if (genius == address(0)) revert ZeroGeniusAddress();
         if (idiot == address(0)) revert ZeroIdiotAddress();
     }
+
+    /// @dev Only the owner can authorize contract upgrades
+    function _authorizeUpgrade(address) internal override onlyOwner {}
 }

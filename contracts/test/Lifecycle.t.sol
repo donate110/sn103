@@ -11,6 +11,7 @@ import {Account as DjinnAccount} from "../src/Account.sol";
 import {Audit, AuditResult} from "../src/Audit.sol";
 import {KeyRecovery} from "../src/KeyRecovery.sol";
 import {Signal, SignalStatus, Purchase, Outcome} from "../src/interfaces/IDjinn.sol";
+import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 /// @title LifecycleIntegrationTest
 /// @notice End-to-end lifecycle tests covering the complete signal flow from
@@ -43,12 +44,12 @@ contract LifecycleIntegrationTest is Test {
         owner = address(this);
 
         usdc = new MockUSDC();
-        signalCommitment = new SignalCommitment(owner);
-        escrow = new Escrow(address(usdc), owner);
-        collateral = new Collateral(address(usdc), owner);
-        creditLedger = new CreditLedger(owner);
-        account = new DjinnAccount(owner);
-        audit = new Audit(owner);
+        signalCommitment = SignalCommitment(_deployProxy(address(new SignalCommitment()), abi.encodeCall(SignalCommitment.initialize, (owner))));
+        escrow = Escrow(_deployProxy(address(new Escrow()), abi.encodeCall(Escrow.initialize, (address(usdc), owner))));
+        collateral = Collateral(_deployProxy(address(new Collateral()), abi.encodeCall(Collateral.initialize, (address(usdc), owner))));
+        creditLedger = CreditLedger(_deployProxy(address(new CreditLedger()), abi.encodeCall(CreditLedger.initialize, (owner))));
+        account = DjinnAccount(_deployProxy(address(new DjinnAccount()), abi.encodeCall(DjinnAccount.initialize, (owner))));
+        audit = Audit(_deployProxy(address(new Audit()), abi.encodeCall(Audit.initialize, (owner))));
         keyRecovery = new KeyRecovery();
 
         // Wire Escrow

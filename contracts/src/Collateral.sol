@@ -3,19 +3,21 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 /// @title Collateral
 /// @notice Holds Genius USDC collateral to cover worst-case damages on active signals.
 /// Required collateral = sum of (notional * slaMultiplierBps / 10000) for all active signal purchases.
 /// If a Genius's collateral drops below the locked minimum, open signals can be auto-cancelled.
-contract Collateral is Ownable, Pausable, ReentrancyGuard {
+contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
     using SafeERC20 for IERC20;
 
     /// @notice USDC token (6 decimals)
-    IERC20 public immutable usdc;
+    IERC20 public usdc;
 
     /// @notice Total deposited collateral per Genius
     mapping(address genius => uint256) public deposits;
@@ -28,6 +30,9 @@ contract Collateral is Ownable, Pausable, ReentrancyGuard {
 
     /// @notice Authorized callers (Escrow, Audit contracts)
     mapping(address caller => bool) public authorized;
+
+    /// @notice Address authorized to pause this contract in emergencies
+    address public pauser;
 
     /// @dev Emitted when a Genius deposits collateral
     event Deposited(address indexed genius, uint256 amount);
@@ -47,7 +52,11 @@ contract Collateral is Ownable, Pausable, ReentrancyGuard {
     /// @dev Emitted when an authorized caller is added or removed
     event AuthorizedUpdated(address indexed caller, bool status);
 
+    /// @notice Emitted when the pauser address is updated
+    event PauserUpdated(address indexed newPauser);
+
     error Unauthorized();
+    error NotPauserOrOwner(address caller);
     error ZeroAddress();
     error ZeroAmount();
     error InsufficientFreeCollateral(uint256 available, uint256 required);
@@ -59,10 +68,18 @@ contract Collateral is Ownable, Pausable, ReentrancyGuard {
         _;
     }
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /// @notice Initializes the Collateral contract (replaces constructor for proxy pattern)
     /// @param _usdc Address of the USDC token contract
     /// @param _owner Address that will own this contract and manage authorized callers
-    constructor(address _usdc, address _owner) Ownable(_owner) {
+    function initialize(address _usdc, address _owner) public initializer {
         if (_usdc == address(0)) revert ZeroAddress();
+        __Ownable_init(_owner);
+        __Pausable_init();
         usdc = IERC20(_usdc);
     }
 
@@ -100,7 +117,6 @@ contract Collateral is Ownable, Pausable, ReentrancyGuard {
     }
 
     /// @notice Lock collateral for a signal purchase. Called by Escrow.
-    /// @dev The lock amount should equal notional * slaMultiplierBps / 10000
     /// @param signalId The signal being purchased
     /// @param genius The Genius whose collateral is being locked
     /// @param amount Amount of USDC to lock (6 decimals)
@@ -128,8 +144,6 @@ contract Collateral is Ownable, Pausable, ReentrancyGuard {
             revert InsufficientSignalLock(signalLock, amount);
         }
         signalLocks[genius][signalId] -= amount;
-        // After slash(), locked may have been capped below the sum of individual signalLocks.
-        // Prevent underflow by capping the decrease.
         if (amount > locked[genius]) {
             locked[genius] = 0;
         } else {
@@ -138,12 +152,11 @@ contract Collateral is Ownable, Pausable, ReentrancyGuard {
         emit Released(signalId, genius, amount);
     }
 
-    /// @notice Slash a Genius's collateral and transfer to a recipient. Called by Audit
-    ///         when Quality Score is negative during settlement.
+    /// @notice Slash a Genius's collateral and transfer to a recipient. Called by Audit.
     /// @param genius The Genius being slashed
     /// @param amount Amount of USDC to slash (6 decimals)
-    /// @param recipient Address to receive the slashed USDC (the Idiot, via Escrow/Audit)
-    /// @return slashAmount The actual amount slashed (may be less than requested if deposits insufficient)
+    /// @param recipient Address to receive the slashed USDC
+    /// @return slashAmount The actual amount slashed (may be less if deposits insufficient)
     function slash(address genius, uint256 amount, address recipient) external onlyAuthorized nonReentrant returns (uint256 slashAmount) {
         if (amount == 0) revert ZeroAmount();
         if (recipient == address(0)) revert ZeroAddress();
@@ -158,22 +171,16 @@ contract Collateral is Ownable, Pausable, ReentrancyGuard {
     }
 
     /// @notice Get total deposited collateral for a Genius
-    /// @param genius The Genius address
-    /// @return Total deposited amount in USDC (6 decimals)
     function getDeposit(address genius) external view returns (uint256) {
         return deposits[genius];
     }
 
     /// @notice Get total locked collateral for a Genius
-    /// @param genius The Genius address
-    /// @return Total locked amount in USDC (6 decimals)
     function getLocked(address genius) external view returns (uint256) {
         return locked[genius];
     }
 
     /// @notice Get available (free) collateral for a Genius
-    /// @param genius The Genius address
-    /// @return Available collateral (deposit - locked) in USDC (6 decimals)
     function getAvailable(address genius) external view returns (uint256) {
         uint256 dep = deposits[genius];
         uint256 lck = locked[genius];
@@ -181,24 +188,30 @@ contract Collateral is Ownable, Pausable, ReentrancyGuard {
     }
 
     /// @notice Get collateral locked for a specific signal
-    /// @param genius The Genius address
-    /// @param signalId The signal ID
-    /// @return Amount locked for this signal in USDC (6 decimals)
     function getSignalLock(address genius, uint256 signalId) external view returns (uint256) {
         return signalLocks[genius][signalId];
     }
 
-    // -------------------------------------------------------------------------
-    // Emergency pause
-    // -------------------------------------------------------------------------
+    /// @notice Set the emergency pauser address
+    /// @param _pauser New pauser address (address(0) to disable)
+    function setPauser(address _pauser) external onlyOwner {
+        pauser = _pauser;
+        emit PauserUpdated(_pauser);
+    }
 
     /// @notice Pause deposits and withdrawals
-    function pause() external onlyOwner {
+    function pause() external {
+        if (msg.sender != pauser && msg.sender != owner()) revert NotPauserOrOwner(msg.sender);
         _pause();
     }
 
     /// @notice Unpause deposits and withdrawals
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    /// @dev Owner can authorize upgrades only when collateral holds no USDC
+    function _authorizeUpgrade(address) internal override onlyOwner {
+        require(usdc.balanceOf(address(this)) == 0, "Collateral: withdraw all USDC first");
     }
 }

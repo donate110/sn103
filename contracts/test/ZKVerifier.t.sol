@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {ZKVerifier} from "../src/ZKVerifier.sol";
+import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 /// @notice Mock verifier that always returns true
 contract MockVerifierTrue {
@@ -93,7 +94,7 @@ contract ZKVerifierTest is Test {
 
     function setUp() public {
         owner = address(this);
-        verifier = new ZKVerifier(owner);
+        verifier = ZKVerifier(_deployProxy(address(new ZKVerifier()), abi.encodeCall(ZKVerifier.initialize, (owner))));
         mockTrue = new MockVerifierTrue();
         mockFalse = new MockVerifierFalse();
         mockReverts = new MockVerifierReverts();

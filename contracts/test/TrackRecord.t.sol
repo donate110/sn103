@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {Test} from "forge-std/Test.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {TrackRecord, VerifiedRecord} from "../src/TrackRecord.sol";
+import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 /// @notice Mock ZK verifier that can be configured to accept or reject proofs
 contract MockZKVerifier {
@@ -41,7 +42,7 @@ contract TrackRecordTest is Test {
     function setUp() public {
         owner = address(this);
         verifier = new MockZKVerifier(true);
-        trackRecord = new TrackRecord(owner);
+        trackRecord = TrackRecord(_deployProxy(address(new TrackRecord()), abi.encodeCall(TrackRecord.initialize, (owner))));
         trackRecord.setZKVerifier(address(verifier));
     }
 
@@ -205,7 +206,7 @@ contract TrackRecordTest is Test {
     // ──────────────────────────────────────────────────────
 
     function test_submit_reverts_verifierNotSet() public {
-        TrackRecord fresh = new TrackRecord(owner);
+        TrackRecord fresh = TrackRecord(_deployProxy(address(new TrackRecord()), abi.encodeCall(TrackRecord.initialize, (owner))));
         (uint256[2] memory pA, uint256[2][2] memory pB, uint256[2] memory pC) = _defaultProof();
         uint256[106] memory pubSignals = _buildPubSignals(5, 100e6, 50e6, 3, 1, 1);
 

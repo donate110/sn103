@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {Escrow} from "../src/Escrow.sol";
 
 /// @title RedeployEscrow
@@ -24,8 +25,11 @@ contract RedeployEscrow is Script {
 
         vm.startBroadcast(deployerKey);
 
-        // Deploy new Escrow
-        Escrow esc_ = new Escrow(usdc, deployer);
+        // Deploy new Escrow behind UUPS proxy
+        Escrow esc_ = Escrow(address(new ERC1967Proxy(
+            address(new Escrow()),
+            abi.encodeCall(Escrow.initialize, (usdc, deployer))
+        )));
         address ne = address(esc_);
         console.log("New Escrow:", ne);
 

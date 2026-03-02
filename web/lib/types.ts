@@ -23,7 +23,6 @@ export interface Signal {
   expiresAt: bigint;
   decoyLines: string[];
   availableSportsbooks: string[];
-  walletRecoveryBlob: string;
   status: SignalStatus;
   createdAt: bigint;
 }

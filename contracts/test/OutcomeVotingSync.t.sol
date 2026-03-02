@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {OutcomeVoting} from "../src/OutcomeVoting.sol";
+import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 /// @title OutcomeVotingSyncTest
 /// @notice Tests for the consensus-based validator set sync mechanism
@@ -18,7 +19,7 @@ contract OutcomeVotingSyncTest is Test {
 
     function setUp() public {
         owner = address(this);
-        voting = new OutcomeVoting(owner);
+        voting = OutcomeVoting(_deployProxy(address(new OutcomeVoting()), abi.encodeCall(OutcomeVoting.initialize, (owner))));
     }
 
     // ─── Helpers ─────────────────────────────────────────────

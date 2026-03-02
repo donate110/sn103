@@ -1,22 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-
-/// @notice Minimal interface for the Audit contract's voted settlement
-interface IAuditForVoting {
-    function settleByVote(address genius, address idiot, int256 qualityScore) external;
-    function earlyExitByVote(address genius, address idiot, int256 qualityScore) external;
-}
-
-/// @notice Minimal interface for the Account contract
-interface IAccountForVoting {
-    function getCurrentCycle(address genius, address idiot) external view returns (uint256);
-    function isAuditReady(address genius, address idiot) external view returns (bool);
-    function getSignalCount(address genius, address idiot) external view returns (uint256);
-}
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {IAudit, IAccount} from "./interfaces/IProtocol.sol";
 
 /// @title OutcomeVoting
 /// @notice On-chain aggregate voting for signal outcomes.
@@ -34,7 +24,7 @@ interface IAccountForVoting {
 ///      retains addValidator/removeValidator for bootstrap and emergencies.
 ///      Votes are per (genius, idiot, cycle) tuple. Each validator can vote
 ///      once per cycle. Finalization is automatic when quorum is reached.
-contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
+contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
     // ─── Constants ──────────────────────────────────────────────
 
     /// @notice Quorum requirement: 2/3 of validators must agree
@@ -44,10 +34,10 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
     // ─── State ──────────────────────────────────────────────────
 
     /// @notice Audit contract reference
-    IAuditForVoting public audit;
+    IAudit public audit;
 
     /// @notice Account contract reference
-    IAccountForVoting public account;
+    IAccount public account;
 
     /// @notice Set of registered validators
     mapping(address => bool) public isValidator;
@@ -94,6 +84,9 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
     /// @dev nonce => validator => voted
     mapping(uint256 => mapping(address => bool)) public hasSyncVoted;
 
+    /// @notice Address authorized to pause this contract in emergencies
+    address public pauser;
+
     // ─── Events ─────────────────────────────────────────────────
 
     /// @notice Emitted when a validator submits their vote
@@ -131,6 +124,9 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
         uint256 cycle,
         address indexed requestedBy
     );
+
+    /// @notice Emitted when the pauser address is updated
+    event PauserUpdated(address indexed newPauser);
 
     // ─── Errors ─────────────────────────────────────────────────
 
@@ -176,10 +172,21 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
     /// @notice Proposed validator array is not sorted or contains duplicates
     error UnsortedOrDuplicateValidators();
 
-    // ─── Constructor ────────────────────────────────────────────
+    /// @notice Caller is not the pauser or the owner
+    error NotPauserOrOwner(address caller);
+
+    // ─── Constructor / Initializer ──────────────────────────────
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     /// @param _owner Contract owner (manages validator set)
-    constructor(address _owner) Ownable(_owner) {}
+    function initialize(address _owner) public initializer {
+        __Ownable_init(_owner);
+        __Pausable_init();
+    }
 
     // ─── Admin ──────────────────────────────────────────────────
 
@@ -187,14 +194,14 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
     /// @param _audit Audit contract address
     function setAudit(address _audit) external onlyOwner {
         if (_audit == address(0)) revert ZeroAddress();
-        audit = IAuditForVoting(_audit);
+        audit = IAudit(_audit);
     }
 
     /// @notice Set the Account contract reference
     /// @param _account Account contract address
     function setAccount(address _account) external onlyOwner {
         if (_account == address(0)) revert ZeroAddress();
-        account = IAccountForVoting(_account);
+        account = IAccount(_account);
     }
 
     /// @notice Register a new validator (owner-only, for bootstrap/emergencies)
@@ -465,8 +472,16 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
 
     // ─── Emergency Pause ────────────────────────────────────────
 
+    /// @notice Set the emergency pauser address
+    /// @param _pauser New pauser address (address(0) to disable)
+    function setPauser(address _pauser) external onlyOwner {
+        pauser = _pauser;
+        emit PauserUpdated(_pauser);
+    }
+
     /// @notice Pause voting
-    function pause() external onlyOwner {
+    function pause() external {
+        if (msg.sender != pauser && msg.sender != owner()) revert NotPauserOrOwner(msg.sender);
         _pause();
     }
 
@@ -474,4 +489,7 @@ contract OutcomeVoting is Ownable, Pausable, ReentrancyGuard {
     function unpause() external onlyOwner {
         _unpause();
     }
+
+    /// @dev Required by UUPSUpgradeable — restricts upgrades to the owner
+    function _authorizeUpgrade(address) internal override onlyOwner {}
 }

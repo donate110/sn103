@@ -11,6 +11,8 @@ import {Account as DjinnAccount} from "../src/Account.sol";
 import {Audit, AuditResult} from "../src/Audit.sol";
 import {KeyRecovery} from "../src/KeyRecovery.sol";
 import {Signal, SignalStatus, Purchase, Outcome} from "../src/interfaces/IDjinn.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 /// @title EdgeCaseIntegrationTest
 /// @notice Tests edge cases from whitepaper Section 14: cancelled games, postponed
@@ -41,12 +43,12 @@ contract EdgeCaseIntegrationTest is Test {
         owner = address(this);
 
         usdc = new MockUSDC();
-        signalCommitment = new SignalCommitment(owner);
-        escrow = new Escrow(address(usdc), owner);
-        collateral = new Collateral(address(usdc), owner);
-        creditLedger = new CreditLedger(owner);
-        account = new DjinnAccount(owner);
-        audit = new Audit(owner);
+        signalCommitment = SignalCommitment(_deployProxy(address(new SignalCommitment()), abi.encodeCall(SignalCommitment.initialize, (owner))));
+        escrow = Escrow(_deployProxy(address(new Escrow()), abi.encodeCall(Escrow.initialize, (address(usdc), owner))));
+        collateral = Collateral(_deployProxy(address(new Collateral()), abi.encodeCall(Collateral.initialize, (address(usdc), owner))));
+        creditLedger = CreditLedger(_deployProxy(address(new CreditLedger()), abi.encodeCall(CreditLedger.initialize, (owner))));
+        account = DjinnAccount(_deployProxy(address(new DjinnAccount()), abi.encodeCall(DjinnAccount.initialize, (owner))));
+        audit = Audit(_deployProxy(address(new Audit()), abi.encodeCall(Audit.initialize, (owner))));
         keyRecovery = new KeyRecovery();
 
         // Wire contracts
@@ -578,9 +580,10 @@ contract EdgeCaseIntegrationTest is Test {
         signalCommitment.setAuthorizedCaller(address(0), true);
     }
 
-    function test_collateral_constructor_zeroUsdc_reverts() public {
-        vm.expectRevert(Collateral.ZeroAddress.selector);
-        new Collateral(address(0), owner);
+    function test_collateral_initialize_zeroUsdc_reverts() public {
+        Collateral colImpl = new Collateral();
+        vm.expectRevert(abi.encodeWithSignature("ZeroAddress()"));
+        new ERC1967Proxy(address(colImpl), abi.encodeCall(Collateral.initialize, (address(0), owner)));
     }
 
     // ─── Early Exit: Protocol Fee Must Be Zero

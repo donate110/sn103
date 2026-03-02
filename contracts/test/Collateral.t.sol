@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import "forge-std/Test.sol";
 import {Collateral} from "../src/Collateral.sol";
 import {MockUSDC} from "./MockUSDC.sol";
+import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 contract CollateralTest is Test {
     Collateral public col;
@@ -19,7 +20,7 @@ contract CollateralTest is Test {
 
     function setUp() public {
         usdc = new MockUSDC();
-        col = new Collateral(address(usdc), owner);
+        col = Collateral(_deployProxy(address(new Collateral()), abi.encodeCall(Collateral.initialize, (address(usdc), owner))));
         col.setAuthorized(authorizedCaller, true);
 
         // Fund genius with USDC and approve collateral contract

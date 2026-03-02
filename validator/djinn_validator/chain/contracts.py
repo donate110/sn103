@@ -94,10 +94,11 @@ SIGNAL_COMMITMENT_ABI = [
                     {"name": "sport", "type": "string"},
                     {"name": "maxPriceBps", "type": "uint256"},
                     {"name": "slaMultiplierBps", "type": "uint256"},
+                    {"name": "maxNotional", "type": "uint256"},
+                    {"name": "minNotional", "type": "uint256"},
                     {"name": "expiresAt", "type": "uint256"},
                     {"name": "decoyLines", "type": "string[]"},
                     {"name": "availableSportsbooks", "type": "string[]"},
-                    {"name": "walletRecoveryBlob", "type": "bytes"},
                     {"name": "status", "type": "uint8"},
                     {"name": "createdAt", "type": "uint256"},
                 ],
@@ -401,8 +402,8 @@ class ChainClient:
                 lambda: self._signal.functions.getSignal(signal_id).call()  # type: ignore[union-attr]
             )
             # Tuple order matches Signal struct: genius, encryptedBlob, commitHash,
-            # sport, maxPriceBps, slaMultiplierBps, expiresAt, decoyLines,
-            # availableSportsbooks, walletRecoveryBlob, status, createdAt
+            # sport, maxPriceBps, slaMultiplierBps, maxNotional, minNotional,
+            # expiresAt, decoyLines, availableSportsbooks, status, createdAt
             return {
                 "genius": result[0],
                 "encryptedBlob": result[1],
@@ -410,9 +411,9 @@ class ChainClient:
                 "sport": result[3],
                 "maxPriceBps": result[4],
                 "slaMultiplierBps": result[5],
-                "expiresAt": result[6],
-                "status": result[10],
-                "createdAt": result[11],
+                "expiresAt": result[8],
+                "status": result[11],
+                "createdAt": result[12],
             }
         except Exception as e:
             log.error("get_signal_failed", signal_id=signal_id, err=str(e))

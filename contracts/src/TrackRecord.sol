@@ -1,17 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-
-/// @notice Minimal interface for the ZKVerifier contract
-interface IZKVerifierForTrackRecord {
-    function verifyTrackRecordProof(
-        uint256[2] calldata _pA,
-        uint256[2][2] calldata _pB,
-        uint256[2] calldata _pC,
-        uint256[106] calldata _pubSignals
-    ) external view returns (bool);
-}
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {IZKVerifier} from "./interfaces/IProtocol.sol";
 
 /// @notice On-chain record of a verified track record proof
 struct VerifiedRecord {
@@ -31,13 +24,13 @@ struct VerifiedRecord {
 /// @notice Stores on-chain verified ZK track record proofs submitted by Geniuses.
 ///         Each proof demonstrates aggregate performance statistics (wins, losses,
 ///         gains) without revealing individual signal details.
-contract TrackRecord is Ownable {
+contract TrackRecord is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     // -------------------------------------------------------------------------
     // State
     // -------------------------------------------------------------------------
 
     /// @notice ZKVerifier contract used for proof verification
-    IZKVerifierForTrackRecord public zkVerifier;
+    IZKVerifier public zkVerifier;
 
     /// @notice All verified records, indexed by recordId
     mapping(uint256 => VerifiedRecord) public records;
@@ -95,11 +88,18 @@ contract TrackRecord is Ownable {
     uint256 public constant COMMIT_EXPIRY_BLOCKS = 32;
 
     // -------------------------------------------------------------------------
-    // Constructor
+    // Constructor / Initializer
     // -------------------------------------------------------------------------
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /// @param _owner Address that will own this contract
-    constructor(address _owner) Ownable(_owner) {}
+    function initialize(address _owner) public initializer {
+        __Ownable_init(_owner);
+    }
 
     // -------------------------------------------------------------------------
     // Admin
@@ -109,7 +109,7 @@ contract TrackRecord is Ownable {
     /// @param _zkVerifier Address of the deployed ZKVerifier
     function setZKVerifier(address _zkVerifier) external onlyOwner {
         if (_zkVerifier == address(0)) revert ZeroAddress();
-        zkVerifier = IZKVerifierForTrackRecord(_zkVerifier);
+        zkVerifier = IZKVerifier(_zkVerifier);
         emit ZKVerifierUpdated(_zkVerifier);
     }
 
@@ -230,4 +230,7 @@ contract TrackRecord is Ownable {
     function getRecord(uint256 recordId) external view returns (VerifiedRecord memory record) {
         return records[recordId];
     }
+
+    /// @dev Required by UUPSUpgradeable — restricts upgrades to the owner
+    function _authorizeUpgrade(address) internal override onlyOwner {}
 }

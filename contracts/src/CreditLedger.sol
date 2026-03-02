@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 /// @title CreditLedger
 /// @notice Non-transferable, non-cashable Djinn Credits used as discounts on future signal purchases.
 ///         Credits are minted as Tranche B during negative audit settlement (see whitepaper Section 7)
 ///         and burned by the Escrow contract when an Idiot uses them to offset a purchase fee.
 /// @dev This is intentionally NOT an ERC20. Credits cannot be transferred, approved, or redeemed for cash.
-contract CreditLedger is Ownable {
+contract CreditLedger is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     // ─── Storage
     // ────────────────────────────────────────────────────────
 
@@ -62,12 +64,19 @@ contract CreditLedger is Ownable {
         _;
     }
 
-    // ─── Constructor
+    // ─── Constructor / Initializer
     // ────────────────────────────────────────────────────
 
-    /// @notice Deploys the CreditLedger contract
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /// @notice Initializes the CreditLedger contract (replaces constructor for proxy pattern)
     /// @param initialOwner Address that will own this contract and manage authorized callers
-    constructor(address initialOwner) Ownable(initialOwner) {}
+    function initialize(address initialOwner) public initializer {
+        __Ownable_init(initialOwner);
+    }
 
     // ─── External Functions
     // ─────────────────────────────────────────────
@@ -124,4 +133,10 @@ contract CreditLedger is Ownable {
     function balanceOf(address account) external view returns (uint256 balance) {
         return _balances[account];
     }
+
+    // ─── UUPS
+    // ─────────────────────────────────────────────────────
+
+    /// @dev Only the owner can authorize contract upgrades
+    function _authorizeUpgrade(address) internal override onlyOwner {}
 }

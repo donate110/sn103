@@ -62,7 +62,6 @@ describe("useSignal", () => {
     expiresAt: BigInt(Math.floor(Date.now() / 1000) + 3600),
     decoyLines: ["line1", "line2"],
     availableSportsbooks: ["DraftKings", "FanDuel"],
-    walletRecoveryBlob: "",
     status: 0,
     createdAt: BigInt(Math.floor(Date.now() / 1000)),
   };

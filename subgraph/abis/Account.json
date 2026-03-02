@@ -1,6 +1,7 @@
 [
   {
-    "type": "constructor",
+    "type": "function",
+    "name": "initialize",
     "inputs": [
       {
         "name": "initialOwner",
@@ -8,6 +9,7 @@
         "internalType": "address"
       }
     ],
+    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -38,57 +40,6 @@
         "name": "",
         "type": "bool",
         "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getAccount",
-    "inputs": [
-      {
-        "name": "genius",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "idiot",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "state",
-        "type": "tuple",
-        "internalType": "struct AccountState",
-        "components": [
-          {
-            "name": "currentCycle",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "signalCount",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "qualityScore",
-            "type": "int256",
-            "internalType": "int256"
-          },
-          {
-            "name": "purchaseIds",
-            "type": "uint256[]",
-            "internalType": "uint256[]"
-          },
-          {
-            "name": "settled",
-            "type": "bool",
-            "internalType": "bool"
-          }
-        ]
       }
     ],
     "stateMutability": "view"

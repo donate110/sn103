@@ -3,46 +3,20 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {Outcome, Purchase, Signal, SignalStatus} from "./interfaces/IDjinn.sol";
-
-/// @notice Minimal interface for the SignalCommitment contract
-interface ISignalCommitment {
-    function getSignal(uint256 signalId) external view returns (Signal memory);
-    function updateStatus(uint256 signalId, SignalStatus status) external;
-}
-
-/// @notice Minimal interface for the Collateral contract
-interface ICollateral {
-    function lock(uint256 signalId, address genius, uint256 amount) external;
-}
-
-/// @notice Minimal interface for the CreditLedger contract
-interface ICreditLedger {
-    function balanceOf(address account) external view returns (uint256);
-    function burn(address account, uint256 amount) external;
-}
-
-/// @notice Minimal interface for the Account contract
-interface IAccount {
-    function recordPurchase(address genius, address idiot, uint256 purchaseId) external;
-    function getCurrentCycle(address genius, address idiot) external view returns (uint256);
-}
-
-/// @notice Minimal interface for the Audit contract (used for fee claim settlement check)
-interface IAuditForEscrow {
-    function auditResults(address genius, address idiot, uint256 cycle) external view
-        returns (int256 qualityScore, uint256 trancheA, uint256 trancheB, uint256 protocolFee, uint256 timestamp);
-}
+import {ISignalCommitment, ICollateral, ICreditLedger, IAccount, IAudit} from "./interfaces/IProtocol.sol";
 
 /// @title Escrow
 /// @notice Holds Idiot USDC deposits and processes signal purchases in the Djinn Protocol.
 ///         Buyers deposit USDC ahead of time for instant purchases. Fees are split between
 ///         escrowed USDC and Djinn Credits (credits used first). A fee pool tracks collections
 ///         per genius-idiot-cycle for audit-time refunds.
-contract Escrow is Ownable, Pausable, ReentrancyGuard {
+contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
     using SafeERC20 for IERC20;
 
     // -------------------------------------------------------------------------
@@ -50,7 +24,7 @@ contract Escrow is Ownable, Pausable, ReentrancyGuard {
     // -------------------------------------------------------------------------
 
     /// @notice USDC token (6 decimals)
-    IERC20 public immutable usdc;
+    IERC20 public usdc;
 
     /// @notice Protocol contract references
     ISignalCommitment public signalCommitment;
@@ -84,6 +58,9 @@ contract Escrow is Ownable, Pausable, ReentrancyGuard {
 
     /// @notice Tracks whether an Idiot has already purchased a given signal (one purchase per Idiot per signal)
     mapping(uint256 => mapping(address => bool)) public hasPurchased;
+
+    /// @notice Address authorized to pause this contract in emergencies
+    address public pauser;
 
     // -------------------------------------------------------------------------
     // Events
@@ -121,6 +98,9 @@ contract Escrow is Ownable, Pausable, ReentrancyGuard {
     /// @notice Emitted when an authorized caller is set
     event AuthorizedCallerSet(address indexed caller, bool authorized);
 
+    /// @notice Emitted when the pauser address is updated
+    event PauserUpdated(address indexed newPauser);
+
     // -------------------------------------------------------------------------
     // Errors
     // -------------------------------------------------------------------------
@@ -140,7 +120,10 @@ contract Escrow is Ownable, Pausable, ReentrancyGuard {
     error CycleNotSettled(address genius, address idiot, uint256 cycle);
     error NoFeesToClaim(address genius, address idiot, uint256 cycle);
     error AlreadyPurchased(uint256 signalId, address idiot);
-
+    error PurchaseNotFound(uint256 purchaseId);
+    error OutcomeAlreadySet(uint256 purchaseId, Outcome current);
+    error InvalidOutcome(Outcome outcome);
+    error NotPauserOrOwner(address caller);
 
     /// @notice Minimum notional per purchase (1 USDC in 6 decimals — prevents dust griefing)
     uint256 public constant MIN_NOTIONAL = 1e6;
@@ -171,10 +154,18 @@ contract Escrow is Ownable, Pausable, ReentrancyGuard {
     // Constructor
     // -------------------------------------------------------------------------
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /// @notice Initializes the Escrow contract (replaces constructor for proxy pattern)
     /// @param _usdc Address of the USDC token on Base
     /// @param _owner Initial owner of the contract
-    constructor(address _usdc, address _owner) Ownable(_owner) {
+    function initialize(address _usdc, address _owner) public initializer {
         if (_usdc == address(0)) revert ZeroAddress();
+        __Ownable_init(_owner);
+        __Pausable_init();
         usdc = IERC20(_usdc);
     }
 
@@ -230,10 +221,6 @@ contract Escrow is Ownable, Pausable, ReentrancyGuard {
         authorizedCallers[caller] = _authorized;
         emit AuthorizedCallerSet(caller, _authorized);
     }
-
-    error PurchaseNotFound(uint256 purchaseId);
-    error OutcomeAlreadySet(uint256 purchaseId, Outcome current);
-    error InvalidOutcome(Outcome outcome);
 
     /// @notice Update the outcome of a purchase. Called by authorized contracts (e.g. oracle/validator).
     /// @param purchaseId The purchase to update
@@ -398,7 +385,7 @@ contract Escrow is Ownable, Pausable, ReentrancyGuard {
         if (auditContract == address(0)) revert ContractNotSet("Audit");
 
         // Verify the cycle is settled by querying the Audit contract
-        (, , , , uint256 settledAt) = IAuditForEscrow(auditContract).auditResults(msg.sender, idiot, cycle);
+        (, , , , uint256 settledAt) = IAudit(auditContract).auditResults(msg.sender, idiot, cycle);
         if (settledAt == 0) revert CycleNotSettled(msg.sender, idiot, cycle);
 
         uint256 amount = feePool[msg.sender][idiot][cycle];
@@ -419,7 +406,7 @@ contract Escrow is Ownable, Pausable, ReentrancyGuard {
 
         uint256 total;
         for (uint256 i; i < idiots.length; ++i) {
-            (, , , , uint256 settledAt) = IAuditForEscrow(auditContract).auditResults(msg.sender, idiots[i], cycles[i]);
+            (, , , , uint256 settledAt) = IAudit(auditContract).auditResults(msg.sender, idiots[i], cycles[i]);
             if (settledAt == 0) revert CycleNotSettled(msg.sender, idiots[i], cycles[i]);
 
             uint256 amount = feePool[msg.sender][idiots[i]][cycles[i]];
@@ -490,13 +477,26 @@ contract Escrow is Ownable, Pausable, ReentrancyGuard {
     // Emergency pause
     // -------------------------------------------------------------------------
 
+    /// @notice Set the emergency pauser address
+    /// @param _pauser New pauser address (address(0) to disable)
+    function setPauser(address _pauser) external onlyOwner {
+        pauser = _pauser;
+        emit PauserUpdated(_pauser);
+    }
+
     /// @notice Pause deposits, withdrawals, and purchases
-    function pause() external onlyOwner {
+    function pause() external {
+        if (msg.sender != pauser && msg.sender != owner()) revert NotPauserOrOwner(msg.sender);
         _pause();
     }
 
     /// @notice Unpause deposits, withdrawals, and purchases
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    /// @dev Owner can authorize upgrades only when escrow holds no USDC
+    function _authorizeUpgrade(address) internal override onlyOwner {
+        require(usdc.balanceOf(address(this)) == 0, "Escrow: withdraw all USDC first");
     }
 }

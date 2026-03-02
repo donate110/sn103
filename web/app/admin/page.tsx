@@ -187,6 +187,7 @@ export default function AdminDashboard() {
   const [errorTotal, setErrorTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshStep, setRefreshStep] = useState("");
+  const [refreshSteps, setRefreshSteps] = useState<Record<string, "pending" | "done" | "error">>({});
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [authed, setAuthed] = useState(false);
   const [password, setPassword] = useState("");
@@ -246,7 +247,7 @@ export default function AdminDashboard() {
     setLoading(true);
     setRefreshStep("metagraph");
 
-    // Helper to track completion of each fetch
+    // Helper to track completion of each fetch with per-step status
     let done = 0;
     const total = 12;
     const labels = [
@@ -254,12 +255,15 @@ export default function AdminDashboard() {
       "network", "signals", "purchases", "audits",
       "attestations", "telemetry", "feedback", "delegates",
     ];
+    const stepStatus: Record<string, "pending" | "done" | "error"> = {};
+    for (const l of labels) stepStatus[l] = "pending";
+    setRefreshSteps({ ...stepStatus });
+
     function track<T>(idx: number, p: Promise<T>): Promise<T> {
-      return p.finally(() => {
-        done++;
-        const remaining = labels.filter((_, i) => i >= done);
-        setRefreshStep(done < total ? (remaining[0] || `${done}/${total}`) : "done");
-      });
+      return p.then(
+        (val) => { stepStatus[labels[idx]] = "done"; done++; setRefreshSteps({ ...stepStatus }); setRefreshStep(done < total ? labels.find((_, i) => stepStatus[labels[i]] === "pending") || `${done}/${total}` : "done"); return val; },
+        (err) => { stepStatus[labels[idx]] = "error"; done++; setRefreshSteps({ ...stepStatus }); setRefreshStep(done < total ? labels.find((_, i) => stepStatus[labels[i]] === "pending") || `${done}/${total}` : "done"); throw err; },
+      );
     }
 
     // Fetch all data in parallel so badge counts are always available
@@ -324,6 +328,7 @@ export default function AdminDashboard() {
 
     setLastRefresh(new Date());
     setRefreshStep("");
+    setRefreshSteps({});
     setLoading(false);
   }, [feedbackFilter]);
 
@@ -379,16 +384,40 @@ export default function AdminDashboard() {
               Last: {lastRefresh.toLocaleTimeString()}
             </span>
           )}
-          <button
-            onClick={async () => {
-              await fetch("/api/admin/clear-cache", { method: "POST" });
-              refresh();
-            }}
-            disabled={loading}
-            className="px-3 py-1.5 text-sm font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50"
-          >
-            {loading ? `${refreshStep || "loading"}...` : "Refresh"}
-          </button>
+          <div className="relative">
+            <button
+              onClick={async () => {
+                await fetch("/api/admin/clear-cache", { method: "POST" });
+                refresh();
+              }}
+              disabled={loading}
+              className="px-3 py-1.5 text-sm font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50"
+            >
+              {loading ? `Refreshing...` : "Refresh"}
+            </button>
+            {loading && Object.keys(refreshSteps).length > 0 && (
+              <div className="absolute right-0 top-full mt-2 bg-white border border-slate-200 rounded-lg shadow-lg p-3 z-50 w-56">
+                <div className="text-xs font-medium text-slate-500 mb-2">
+                  {Object.values(refreshSteps).filter(s => s === "done").length}/{Object.keys(refreshSteps).length} sources loaded
+                </div>
+                <div className="space-y-1">
+                  {Object.entries(refreshSteps).map(([label, status]) => (
+                    <div key={label} className="flex items-center gap-2 text-xs">
+                      <span className={status === "done" ? "text-green-500" : status === "error" ? "text-red-500" : "text-slate-300"}>
+                        {status === "done" ? "\u2713" : status === "error" ? "\u2717" : "\u25cb"}
+                      </span>
+                      <span className={status === "pending" ? "text-slate-400" : status === "error" ? "text-red-600" : "text-slate-700"}>
+                        {label}
+                      </span>
+                      {status === "pending" && label === refreshStep && (
+                        <span className="text-slate-400 animate-pulse">&hellip;</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
           {GRAFANA_URL && (
             <a
               href={GRAFANA_URL}

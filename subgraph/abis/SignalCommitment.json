@@ -236,11 +236,6 @@
             "internalType": "string[]"
           },
           {
-            "name": "walletRecoveryBlob",
-            "type": "bytes",
-            "internalType": "bytes"
-          },
-          {
             "name": "status",
             "type": "uint8",
             "internalType": "enum SignalStatus"

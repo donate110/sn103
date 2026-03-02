@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import "forge-std/Test.sol";
 import {Account as DjinnAccount} from "../src/Account.sol";
 import {AccountState, Outcome} from "../src/interfaces/IDjinn.sol";
+import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 contract AccountTest is Test {
     DjinnAccount public acct;
@@ -15,7 +16,7 @@ contract AccountTest is Test {
     address public idiot = address(0xB2);
 
     function setUp() public {
-        acct = new DjinnAccount(owner);
+        acct = DjinnAccount(_deployProxy(address(new DjinnAccount()), abi.encodeCall(DjinnAccount.initialize, (owner))));
         acct.setAuthorizedCaller(authorizedCaller, true);
     }
 
@@ -83,7 +84,7 @@ contract AccountTest is Test {
 
         assertEq(uint8(acct.getOutcome(genius, idiot, 1)), uint8(Outcome.Favorable));
 
-        AccountState memory state = acct.getAccount(genius, idiot);
+        AccountState memory state = acct.getAccountState(genius, idiot);
         assertEq(state.qualityScore, 1);
     }
 
@@ -95,7 +96,7 @@ contract AccountTest is Test {
 
         assertEq(uint8(acct.getOutcome(genius, idiot, 1)), uint8(Outcome.Unfavorable));
 
-        AccountState memory state = acct.getAccount(genius, idiot);
+        AccountState memory state = acct.getAccountState(genius, idiot);
         assertEq(state.qualityScore, -1);
     }
 
@@ -108,7 +109,7 @@ contract AccountTest is Test {
         assertEq(uint8(acct.getOutcome(genius, idiot, 1)), uint8(Outcome.Void));
 
         // Void does not affect quality score
-        AccountState memory state = acct.getAccount(genius, idiot);
+        AccountState memory state = acct.getAccountState(genius, idiot);
         assertEq(state.qualityScore, 0);
     }
 
@@ -141,7 +142,7 @@ contract AccountTest is Test {
         vm.prank(authorizedCaller);
         acct.recordOutcome(genius, idiot, 6, Outcome.Void);
 
-        AccountState memory state = acct.getAccount(genius, idiot);
+        AccountState memory state = acct.getAccountState(genius, idiot);
         assertEq(state.qualityScore, 1);
     }
 
@@ -289,7 +290,7 @@ contract AccountTest is Test {
     function test_recordPurchase_selfPurchaseAllowed() public {
         vm.prank(authorizedCaller);
         acct.recordPurchase(genius, genius, 1);
-        AccountState memory state = acct.getAccount(genius, genius);
+        AccountState memory state = acct.getAccountState(genius, genius);
         assertEq(state.signalCount, 1);
     }
 
@@ -297,7 +298,7 @@ contract AccountTest is Test {
     // ───────────────────────────────────────────
 
     function test_getAccount_defaultValues() public view {
-        AccountState memory state = acct.getAccount(genius, idiot);
+        AccountState memory state = acct.getAccountState(genius, idiot);
         assertEq(state.currentCycle, 0);
         assertEq(state.signalCount, 0);
         assertEq(state.qualityScore, 0);
@@ -308,7 +309,7 @@ contract AccountTest is Test {
     function test_getAccountState_aliasWorks() public {
         _recordPurchase(1);
 
-        AccountState memory stateA = acct.getAccount(genius, idiot);
+        AccountState memory stateA = acct.getAccountState(genius, idiot);
         AccountState memory stateB = acct.getAccountState(genius, idiot);
 
         assertEq(stateA.signalCount, stateB.signalCount);
@@ -351,13 +352,13 @@ contract AccountTest is Test {
         vm.prank(authorizedCaller);
         acct.setSettled(genius, idiot, true);
 
-        AccountState memory state = acct.getAccount(genius, idiot);
+        AccountState memory state = acct.getAccountState(genius, idiot);
         assertTrue(state.settled);
 
         vm.prank(authorizedCaller);
         acct.setSettled(genius, idiot, false);
 
-        state = acct.getAccount(genius, idiot);
+        state = acct.getAccountState(genius, idiot);
         assertFalse(state.settled);
     }
 }

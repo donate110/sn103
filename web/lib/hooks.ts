@@ -362,7 +362,6 @@ export function useSignal(signalId: bigint | undefined) {
           expiresAt: toBigInt(raw.expiresAt),
           decoyLines: Array.isArray(raw.decoyLines) ? raw.decoyLines.map(String) : [],
           availableSportsbooks: Array.isArray(raw.availableSportsbooks) ? raw.availableSportsbooks.map(String) : [],
-          walletRecoveryBlob: String(raw.walletRecoveryBlob ?? ""),
           status: Number(raw.status ?? 0),
           createdAt: toBigInt(raw.createdAt),
         });

@@ -98,7 +98,7 @@ export function useActiveRelationships(
         try {
           const genius = role === "genius" ? address : cp;
           const idiot = role === "genius" ? cp : address;
-          const state = await accountContract.getAccount(genius, idiot);
+          const state = await accountContract.getAccountState(genius, idiot);
           const signalCount = Number(state.signalCount);
           if (signalCount > 0) {
             active.push({

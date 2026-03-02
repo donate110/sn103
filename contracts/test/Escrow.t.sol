@@ -9,6 +9,7 @@ import {Collateral} from "../src/Collateral.sol";
 import {CreditLedger} from "../src/CreditLedger.sol";
 import {Account as DjinnAccount} from "../src/Account.sol";
 import {Signal, SignalStatus, Purchase, Outcome} from "../src/interfaces/IDjinn.sol";
+import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 /// @title EscrowIntegrationTest
 /// @notice Integration tests for the full purchase flow through Escrow
@@ -36,11 +37,11 @@ contract EscrowIntegrationTest is Test {
 
         // Deploy all contracts
         usdc = new MockUSDC();
-        signalCommitment = new SignalCommitment(owner);
-        escrow = new Escrow(address(usdc), owner);
-        collateral = new Collateral(address(usdc), owner);
-        creditLedger = new CreditLedger(owner);
-        account = new DjinnAccount(owner);
+        signalCommitment = SignalCommitment(_deployProxy(address(new SignalCommitment()), abi.encodeCall(SignalCommitment.initialize, (owner))));
+        escrow = Escrow(_deployProxy(address(new Escrow()), abi.encodeCall(Escrow.initialize, (address(usdc), owner))));
+        collateral = Collateral(_deployProxy(address(new Collateral()), abi.encodeCall(Collateral.initialize, (address(usdc), owner))));
+        creditLedger = CreditLedger(_deployProxy(address(new CreditLedger()), abi.encodeCall(CreditLedger.initialize, (owner))));
+        account = DjinnAccount(_deployProxy(address(new DjinnAccount()), abi.encodeCall(DjinnAccount.initialize, (owner))));
 
         // Wire contracts together
         escrow.setSignalCommitment(address(signalCommitment));
@@ -795,7 +796,7 @@ contract EscrowIntegrationTest is Test {
 
     function test_canPurchase_signalCommitment_not_set() public {
         // Deploy fresh escrow without wiring
-        Escrow freshEscrow = new Escrow(address(usdc), owner);
+        Escrow freshEscrow = Escrow(_deployProxy(address(new Escrow()), abi.encodeCall(Escrow.initialize, (address(usdc), owner))));
 
         (bool canBuy, string memory reason) = freshEscrow.canPurchase(1, NOTIONAL);
         assertFalse(canBuy, "Should fail with no SignalCommitment set");
@@ -1170,11 +1171,11 @@ contract EscrowFeeClaimTest is Test {
         owner = address(this);
 
         usdc = new MockUSDC();
-        signalCommitment = new SignalCommitment(owner);
-        escrow = new Escrow(address(usdc), owner);
-        collateral = new Collateral(address(usdc), owner);
-        creditLedger = new CreditLedger(owner);
-        account = new DjinnAccount(owner);
+        signalCommitment = SignalCommitment(_deployProxy(address(new SignalCommitment()), abi.encodeCall(SignalCommitment.initialize, (owner))));
+        escrow = Escrow(_deployProxy(address(new Escrow()), abi.encodeCall(Escrow.initialize, (address(usdc), owner))));
+        collateral = Collateral(_deployProxy(address(new Collateral()), abi.encodeCall(Collateral.initialize, (address(usdc), owner))));
+        creditLedger = CreditLedger(_deployProxy(address(new CreditLedger()), abi.encodeCall(CreditLedger.initialize, (owner))));
+        account = DjinnAccount(_deployProxy(address(new DjinnAccount()), abi.encodeCall(DjinnAccount.initialize, (owner))));
         mockAudit = new MockAuditForClaims();
 
         escrow.setSignalCommitment(address(signalCommitment));

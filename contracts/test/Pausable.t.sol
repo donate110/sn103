@@ -11,6 +11,7 @@ import {Collateral} from "../src/Collateral.sol";
 import {CreditLedger} from "../src/CreditLedger.sol";
 import {Account as DjinnAccount} from "../src/Account.sol";
 import {Audit} from "../src/Audit.sol";
+import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 /// @title PausableTest
 /// @notice Tests the emergency pause mechanism on Escrow, Collateral, and Audit
@@ -32,12 +33,12 @@ contract PausableTest is Test {
         owner = address(this);
 
         usdc = new MockUSDC();
-        signalCommitment = new SignalCommitment(owner);
-        escrow = new Escrow(address(usdc), owner);
-        collateral = new Collateral(address(usdc), owner);
-        creditLedger = new CreditLedger(owner);
-        account = new DjinnAccount(owner);
-        audit = new Audit(owner);
+        signalCommitment = SignalCommitment(_deployProxy(address(new SignalCommitment()), abi.encodeCall(SignalCommitment.initialize, (owner))));
+        escrow = Escrow(_deployProxy(address(new Escrow()), abi.encodeCall(Escrow.initialize, (address(usdc), owner))));
+        collateral = Collateral(_deployProxy(address(new Collateral()), abi.encodeCall(Collateral.initialize, (address(usdc), owner))));
+        creditLedger = CreditLedger(_deployProxy(address(new CreditLedger()), abi.encodeCall(CreditLedger.initialize, (owner))));
+        account = DjinnAccount(_deployProxy(address(new DjinnAccount()), abi.encodeCall(DjinnAccount.initialize, (owner))));
+        audit = Audit(_deployProxy(address(new Audit()), abi.encodeCall(Audit.initialize, (owner))));
 
         // Wire contracts
         escrow.setSignalCommitment(address(signalCommitment));
@@ -71,7 +72,7 @@ contract PausableTest is Test {
     }
 
     function test_escrow_pause_reverts_nonOwner() public {
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        vm.expectRevert(abi.encodeWithSelector(Escrow.NotPauserOrOwner.selector, nonOwner));
         vm.prank(nonOwner);
         escrow.pause();
     }
@@ -163,7 +164,7 @@ contract PausableTest is Test {
     }
 
     function test_collateral_pause_reverts_nonOwner() public {
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        vm.expectRevert(abi.encodeWithSelector(Collateral.NotPauserOrOwner.selector, nonOwner));
         vm.prank(nonOwner);
         collateral.pause();
     }
@@ -231,7 +232,7 @@ contract PausableTest is Test {
     }
 
     function test_audit_pause_reverts_nonOwner() public {
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        vm.expectRevert(abi.encodeWithSelector(Audit.NotPauserOrOwner.selector, nonOwner));
         vm.prank(nonOwner);
         audit.pause();
     }
@@ -334,7 +335,7 @@ contract PausableTest is Test {
     }
 
     function test_signalCommitment_pause_reverts_nonOwner() public {
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
+        vm.expectRevert(abi.encodeWithSelector(SignalCommitment.NotPauserOrOwner.selector, nonOwner));
         vm.prank(nonOwner);
         signalCommitment.pause();
     }

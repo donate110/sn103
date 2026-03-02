@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import {CreditLedger} from "../src/CreditLedger.sol";
+import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 contract CreditLedgerTest is Test {
     CreditLedger public ledger;
@@ -14,7 +15,7 @@ contract CreditLedgerTest is Test {
     address public user2 = address(0xB2);
 
     function setUp() public {
-        ledger = new CreditLedger(owner);
+        ledger = CreditLedger(_deployProxy(address(new CreditLedger()), abi.encodeCall(CreditLedger.initialize, (owner))));
         ledger.setAuthorizedCaller(authorizedCaller, true);
     }
 

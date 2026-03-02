@@ -1,20 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-
-/// @title IGroth16Verifier
-/// @notice Common interface for snarkjs-generated Groth16 verifier contracts.
-///         Each circuit has a different pubSignals array size, so we use
-///         a raw staticcall with abi-encoded data.
-interface IGroth16Verifier {
-    function verifyProof(
-        uint256[2] calldata _pA,
-        uint256[2][2] calldata _pB,
-        uint256[2] calldata _pC,
-        uint256[] calldata _pubSignals
-    ) external view returns (bool);
-}
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {IGroth16Verifier} from "./interfaces/IProtocol.sol";
 
 /// @title ZKVerifier
 /// @notice Delegates ZK proof verification to deployed Groth16 verifier contracts
@@ -22,7 +12,7 @@ interface IGroth16Verifier {
 /// @dev The audit verifier expects 52 public signals (10 signals * 5 fields + 2 score fields).
 ///      The track record verifier expects 106 public signals (20 signals * 5 fields + 6 aggregate fields).
 ///      When no verifier is set, verification returns true (placeholder mode).
-contract ZKVerifier is Ownable {
+contract ZKVerifier is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @notice Address of the deployed Groth16AuditVerifier contract
     address public auditVerifier;
 
@@ -36,8 +26,15 @@ contract ZKVerifier is Ownable {
     error VerifierNotSet();
     error VerificationCallFailed();
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /// @param _owner Address that will own this contract
-    constructor(address _owner) Ownable(_owner) {}
+    function initialize(address _owner) public initializer {
+        __Ownable_init(_owner);
+    }
 
     /// @notice Set the audit proof verifier contract address
     /// @param _verifier Address of the deployed Groth16AuditVerifier
@@ -100,4 +97,7 @@ contract ZKVerifier is Ownable {
         if (!success || result.length < 32) revert VerificationCallFailed();
         return abi.decode(result, (bool));
     }
+
+    /// @dev Required by UUPSUpgradeable — restricts upgrades to the owner
+    function _authorizeUpgrade(address) internal override onlyOwner {}
 }

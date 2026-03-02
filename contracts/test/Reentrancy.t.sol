@@ -9,6 +9,7 @@ import {Collateral} from "../src/Collateral.sol";
 import {CreditLedger} from "../src/CreditLedger.sol";
 import {Account as DjinnAccount} from "../src/Account.sol";
 import {Signal, SignalStatus, Purchase, Outcome} from "../src/interfaces/IDjinn.sol";
+import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 /// @notice Malicious CreditLedger that tries to reenter Escrow.purchase via burn()
 contract ReentrantCreditLedger {
@@ -75,11 +76,11 @@ contract ReentrancyTest is Test {
         owner = address(this);
 
         usdc = new MockUSDC();
-        signalCommitment = new SignalCommitment(owner);
-        escrow = new Escrow(address(usdc), owner);
-        collateral = new Collateral(address(usdc), owner);
-        creditLedger = new CreditLedger(owner);
-        account = new DjinnAccount(owner);
+        signalCommitment = SignalCommitment(_deployProxy(address(new SignalCommitment()), abi.encodeCall(SignalCommitment.initialize, (owner))));
+        escrow = Escrow(_deployProxy(address(new Escrow()), abi.encodeCall(Escrow.initialize, (address(usdc), owner))));
+        collateral = Collateral(_deployProxy(address(new Collateral()), abi.encodeCall(Collateral.initialize, (address(usdc), owner))));
+        creditLedger = CreditLedger(_deployProxy(address(new CreditLedger()), abi.encodeCall(CreditLedger.initialize, (owner))));
+        account = DjinnAccount(_deployProxy(address(new DjinnAccount()), abi.encodeCall(DjinnAccount.initialize, (owner))));
         maliciousLedger = new ReentrantCreditLedger();
 
         // Wire contracts

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {Account as DjinnAccount} from "../src/Account.sol";
 
 /// @title RedeployAccount
@@ -21,7 +22,11 @@ contract RedeployAccount is Script {
         vm.startBroadcast(deployerKey);
 
         // Deploy new Account
-        address na = address(new DjinnAccount(deployer));
+        DjinnAccount na_ = DjinnAccount(address(new ERC1967Proxy(
+            address(new DjinnAccount()),
+            abi.encodeCall(DjinnAccount.initialize, (deployer))
+        )));
+        address na = address(na_);
         console.log("New Account:", na);
 
         // Authorize Escrow and Audit on the new Account

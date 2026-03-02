@@ -53,7 +53,7 @@ if (typeof window !== "undefined" && process.env.NODE_ENV === "production") {
 export const SIGNAL_COMMITMENT_ABI = [
   "function commit((uint256 signalId, bytes encryptedBlob, bytes32 commitHash, string sport, uint256 maxPriceBps, uint256 slaMultiplierBps, uint256 maxNotional, uint256 minNotional, uint256 expiresAt, string[] decoyLines, string[] availableSportsbooks) p) external",
   "function cancelSignal(uint256 signalId) external",
-  "function getSignal(uint256 signalId) external view returns (tuple(address genius, bytes encryptedBlob, bytes32 commitHash, string sport, uint256 maxPriceBps, uint256 slaMultiplierBps, uint256 maxNotional, uint256 minNotional, uint256 expiresAt, string[] decoyLines, string[] availableSportsbooks, bytes walletRecoveryBlob, uint8 status, uint256 createdAt))",
+  "function getSignal(uint256 signalId) external view returns (tuple(address genius, bytes encryptedBlob, bytes32 commitHash, string sport, uint256 maxPriceBps, uint256 slaMultiplierBps, uint256 maxNotional, uint256 minNotional, uint256 expiresAt, string[] decoyLines, string[] availableSportsbooks, uint8 status, uint256 createdAt))",
   "function isActive(uint256 signalId) external view returns (bool)",
   "function signalExists(uint256 signalId) external view returns (bool)",
   "event SignalCommitted(uint256 indexed signalId, address indexed genius, string sport, uint256 maxPriceBps, uint256 slaMultiplierBps, uint256 maxNotional, uint256 expiresAt)",
@@ -90,7 +90,7 @@ export const CREDIT_LEDGER_ABI = [
 ] as const;
 
 export const ACCOUNT_ABI = [
-  "function getAccount(address genius, address idiot) external view returns (tuple(uint256 currentCycle, uint256 signalCount, int256 qualityScore, uint256[] purchaseIds, bool settled))",
+  "function getAccountState(address genius, address idiot) external view returns (tuple(uint256 currentCycle, uint256 signalCount, int256 qualityScore, uint256[] purchaseIds, bool settled))",
   "function getCurrentCycle(address genius, address idiot) external view returns (uint256)",
   "function isAuditReady(address genius, address idiot) external view returns (bool)",
   "function getSignalCount(address genius, address idiot) external view returns (uint256)",

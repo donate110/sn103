@@ -83,9 +83,9 @@ class TestGetSignal:
 
     @pytest.mark.asyncio
     async def test_parses_contract_result(self, client: ChainClient) -> None:
-        # 12-field Signal struct: genius, encryptedBlob, commitHash, sport,
-        # maxPriceBps, slaMultiplierBps, expiresAt, decoyLines,
-        # availableSportsbooks, walletRecoveryBlob, status, createdAt
+        # 13-field Signal struct: genius, encryptedBlob, commitHash, sport,
+        # maxPriceBps, slaMultiplierBps, maxNotional, minNotional, expiresAt,
+        # decoyLines, availableSportsbooks, status, createdAt
         mock_result = [
             "0xGenius",            # [0] genius
             b"\xab\xcd",          # [1] encryptedBlob
@@ -93,12 +93,13 @@ class TestGetSignal:
             "basketball_nba",     # [3] sport
             500,                   # [4] maxPriceBps
             200,                   # [5] slaMultiplierBps
-            1700100000,            # [6] expiresAt
-            ["line1", "line2"],   # [7] decoyLines
-            ["draftkings"],       # [8] availableSportsbooks
-            b"\xff",              # [9] walletRecoveryBlob
-            1,                     # [10] status
-            1700000000,            # [11] createdAt
+            100_000_000,           # [6] maxNotional
+            10_000_000,            # [7] minNotional
+            1700100000,            # [8] expiresAt
+            ["line1", "line2"],   # [9] decoyLines
+            ["draftkings"],       # [10] availableSportsbooks
+            1,                     # [11] status
+            1700000000,            # [12] createdAt
         ]
         mock_call = AsyncMock(return_value=mock_result)
         client._signal.functions.getSignal.return_value.call = mock_call

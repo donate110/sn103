@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import "forge-std/Test.sol";
 import {SignalCommitment} from "../src/SignalCommitment.sol";
 import {Signal, SignalStatus} from "../src/interfaces/IDjinn.sol";
+import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 contract SignalCommitmentTest is Test {
     SignalCommitment public sc;
@@ -14,7 +15,7 @@ contract SignalCommitmentTest is Test {
     address public unauthorizedCaller = address(0xA3);
 
     function setUp() public {
-        sc = new SignalCommitment(owner);
+        sc = SignalCommitment(_deployProxy(address(new SignalCommitment()), abi.encodeCall(SignalCommitment.initialize, (owner))));
         sc.setAuthorizedCaller(authorizedCaller, true);
     }
 

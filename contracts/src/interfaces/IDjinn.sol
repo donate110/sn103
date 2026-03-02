@@ -29,7 +29,6 @@ struct Signal {
     uint256 expiresAt;
     string[] decoyLines;
     string[] availableSportsbooks;
-    bytes walletRecoveryBlob;
     SignalStatus status;
     uint256 createdAt;
 }
