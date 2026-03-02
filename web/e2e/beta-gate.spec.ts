@@ -25,7 +25,7 @@ test.describe("Beta gate", () => {
 
     // If beta gate is active, enter the password
     if (await gateInput.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await gateInput.fill("djinnybaby");
+      await gateInput.fill(process.env.E2E_BETA_PASSWORD || "");
       await page.getByRole("button", { name: "Enter" }).click();
 
       // After correct password, should see the home page CTAs
