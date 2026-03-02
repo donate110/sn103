@@ -375,7 +375,7 @@ export default function AdminDashboard() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Admin Dashboard</h1>
           <p className="text-slate-500 text-sm mt-1">
-            Djinn Protocol infrastructure monitoring (v486)
+            Djinn Protocol infrastructure monitoring
           </p>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
