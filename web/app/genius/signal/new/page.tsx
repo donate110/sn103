@@ -1434,6 +1434,7 @@ export default function CreateSignal() {
 
         <SecretModal
           open={isProcessing}
+          variant={step === "preflight" ? "network" : step === "committing" ? "local" : "distribute"}
           title={step === "preflight" ? "Verifying Signal" : step === "committing" ? "Encrypting & Committing Signal" : "Distributing Key Shares"}
           message={step === "preflight"
             ? "Checking validator availability and verifying your lines are live on sportsbooks..."
@@ -1466,11 +1467,12 @@ export default function CreateSignal() {
             return (
               <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 mb-4">
                 <p className="text-sm font-medium text-amber-800 mb-1">
-                  Collateral needed: ${needed.toLocaleString("en-US")} USDC more
+                  Deposit ${needed.toLocaleString("en-US")} more to create this signal
                 </p>
                 <p className="text-xs text-amber-600 mb-3">
-                  At ${maxNotionalUsdc.toLocaleString()} max notional with {slaPct}% SLA, you need ${(Number(requiredCollateral) / 1e6).toLocaleString()} in available collateral.
-                  {walletHasUsdc ? ` You have $${(Number(walletUsdc) / 1e6).toLocaleString()} in your wallet.` : ""}
+                  This signal locks ${(Number(requiredCollateral) / 1e6).toLocaleString()} of collateral (${maxNotionalUsdc.toLocaleString()} notional &times; {slaPct}% SLA).
+                  {" "}You have ${(Number(collateralAvailable) / 1e6).toLocaleString()} unlocked but need ${(Number(requiredCollateral) / 1e6).toLocaleString()}.
+                  {walletHasUsdc ? ` Deposit from your $${(Number(walletUsdc) / 1e6).toLocaleString()} wallet balance below.` : ""}
                 </p>
                 <div className="flex gap-2">
                   <input

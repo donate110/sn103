@@ -150,22 +150,22 @@ export default function GeniusDashboard() {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
         <div className="card">
           <p className="text-xs text-slate-500 uppercase tracking-wide">
-            Wallet USDC
+            Wallet
           </p>
           <p className="text-2xl font-bold text-slate-900 mt-2">
             {walletUsdcLoading ? "..." : `$${formatUsdc(walletUsdc)}`}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Available to deposit</p>
+          <p className="text-xs text-slate-500 mt-1">USDC in your wallet</p>
         </div>
 
         <div className="card">
           <p className="text-xs text-slate-500 uppercase tracking-wide">
-            Collateral
+            Total Deposited
           </p>
           <p className="text-2xl font-bold text-slate-900 mt-2">
             {loading ? "..." : `$${formatUsdc(deposit)}`}
           </p>
-          <p className="text-xs text-slate-500 mt-1">USDC deposited</p>
+          <p className="text-xs text-slate-500 mt-1">In collateral contract</p>
         </div>
 
         <div className="card">
@@ -175,17 +175,17 @@ export default function GeniusDashboard() {
           <p className="text-2xl font-bold text-genius-500 mt-2">
             {loading ? "..." : `$${formatUsdc(locked)}`}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Backing signals</p>
+          <p className="text-xs text-slate-500 mt-1">Reserved for active signals</p>
         </div>
 
         <div className="card">
           <p className="text-xs text-slate-500 uppercase tracking-wide">
-            Available
+            Unlocked
           </p>
           <p className="text-2xl font-bold text-green-600 mt-2">
             {loading ? "..." : `$${formatUsdc(available)}`}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Free to withdraw</p>
+          <p className="text-xs text-slate-500 mt-1">Withdraw or back new signals</p>
         </div>
 
         <div className="card">

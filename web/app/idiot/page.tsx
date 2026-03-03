@@ -242,33 +242,33 @@ export default function IdiotDashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <div className="card">
           <p className="text-xs text-slate-500 uppercase tracking-wide">
-            Wallet USDC
+            Wallet
           </p>
           <p className="text-2xl font-bold text-slate-900 mt-2">
             {walletUsdcLoading ? "..." : `$${formatUsdc(walletUsdc)}`}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Available to deposit</p>
+          <p className="text-xs text-slate-500 mt-1">USDC in your wallet</p>
         </div>
 
         <div className="card">
           <p className="text-xs text-slate-500 uppercase tracking-wide">
-            Escrow Balance
+            Deposited
           </p>
           <p className="text-2xl font-bold text-slate-900 mt-2">
             {escrowLoading ? "..." : `$${formatUsdc(escrowBalance)}`}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Ready for purchases</p>
+          <p className="text-xs text-slate-500 mt-1">Ready for instant purchases</p>
         </div>
 
         <div className="card">
           <p className="text-xs text-slate-500 uppercase tracking-wide">
-            Djinn Credits
+            Credits
           </p>
           <p className="text-2xl font-bold text-idiot-500 mt-2">
             {creditLoading ? "..." : formatUsdc(creditBalance)}
           </p>
           <p className="text-xs text-slate-500 mt-1">
-            Offset purchase fees
+            From settlements, offsets fees
           </p>
         </div>
 
