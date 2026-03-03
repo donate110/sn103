@@ -33,6 +33,7 @@ class StoreShareRequest(BaseModel):
     share_y: str = Field(max_length=66)  # Hex-encoded BN254 field element (64 hex + 0x)
     encrypted_key_share: str = Field(max_length=4096)  # Hex-encoded encrypted AES key share
     encrypted_index_share: str = Field(default="", max_length=4096)  # Hex-encoded index share for MPC
+    shamir_threshold: int = Field(default=7, ge=1, le=10, description="Shamir reconstruction threshold declared by the client")
 
     @field_validator("share_y")
     @classmethod

@@ -247,17 +247,17 @@ export default function IdiotDashboard() {
           <p className="text-2xl font-bold text-slate-900 mt-2">
             {walletUsdcLoading ? "..." : `$${formatUsdc(walletUsdc)}`}
           </p>
-          <p className="text-xs text-slate-500 mt-1">USDC in your wallet</p>
+          <p className="text-xs text-slate-500 mt-1">USDC in your connected wallet</p>
         </div>
 
         <div className="card">
           <p className="text-xs text-slate-500 uppercase tracking-wide">
-            Deposited
+            Escrow Balance
           </p>
           <p className="text-2xl font-bold text-slate-900 mt-2">
             {escrowLoading ? "..." : `$${formatUsdc(escrowBalance)}`}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Ready for instant purchases</p>
+          <p className="text-xs text-slate-500 mt-1">Deposited for instant signal purchases</p>
         </div>
 
         <div className="card">

@@ -13,6 +13,7 @@ export interface StoreShareRequest {
   share_y: string; // Hex-encoded field element
   encrypted_key_share: string; // Hex-encoded
   encrypted_index_share: string; // Hex-encoded Shamir share of real index (for MPC)
+  shamir_threshold: number; // Declared Shamir reconstruction threshold
 }
 
 export interface StoreShareResponse {

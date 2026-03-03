@@ -329,9 +329,22 @@ def create_app(
 
     _ETH_ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
+    # Protocol-enforced minimum Shamir threshold. Validators reject shares
+    # from polynomials with threshold below this value regardless of client
+    # configuration. This prevents a compromised frontend or custom client
+    # from weakening signal secrecy by using threshold=1.
+    _MIN_SHAMIR_THRESHOLD = 3
+
     @app.post("/v1/signal", response_model=StoreShareResponse)
     async def store_share(req: StoreShareRequest) -> StoreShareResponse:
         """Accept and store an encrypted key share from a Genius."""
+        # Enforce minimum Shamir threshold at the protocol level
+        if req.shamir_threshold < _MIN_SHAMIR_THRESHOLD:
+            raise HTTPException(
+                status_code=400,
+                detail=f"shamir_threshold must be >= {_MIN_SHAMIR_THRESHOLD} for signal secrecy (got {req.shamir_threshold})",
+            )
+
         # Validate Ethereum address format at the API boundary
         if not _ETH_ADDR_RE.match(req.genius_address):
             raise HTTPException(

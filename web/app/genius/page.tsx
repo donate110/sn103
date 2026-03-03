@@ -147,7 +147,7 @@ export default function GeniusDashboard() {
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
         <div className="card">
           <p className="text-xs text-slate-500 uppercase tracking-wide">
             Wallet
@@ -155,37 +155,33 @@ export default function GeniusDashboard() {
           <p className="text-2xl font-bold text-slate-900 mt-2">
             {walletUsdcLoading ? "..." : `$${formatUsdc(walletUsdc)}`}
           </p>
-          <p className="text-xs text-slate-500 mt-1">USDC in your wallet</p>
+          <p className="text-xs text-slate-500 mt-1">USDC in your connected wallet</p>
         </div>
 
-        <div className="card">
+        <div className="card col-span-1 md:col-span-1">
           <p className="text-xs text-slate-500 uppercase tracking-wide">
-            Total Deposited
+            Collateral
           </p>
           <p className="text-2xl font-bold text-slate-900 mt-2">
             {loading ? "..." : `$${formatUsdc(deposit)}`}
           </p>
-          <p className="text-xs text-slate-500 mt-1">In collateral contract</p>
-        </div>
-
-        <div className="card">
-          <p className="text-xs text-slate-500 uppercase tracking-wide">
-            Locked
-          </p>
-          <p className="text-2xl font-bold text-genius-500 mt-2">
-            {loading ? "..." : `$${formatUsdc(locked)}`}
-          </p>
-          <p className="text-xs text-slate-500 mt-1">Reserved for active signals</p>
-        </div>
-
-        <div className="card">
-          <p className="text-xs text-slate-500 uppercase tracking-wide">
-            Unlocked
-          </p>
-          <p className="text-2xl font-bold text-green-600 mt-2">
-            {loading ? "..." : `$${formatUsdc(available)}`}
-          </p>
-          <p className="text-xs text-slate-500 mt-1">Withdraw or back new signals</p>
+          <p className="text-xs text-slate-500 mt-1">USDC deposited into the collateral contract</p>
+          <div className="mt-3 pt-3 border-t border-slate-100 flex gap-4">
+            <div>
+              <p className="text-xs text-slate-400">Locked</p>
+              <p className="text-sm font-semibold text-genius-500">
+                {loading ? "..." : `$${formatUsdc(locked)}`}
+              </p>
+              <p className="text-[10px] text-slate-400">Backing active signals</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400">Unlocked</p>
+              <p className="text-sm font-semibold text-green-600">
+                {loading ? "..." : `$${formatUsdc(available)}`}
+              </p>
+              <p className="text-[10px] text-slate-400">Available to use or withdraw</p>
+            </div>
+          </div>
         </div>
 
         <div className="card">

@@ -33,8 +33,21 @@ class TestStoreShareRequest:
             share_x=1,
             share_y="0xabcdef",
             encrypted_key_share="deadbeef",
+            shamir_threshold=7,
         )
         assert req.share_x == 1
+        assert req.shamir_threshold == 7
+
+    def test_valid_request_default_threshold(self) -> None:
+        """shamir_threshold defaults to 7 for backwards compatibility."""
+        req = StoreShareRequest(
+            signal_id="sig-1",
+            genius_address="0xGenius",
+            share_x=1,
+            share_y="0xabcdef",
+            encrypted_key_share="deadbeef",
+        )
+        assert req.shamir_threshold == 7
 
     def test_share_x_too_low(self) -> None:
         with pytest.raises(ValidationError, match="share_x"):
@@ -44,6 +57,7 @@ class TestStoreShareRequest:
                 share_x=0,
                 share_y="0xabcdef",
                 encrypted_key_share="deadbeef",
+                shamir_threshold=7,
             )
 
     def test_share_x_too_high(self) -> None:
@@ -54,6 +68,7 @@ class TestStoreShareRequest:
                 share_x=11,
                 share_y="0xabcdef",
                 encrypted_key_share="deadbeef",
+                shamir_threshold=7,
             )
 
     def test_invalid_hex_share_y(self) -> None:
@@ -64,6 +79,7 @@ class TestStoreShareRequest:
                 share_x=1,
                 share_y="not-hex!",
                 encrypted_key_share="deadbeef",
+                shamir_threshold=7,
             )
 
     def test_invalid_hex_encrypted_key_share(self) -> None:
@@ -74,6 +90,29 @@ class TestStoreShareRequest:
                 share_x=1,
                 share_y="0xabcdef",
                 encrypted_key_share="xyz!!",
+                shamir_threshold=7,
+            )
+
+    def test_shamir_threshold_too_low(self) -> None:
+        with pytest.raises(ValidationError, match="shamir_threshold"):
+            StoreShareRequest(
+                signal_id="sig-1",
+                genius_address="0xGenius",
+                share_x=1,
+                share_y="0xabcdef",
+                encrypted_key_share="deadbeef",
+                shamir_threshold=0,
+            )
+
+    def test_shamir_threshold_too_high(self) -> None:
+        with pytest.raises(ValidationError, match="shamir_threshold"):
+            StoreShareRequest(
+                signal_id="sig-1",
+                genius_address="0xGenius",
+                share_x=1,
+                share_y="0xabcdef",
+                encrypted_key_share="deadbeef",
+                shamir_threshold=11,
             )
 
 
@@ -280,6 +319,7 @@ class TestStringLengthLimits:
                 share_x=1,
                 share_y="abcdef",
                 encrypted_key_share="deadbeef",
+                shamir_threshold=7,
             )
 
     def test_buyer_address_too_long(self) -> None:

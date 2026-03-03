@@ -38,7 +38,6 @@ import {
   type SportOption,
 } from "@/lib/odds";
 
-const SHAMIR_TOTAL_SHARES = parseInt(process.env.NEXT_PUBLIC_SHAMIR_TOTAL ?? "10", 10);
 const SHAMIR_THRESHOLD = parseInt(process.env.NEXT_PUBLIC_SHAMIR_THRESHOLD ?? "7", 10);
 
 type WizardStep = "browse" | "review" | "configure" | "preflight" | "committing" | "distributing" | "success" | "error";
@@ -478,19 +477,25 @@ export default function CreateSignal() {
 
       setStep("distributing");
 
+      const validators = preflightValidators;
+      const signalIdStr = signalId.toString();
+
+      // Generate exactly one share per validator. The threshold is capped at
+      // the validator count so Shamir reconstruction always requires distinct
+      // validators -- never one validator holding enough shares to reconstruct.
+      const nShares = validators.length;
+      const effectiveThreshold = Math.min(SHAMIR_THRESHOLD, nShares);
+
       const keyBigInt = keyToBigInt(aesKey);
-      const shares = splitSecret(keyBigInt, SHAMIR_TOTAL_SHARES, SHAMIR_THRESHOLD);
+      const shares = splitSecret(keyBigInt, nShares, effectiveThreshold);
 
       // Also Shamir-split the real index for MPC executability checks
       // realIndex is 0-based internally, but 1-indexed for the protocol (1-10)
       const indexBigInt = BigInt(realIndex + 1);
-      const indexShares = splitSecret(indexBigInt, SHAMIR_TOTAL_SHARES, SHAMIR_THRESHOLD);
-
-      const validators = preflightValidators;
-      const signalIdStr = signalId.toString();
+      const indexShares = splitSecret(indexBigInt, nShares, effectiveThreshold);
 
       const storePromises = shares.map((share, i) => {
-        const validator = validators[i % validators.length];
+        const validator = validators[i];
         // Send only the individual Shamir share — NEVER the full AES key
         const shareHex = share.y.toString(16).padStart(64, "0");
         const indexShareHex = indexShares[i].y.toString(16).padStart(64, "0");
@@ -501,23 +506,24 @@ export default function CreateSignal() {
           share_y: share.y.toString(16),
           encrypted_key_share: shareHex,
           encrypted_index_share: indexShareHex,
+          shamir_threshold: effectiveThreshold,
         });
       });
 
       const results = await Promise.allSettled(storePromises);
       const succeeded = results.filter((r) => r.status === "fulfilled").length;
       const failed = results.filter((r) => r.status === "rejected").length;
-      if (succeeded < SHAMIR_THRESHOLD) {
+      if (succeeded < effectiveThreshold) {
         const errors = results
           .filter((r): r is PromiseRejectedResult => r.status === "rejected")
           .map((r) => r.reason?.message || String(r.reason))
           .slice(0, 3);
         throw new Error(
-          `Key distribution failed: ${succeeded} of ${SHAMIR_THRESHOLD} required validators responded.\n${errors.join("\n")}`,
+          `Key distribution failed: ${succeeded} of ${effectiveThreshold} required validators responded.\n${errors.join("\n")}`,
         );
       }
       if (failed > 0) {
-        console.warn(`${failed}/10 share stores failed (${succeeded} succeeded)`);
+        console.warn(`${failed}/${nShares} share stores failed (${succeeded} succeeded)`);
       }
 
       // Persist private signal data for wallet recovery and audit tracking
@@ -1517,6 +1523,15 @@ export default function CreateSignal() {
 
         {/* Sticky CTA bar */}
         <div className="sticky bottom-0 -mx-5 px-5 py-3 sm:-mx-8 sm:px-8 bg-white/95 backdrop-blur-sm border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-6 -mb-6">
+          {seedReady && !isProcessing && (
+            <div className="text-xs text-slate-400 mb-2 leading-relaxed">
+              <span className="text-slate-500 font-medium">What happens next:</span>{" "}
+              Your pick is encrypted locally with AES-256. The encryption key is then
+              split into one share per live validator using Shamir secret sharing
+              (threshold: {SHAMIR_THRESHOLD}). Multiple validators must cooperate via
+              MPC to verify a purchase. No single party (including us) can see your signal.
+            </div>
+          )}
           <button
             type="submit"
             disabled={isProcessing || commitLoading || seedDeriving || (() => {

@@ -95,6 +95,7 @@ class TestStoreShare:
             "share_x": 1,
             "share_y": hex(12345),
             "encrypted_key_share": "deadbeef",
+            "shamir_threshold": 7,
         })
         assert resp.status_code == 200
         data = resp.json()
@@ -109,6 +110,7 @@ class TestStoreShare:
             "share_x": 1,
             "share_y": hex(BN254_PRIME + 1),
             "encrypted_key_share": "deadbeef",
+            "shamir_threshold": 7,
         })
         assert resp.status_code == 400
         assert "BN254" in resp.json()["detail"]
@@ -121,6 +123,7 @@ class TestStoreShare:
             "share_x": 0,
             "share_y": hex(42),
             "encrypted_key_share": "deadbeef",
+            "shamir_threshold": 7,
         })
         assert resp.status_code == 422
 
@@ -132,6 +135,7 @@ class TestStoreShare:
             "share_x": 1,
             "share_y": "not-hex",
             "encrypted_key_share": "deadbeef",
+            "shamir_threshold": 7,
         })
         assert resp.status_code == 422
 
@@ -143,8 +147,22 @@ class TestStoreShare:
             "share_x": 1,
             "share_y": "0",
             "encrypted_key_share": "deadbeef",
+            "shamir_threshold": 7,
         })
         assert resp.status_code == 200
+
+    def test_rejects_low_shamir_threshold(self, client: TestClient) -> None:
+        """Validators reject shares with threshold below protocol minimum (3)."""
+        resp = client.post("/v1/signal", json={
+            "signal_id": "sig-low-t",
+            "genius_address": "0x" + "aa" * 20,
+            "share_x": 1,
+            "share_y": "ff",
+            "encrypted_key_share": "deadbeef",
+            "shamir_threshold": 1,
+        })
+        assert resp.status_code == 400
+        assert "shamir_threshold" in resp.json()["detail"]
 
 
 class TestPurchase:
@@ -402,6 +420,7 @@ class TestMetricsEndpoint:
             "share_x": 1,
             "share_y": "abcdef",
             "encrypted_key_share": "deadbeef",
+            "shamir_threshold": 7,
         })
         resp = client.get("/metrics")
         assert resp.status_code == 200
@@ -441,6 +460,7 @@ class TestInputValidation:
             "share_x": 1,
             "share_y": "not-hex!",
             "encrypted_key_share": "deadbeef",
+            "shamir_threshold": 7,
         })
         assert resp.status_code == 422
 
@@ -486,6 +506,7 @@ class TestInputValidation:
             "share_x": 1,
             "share_y": "abcdef",
             "encrypted_key_share": "deadbeef",
+            "shamir_threshold": 7,
         })
         assert resp.status_code == 400
         assert "Ethereum address" in resp.json()["detail"]
@@ -498,6 +519,7 @@ class TestInputValidation:
             "share_x": 1,
             "share_y": "abcdef",
             "encrypted_key_share": "deadbeef",
+            "shamir_threshold": 7,
         })
         assert resp.status_code == 422
 
@@ -860,6 +882,7 @@ class TestExceptionHandler:
             "share_x": 1,
             "share_y": "ff",
             "encrypted_key_share": "abcd",
+            "shamir_threshold": 7,
         })
         assert resp.status_code == 500
         assert resp.json()["detail"] == "Internal server error"
@@ -1187,6 +1210,7 @@ class TestFieldElementBoundsValidation:
             "share_x": 1,
             "share_y": oversized,
             "encrypted_key_share": "aabb",
+            "shamir_threshold": 7,
         })
         assert resp.status_code == 400
 
@@ -1198,6 +1222,7 @@ class TestFieldElementBoundsValidation:
             "share_x": 1,
             "share_y": "ff",
             "encrypted_key_share": "aabb",
+            "shamir_threshold": 7,
         })
         assert resp.status_code == 200
 

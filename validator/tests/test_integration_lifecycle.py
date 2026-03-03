@@ -68,6 +68,7 @@ class TestSignalLifecycle:
             "share_x": share.x,
             "share_y": hex(share.y)[2:],
             "encrypted_key_share": encrypted_aes_key.hex(),
+            "shamir_threshold": 7,
         })
         assert resp.status_code == 200
         assert resp.json()["stored"] is True
@@ -103,6 +104,7 @@ class TestSignalLifecycle:
             "share_x": share.x,
             "share_y": hex(share.y)[2:],
             "encrypted_key_share": encrypted_aes_key.hex(),
+            "shamir_threshold": 7,
         })
 
         # Purchase — available_indices does NOT include the real index (5)
@@ -131,6 +133,7 @@ class TestSignalLifecycle:
             "share_x": share.x,
             "share_y": hex(share.y)[2:],
             "encrypted_key_share": encrypted_aes_key.hex(),
+            "shamir_threshold": 7,
         })
 
         # First purchase
