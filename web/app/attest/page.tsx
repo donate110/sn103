@@ -7,11 +7,17 @@ interface AttestResult {
   url: string;
   success: boolean;
   verified: boolean;
+  /** Who performed verification: validator (server-side) or client (browser WASM) */
+  verifiedBy?: "validator" | "client" | null;
   proof_hex: string | null;
   response_body: string | null;
   server_name: string | null;
   timestamp: number;
   error: string | null;
+  /** Timing metadata (client-side wall clock) */
+  startedAt?: number;
+  finishedAt?: number;
+  durationMs?: number;
 }
 
 type Status = "idle" | "proving" | "verifying" | "done" | "error";
@@ -54,6 +60,8 @@ export default function AttestPage() {
       setResult(null);
       setErrorMsg(null);
 
+      const t0 = Date.now();
+
       try {
         const requestId = `attest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const resp = await fetch("/api/attest", {
@@ -69,6 +77,11 @@ export default function AttestPage() {
         }
 
         const data = await resp.json();
+
+        // Track who verified the proof
+        if (data.verified) {
+          data.verifiedBy = "validator";
+        }
 
         // If proof exists but validator didn't verify, try client-side WASM verification
         if (data.success && !data.verified && data.proof_hex) {
@@ -87,6 +100,9 @@ export default function AttestPage() {
                 requestedHost.endsWith("." + proofServer) ||
                 proofServer.endsWith("." + requestedHost);
               data.verified = serverOk;
+              if (serverOk) {
+                data.verifiedBy = "client";
+              }
               if (!serverOk) {
                 data.error = `server mismatch: expected ${requestedHost}, got ${proofServer}`;
               }
@@ -102,6 +118,12 @@ export default function AttestPage() {
             // WASM verification failed — show result as-is
           }
         }
+
+        // Attach timing metadata
+        const t1 = Date.now();
+        data.startedAt = t0;
+        data.finishedAt = t1;
+        data.durationMs = t1 - t0;
 
         setResult(data);
         setStatus("done");
@@ -333,11 +355,18 @@ function ResultCard({
     <div className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
       <div className="flex items-center gap-2 mb-4">
         <span
-          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium cursor-default ${
             result.verified
               ? "bg-green-100 text-green-700 border border-green-200"
               : "bg-amber-100 text-amber-700 border border-amber-200"
           }`}
+          title={
+            result.verified
+              ? result.verifiedBy === "client"
+                ? "Proof is valid and was verified client-side (browser WASM)"
+                : "Proof verified by validator (server-side)"
+              : "Proof was not verified"
+          }
         >
           {result.verified ? "Verified" : "Unverified"}
         </span>
@@ -361,6 +390,18 @@ function ResultCard({
               : "\u2014"}
           </dd>
         </div>
+        {result.durationMs != null && (
+          <div>
+            <dt className="text-slate-500">Timing</dt>
+            <dd className="text-slate-900 text-xs font-mono tabular-nums">
+              {new Date(result.startedAt!).toLocaleTimeString()} &rarr;{" "}
+              {new Date(result.finishedAt!).toLocaleTimeString()}{" "}
+              <span className="text-slate-500">
+                ({(result.durationMs / 1000).toFixed(1)}s)
+              </span>
+            </dd>
+          </div>
+        )}
         {proofFingerprint && (
           <div>
             <dt className="text-slate-500">Proof fingerprint</dt>
