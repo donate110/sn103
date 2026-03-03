@@ -384,7 +384,7 @@ export default function AdminDashboard() {
               Last: {lastRefresh.toLocaleTimeString()}
             </span>
           )}
-          <div className="relative">
+          <div>
             <button
               onClick={async () => {
                 await fetch("/api/admin/clear-cache", { method: "POST" });
@@ -393,30 +393,10 @@ export default function AdminDashboard() {
               disabled={loading}
               className="px-3 py-1.5 text-sm font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50"
             >
-              {loading ? `Refreshing...` : "Refresh"}
+              {loading && Object.keys(refreshSteps).length > 0
+                ? `${Object.values(refreshSteps).filter(s => s === "done").length}/${Object.keys(refreshSteps).length} loaded`
+                : loading ? "Refreshing..." : "Refresh"}
             </button>
-            {loading && Object.keys(refreshSteps).length > 0 && (
-              <div className="absolute right-0 top-full mt-2 bg-white border border-slate-200 rounded-lg shadow-lg p-3 z-50 w-56">
-                <div className="text-xs font-medium text-slate-500 mb-2">
-                  {Object.values(refreshSteps).filter(s => s === "done").length}/{Object.keys(refreshSteps).length} sources loaded
-                </div>
-                <div className="space-y-1">
-                  {Object.entries(refreshSteps).map(([label, status]) => (
-                    <div key={label} className="flex items-center gap-2 text-xs">
-                      <span className={status === "done" ? "text-green-500" : status === "error" ? "text-red-500" : "text-slate-300"}>
-                        {status === "done" ? "\u2713" : status === "error" ? "\u2717" : "\u25cb"}
-                      </span>
-                      <span className={status === "pending" ? "text-slate-400" : status === "error" ? "text-red-600" : "text-slate-700"}>
-                        {label}
-                      </span>
-                      {status === "pending" && label === refreshStep && (
-                        <span className="text-slate-400 animate-pulse">&hellip;</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
           {GRAFANA_URL && (
             <a

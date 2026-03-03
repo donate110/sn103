@@ -379,20 +379,19 @@ class MinerScorer:
                 avg_latencies[m.uid] = sum(lats) / len(lats)
 
         if not avg_latencies:
-            return {m.uid: 1.0 for m in miners}
+            return {m.uid: 0.0 for m in miners}
 
         min_lat = min(avg_latencies.values())
         max_lat = max(avg_latencies.values())
         spread = max_lat - min_lat
 
         if spread == 0:
-            return {m.uid: 1.0 for m in miners}
+            return {uid: 1.0 for uid in avg_latencies} | {m.uid: 0.0 for m in miners if m.uid not in avg_latencies}
 
         scores = {uid: 1.0 - (lat - min_lat) / spread for uid, lat in avg_latencies.items()}
-        median = sorted(scores.values())[len(scores) // 2] if scores else 1.0
         for m in miners:
             if m.uid not in scores:
-                scores[m.uid] = median
+                scores[m.uid] = 0.0
         return scores
 
     @staticmethod
@@ -405,12 +404,10 @@ class MinerScorer:
         """
         total = sum(raw.values())
         if total < 1e-12:
-            n = len(raw)
-            return {uid: 1.0 / n for uid in raw} if n > 0 else {}
+            return {uid: 0.0 for uid in raw}
         result = {uid: score / total for uid, score in raw.items()}
         if not all(math.isfinite(v) for v in result.values()):
-            n = len(result)
-            return {uid: 1.0 / n for uid in result} if n > 0 else {}
+            return {uid: 0.0 for uid in result}
         return result
 
     def select_attest_miners(self, candidate_uids: list[int], max_results: int = 5) -> list[tuple[int, str]]:

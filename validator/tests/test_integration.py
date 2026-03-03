@@ -862,13 +862,13 @@ class TestMultiEpochScoring:
         weights = scorer.compute_weights(is_active_epoch=True)
         assert weights == {}
 
-    def test_all_zero_scores_gives_uniform_weights(
+    def test_all_zero_scores_gives_zero_weights(
         self, scorer: MinerScorer
     ) -> None:
-        """When all miners have zero scores, weights are distributed uniformly."""
+        """When all miners have zero scores, weights are zero (no free emissions)."""
         for uid in range(1, 4):
             scorer.get_or_create(uid, f"hk{uid}")
 
         weights = scorer.compute_weights(is_active_epoch=True)
         for uid in range(1, 4):
-            assert weights[uid] == pytest.approx(1 / 3)
+            assert weights[uid] == 0.0

@@ -146,8 +146,8 @@ class TestMinerScorer:
         assert scorer.compute_weights(is_active_epoch=True) == {}
         assert scorer.compute_weights(is_active_epoch=False) == {}
 
-    def test_zero_total_weight_distributes_evenly(self) -> None:
-        """When all raw scores are 0, weights should be distributed evenly."""
+    def test_zero_total_weight_returns_zeros(self) -> None:
+        """When all raw scores are 0, weights should be 0 (no free emissions)."""
         scorer = MinerScorer()
         for uid in range(3):
             scorer.get_or_create(uid, f"h{uid}")
@@ -155,7 +155,7 @@ class TestMinerScorer:
         weights = scorer.compute_weights(is_active_epoch=True)
         assert len(weights) == 3
         for uid in range(3):
-            assert weights[uid] == pytest.approx(1.0 / 3)
+            assert weights[uid] == 0.0
 
     def test_history_log_scaling(self) -> None:
         scorer = MinerScorer()
@@ -172,7 +172,7 @@ class TestMinerScorer:
         assert weights[1] > weights[0]
 
     def test_speed_scores_uniform_when_no_latencies(self) -> None:
-        """When no miners have latencies, all get speed score 1.0."""
+        """When no miners have latencies, all get speed score 0.0 (no free credit)."""
         scorer = MinerScorer()
         for uid in range(3):
             scorer.get_or_create(uid, f"h{uid}")
@@ -180,28 +180,27 @@ class TestMinerScorer:
         scores = scorer._normalize_speed(list(scorer._miners.values()))
         assert len(scores) == 3
         for uid in range(3):
-            assert scores[uid] == 1.0
+            assert scores[uid] == 0.0
 
     def test_normalize_near_zero_total(self) -> None:
-        """Near-zero total should produce uniform weights, not Inf."""
+        """Near-zero total should produce zero weights, not Inf or uniform."""
         raw = {0: 1e-15, 1: 1e-15, 2: 1e-15}
         result = MinerScorer._normalize(raw)
         assert len(result) == 3
         for uid in range(3):
-            assert result[uid] == pytest.approx(1.0 / 3)
-            assert math.isfinite(result[uid])
+            assert result[uid] == 0.0
 
     def test_normalize_negative_scores_handled(self) -> None:
-        """Negative raw scores that sum near zero use uniform fallback."""
+        """Negative raw scores that sum near zero produce zero weights."""
         raw = {0: 0.5, 1: -0.5}
         result = MinerScorer._normalize(raw)
-        # Total is ~0 so should fall back to uniform
+        # Total is ~0 so should fall back to zeros
         assert len(result) == 2
         for uid in range(2):
-            assert result[uid] == pytest.approx(0.5)
+            assert result[uid] == 0.0
 
-    def test_speed_scores_median_for_unqueried_miners(self) -> None:
-        """Miners without latencies get median speed score, not zero."""
+    def test_speed_scores_zero_for_unqueried_miners(self) -> None:
+        """Miners without latencies get 0 speed score (no free credit)."""
         scorer = MinerScorer()
         # Miners 0-2 have latencies; miner 3 has none
         for uid, lat in [(0, 0.1), (1, 0.5), (2, 1.0)]:
@@ -210,12 +209,10 @@ class TestMinerScorer:
         scorer.get_or_create(3, "h3")  # No queries, no latencies
         scores = scorer._normalize_speed(list(scorer._miners.values()))
         assert 3 in scores, "Unqueried miner must be in speed scores"
-        assert scores[3] > 0.0, "Unqueried miner must not be penalized to zero"
-        # Median of {1.0, ~0.56, 0.0} = ~0.56
-        assert 0.0 < scores[3] < 1.0
+        assert scores[3] == 0.0, "Unqueried miner must get zero speed score"
 
     def test_speed_scores_all_same_latency_includes_all(self) -> None:
-        """When all latencies are equal, all miners (including unqueried) get 1.0."""
+        """When all latencies are equal, queried miners get 1.0, unqueried get 0.0."""
         scorer = MinerScorer()
         for uid in range(3):
             m = scorer.get_or_create(uid, f"h{uid}")
@@ -223,17 +220,18 @@ class TestMinerScorer:
         scorer.get_or_create(3, "h3")  # No latencies
         scores = scorer._normalize_speed(list(scorer._miners.values()))
         assert len(scores) == 4
-        for uid in range(4):
+        for uid in range(3):
             assert scores[uid] == 1.0
+        assert scores[3] == 0.0
 
     def test_normalize_guards_non_finite_values(self) -> None:
-        """If division somehow produces inf/nan, falls back to uniform."""
+        """If division somehow produces inf/nan, falls back to zeros."""
         # Simulate by injecting inf values in raw dict
         raw = {0: float("inf"), 1: 1.0}
         result = MinerScorer._normalize(raw)
-        # inf / (inf + 1) = nan, so should fall back to uniform
+        # inf / (inf + 1) = nan, so should fall back to zeros
         assert len(result) == 2
-        assert all(math.isfinite(v) for v in result.values())
+        assert all(v == 0.0 for v in result.values())
 
     def test_normalize_all_finite(self) -> None:
         """Normal case produces all finite weights summing to ~1.0."""
