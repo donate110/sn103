@@ -278,11 +278,12 @@ class ShareStore:
 
     def has(self, signal_id: str) -> bool:
         """Check if we hold a share for this signal."""
-        row = self._conn.execute(
-            "SELECT 1 FROM shares WHERE signal_id = ? LIMIT 1",
-            (signal_id,),
-        ).fetchone()
-        return row is not None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM shares WHERE signal_id = ? LIMIT 1",
+                (signal_id,),
+            ).fetchone()
+            return row is not None
 
     def release(self, signal_id: str, buyer_address: str) -> bytes | None:
         """Release the encrypted key share to a buyer.
@@ -353,13 +354,15 @@ class ShareStore:
 
     @property
     def count(self) -> int:
-        row = self._conn.execute("SELECT COUNT(*) FROM shares").fetchone()
-        return row[0] if row else 0
+        with self._lock:
+            row = self._conn.execute("SELECT COUNT(*) FROM shares").fetchone()
+            return row[0] if row else 0
 
     def active_signals(self) -> list[str]:
         """List all signal IDs we hold shares for."""
-        rows = self._conn.execute("SELECT signal_id FROM shares").fetchall()
-        return [r[0] for r in rows]
+        with self._lock:
+            rows = self._conn.execute("SELECT signal_id FROM shares").fetchall()
+            return [r[0] for r in rows]
 
     def close(self) -> None:
         """Close the database connection."""

@@ -113,20 +113,20 @@ async def epoch_loop(
             async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
                 await asyncio.gather(*[_check_health(client, uid) for uid in miner_uids])
 
+            responded = sum(
+                1 for uid in miner_uids
+                if (m := scorer.get(uid)) is not None and m.health_checks_responded > 0
+            ) if miner_uids else 0
+            failed_uids = [
+                uid for uid in miner_uids
+                if (m := scorer.get(uid)) is not None and m.health_checks_responded == 0
+            ] if miner_uids else []
             if activity is not None and miner_uids:
-                responded = sum(
-                    1 for uid in miner_uids
-                    if (m := scorer.get(uid)) is not None and m.health_checks_responded > 0
-                )
-                failed_uids = [
-                    uid for uid in miner_uids
-                    if (m := scorer.get(uid)) is not None and m.health_checks_responded == 0
-                ]
                 activity.record(
                     ActivityCategory.HEALTH_CHECK,
                     f"{responded}/{len(miner_uids)} miners responded",
                     responded=responded, total=len(miner_uids),
-                    failed_uids=failed_uids[:50],  # Cap to avoid huge payloads
+                    failed_uids=failed_uids[:50],
                 )
             if telemetry and miner_uids:
                 telemetry.record(
@@ -298,6 +298,10 @@ async def epoch_loop(
                                 if telemetry:
                                     telemetry.record("audit_vote_error", f"Vote failed: {err_str[:200]}", error=err_str[:500])
                                 continue  # Don't mark settled if vote failed
+                    else:
+                        # No chain client or read-only mode — skip settlement
+                        log.debug("audit_vote_skipped_no_writer", genius=result.genius, idiot=result.idiot, cycle=result.cycle)
+                        continue
                     audit_set_store.mark_settled(
                         result.genius, result.idiot, result.cycle,
                     )
@@ -305,8 +309,11 @@ async def epoch_loop(
             # Prune old resolved signals to prevent memory growth
             await outcome_attestor.cleanup_resolved()
 
-            # Determine if this is an active epoch (any signals being processed)
-            is_active = share_store.count > 0
+            # Active epoch = miners were actually challenged this interval
+            is_active = any(
+                m.queries_total > 0 or m.attestations_total > 0
+                for m in scorer._miners.values()
+            )
 
             # Compute and set weights — only reset metrics AFTER weights are set
             # so that challenge data accumulates across the full interval

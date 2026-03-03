@@ -463,8 +463,9 @@ class MinerScorer:
                 break
             result.append((uid, "proven"))
 
-        # Fill remaining slots with up to 2 unproven miners
+        # Fill remaining slots with up to 2 random unproven miners
         unproven_limit = min(2, max_results - len(result))
+        random.shuffle(unproven)
         for uid in unproven[:unproven_limit]:
             result.append((uid, "unproven"))
 
