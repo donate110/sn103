@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useCallback, useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAccount } from "wagmi";
@@ -27,10 +27,25 @@ export default function GeniusSignalDetail() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   // Find local private data for this signal (real pick, decoys, etc.)
+  const [localCleared, setLocalCleared] = useState(false);
   const savedData = useMemo(() => {
-    if (!address) return null;
+    if (localCleared || !address) return null;
     const saved = getSavedSignals(address);
     return saved.find((s) => s.signalId === signalId) ?? null;
+  }, [address, signalId, localCleared]);
+
+  const clearLocalData = useCallback(() => {
+    if (!address) return;
+    const key = `djinn-signal-data:${address.toLowerCase()}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const arr = JSON.parse(raw) as Array<{ signalId: string }>;
+        const filtered = arr.filter((s) => s.signalId !== signalId);
+        localStorage.setItem(key, JSON.stringify(filtered));
+      }
+    } catch { /* ignore */ }
+    setLocalCleared(true);
   }, [address, signalId]);
 
   const isOwner = signal && address
@@ -245,56 +260,102 @@ export default function GeniusSignalDetail() {
       </div>
 
       {/* Lines (decoys + real pick if local data available) */}
-      <div className="card mb-6">
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">
-          Lines
-          {savedData && (
-            <span className="text-sm font-normal text-genius-500 ml-2">
-              Your real pick is highlighted
-            </span>
-          )}
-        </h2>
-        {signal.decoyLines.length === 0 ? (
-          <p className="text-slate-500 text-sm">No line data available.</p>
-        ) : (
-          <div className="space-y-2">
-            {signal.decoyLines.map((raw, i) => {
-              const isReal = savedData?.realIndex === i + 1;
-              const structured = parseLine(raw);
-              return (
-                <div
-                  key={i}
-                  className={`px-3 py-2.5 rounded-lg text-sm ${
-                    isReal
-                      ? "bg-genius-50 border-2 border-genius-300 text-genius-800"
-                      : "bg-slate-50 border border-slate-200 text-slate-600"
-                  }`}
-                >
-                  {structured ? (
-                    <LineDisplay line={structured} index={i + 1} isReal={isReal} />
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      {isReal && (
-                        <span className="text-xs font-bold text-genius-500 uppercase">
-                          Real
-                        </span>
-                      )}
-                      <span className="text-slate-500">Line {i + 1}:</span>
-                      <span className="font-mono text-xs break-all">{raw}</span>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+      {savedData ? (
+        /* Dark treatment: real pick is client-side secret, only visible to the genius */
+        <div className="rounded-2xl bg-slate-900 p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">
+              Lines
+              <span className="text-sm font-normal text-genius-400 ml-2">
+                Your real pick is highlighted
+              </span>
+            </h2>
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-1.5 text-xs text-slate-400">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+                Only visible to you
+              </span>
+              <button
+                type="button"
+                onClick={clearLocalData}
+                className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors"
+                title="Clear local data for this signal (simulates a new browser)"
+              >
+                clear
+              </button>
+            </div>
           </div>
-        )}
-        {!savedData && (
+          {signal.decoyLines.length === 0 ? (
+            <p className="text-slate-400 text-sm">No line data available.</p>
+          ) : (
+            <div className="space-y-2">
+              {signal.decoyLines.map((raw, i) => {
+                const isReal = savedData?.realIndex === i + 1;
+                const structured = parseLine(raw);
+                return (
+                  <div
+                    key={i}
+                    className={`px-3 py-2.5 rounded-lg text-sm ${
+                      isReal
+                        ? "bg-genius-500/20 border-2 border-genius-400 text-genius-200"
+                        : "bg-slate-800 border border-slate-700 text-slate-400"
+                    }`}
+                  >
+                    {structured ? (
+                      <LineDisplay line={structured} index={i + 1} isReal={isReal} dark />
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        {isReal && (
+                          <span className="text-xs font-bold text-genius-400 uppercase">
+                            Real
+                          </span>
+                        )}
+                        <span className="text-slate-500">Line {i + 1}:</span>
+                        <span className="font-mono text-xs break-all">{raw}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
+        /* Light card when no local data — just public lines, no secret revealed */
+        <div className="card mb-6">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">Lines</h2>
+          {signal.decoyLines.length === 0 ? (
+            <p className="text-slate-500 text-sm">No line data available.</p>
+          ) : (
+            <div className="space-y-2">
+              {signal.decoyLines.map((raw, i) => {
+                const structured = parseLine(raw);
+                return (
+                  <div
+                    key={i}
+                    className="px-3 py-2.5 rounded-lg text-sm bg-slate-50 border border-slate-200 text-slate-600"
+                  >
+                    {structured ? (
+                      <LineDisplay line={structured} index={i + 1} isReal={false} />
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500">Line {i + 1}:</span>
+                        <span className="font-mono text-xs break-all">{raw}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <p className="text-xs text-slate-400 mt-3">
             Local signal data not found for this signal. The real pick cannot be highlighted.
             This may happen if the signal was created in a different browser session.
           </p>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Actions */}
       {isOwner && !cancelSuccess && (
@@ -380,10 +441,12 @@ function LineDisplay({
   line,
   index,
   isReal,
+  dark,
 }: {
   line: StructuredLine;
   index: number;
   isReal: boolean;
+  dark?: boolean;
 }) {
   const display = formatLine(line);
   const sportLabel = line.sport
@@ -398,18 +461,28 @@ function LineDisplay({
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2 flex-wrap">
         {isReal && (
-          <span className="inline-flex items-center rounded-full bg-genius-100 text-genius-700 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+            dark ? "bg-genius-500/30 text-genius-300" : "bg-genius-100 text-genius-700"
+          }`}>
             Real Pick
           </span>
         )}
-        <span className={`text-xs ${isReal ? "text-genius-500" : "text-slate-400"}`}>
+        <span className={`text-xs ${
+          isReal
+            ? dark ? "text-genius-400" : "text-genius-500"
+            : dark ? "text-slate-500" : "text-slate-400"
+        }`}>
           #{index}
         </span>
-        <span className={`font-medium ${isReal ? "text-genius-800" : "text-slate-700"}`}>
+        <span className={`font-medium ${
+          isReal
+            ? dark ? "text-genius-200" : "text-genius-800"
+            : dark ? "text-slate-300" : "text-slate-700"
+        }`}>
           {display}
         </span>
       </div>
-      <div className="flex items-center gap-2 text-[11px] text-slate-400">
+      <div className={`flex items-center gap-2 text-[11px] ${dark ? "text-slate-500" : "text-slate-400"}`}>
         <span>{sportLabel}</span>
         <span>&middot;</span>
         <span>{marketLabel}</span>
