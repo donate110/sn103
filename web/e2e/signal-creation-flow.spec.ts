@@ -13,7 +13,8 @@ test.describe("Signal creation flow (wallet connected)", () => {
     await expect(page.getByText("Create Signal")).toBeVisible();
 
     // Should show sport groups (NBA is the first default sport)
-    await expect(page.getByText("NBA")).toBeVisible();
+    // NBA button renders in both mobile and desktop layouts, use first()
+    await expect(page.getByRole("button", { name: "NBA" }).first()).toBeVisible();
 
     // Events should load from mocked API
     await expect(

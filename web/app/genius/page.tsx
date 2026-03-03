@@ -7,7 +7,7 @@ import QualityScore from "@/components/QualityScore";
 import { useCollateral, useDepositCollateral, useWithdrawCollateral, useWalletUsdcBalance, useEarlyExit, useCancelSignal, humanizeError } from "@/lib/hooks";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
 import { useAuditHistory } from "@/lib/hooks/useAuditHistory";
-import { useSettledSignals, getSavedSignals } from "@/lib/hooks/useSettledSignals";
+import { getSavedSignals } from "@/lib/hooks/useSettledSignals";
 import { useActiveRelationships, type ActiveRelationship } from "@/lib/hooks/useActiveRelationships";
 import { formatUsdc, parseUsdc, formatBps, truncateAddress } from "@/lib/types";
 
@@ -19,8 +19,6 @@ export default function GeniusDashboard() {
   const { withdraw: withdrawCollateral, loading: withdrawLoading } = useWithdrawCollateral();
   const { signals: mySignals, loading: signalsLoading } = useActiveSignals(undefined, address, true);
   const { audits, loading: auditsLoading, aggregateQualityScore } = useAuditHistory(address);
-  const { signals: settledSignals } = useSettledSignals(address);
-
   // Map signal IDs to their minerVerified status from localStorage
   const verifiedMap = useMemo(() => {
     const saved = getSavedSignals(address);
@@ -194,6 +192,72 @@ export default function GeniusDashboard() {
         </div>
       </div>
 
+      {/* Collateral Management */}
+      <section className="mb-8">
+        <h2 className="text-xl font-semibold text-slate-900 mb-4">
+          Collateral Management
+        </h2>
+        <div className="card">
+          {txSuccess && (
+            <div className="rounded-lg bg-green-50 border border-green-200 p-3 mb-4" role="status">
+              <p className="text-xs text-green-700">{txSuccess}</p>
+            </div>
+          )}
+          {txError && (
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 mb-4" role="alert">
+              <p className="text-xs text-red-600">{txError}</p>
+            </div>
+          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <form onSubmit={(e) => { e.preventDefault(); handleDeposit(); }}>
+              <label htmlFor="depositCollateral" className="label">Deposit USDC Collateral</label>
+              <div className="flex gap-2">
+                <input
+                  id="depositCollateral"
+                  type="number"
+                  inputMode="decimal"
+                  placeholder="Amount (USDC)"
+                  className="input flex-1"
+                  value={depositAmount}
+                  onChange={(e) => setDepositAmount(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  className="btn-primary whitespace-nowrap"
+                  disabled={depositLoading || !depositAmount}
+                >
+                  {depositLoading ? "Depositing..." : "Deposit"}
+                </button>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                First deposit requires a one-time USDC approval.
+              </p>
+            </form>
+            <form onSubmit={(e) => { e.preventDefault(); handleWithdraw(); }}>
+              <label htmlFor="withdrawCollateral" className="label">Withdraw Available Collateral</label>
+              <div className="flex gap-2">
+                <input
+                  id="withdrawCollateral"
+                  type="number"
+                  inputMode="decimal"
+                  placeholder="Amount (USDC)"
+                  className="input flex-1"
+                  value={withdrawAmount}
+                  onChange={(e) => setWithdrawAmount(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  className="btn-secondary whitespace-nowrap"
+                  disabled={withdrawLoading || !withdrawAmount}
+                >
+                  {withdrawLoading ? "Withdrawing..." : "Withdraw"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
       {/* My Signals */}
       <section className="mb-8">
         {(() => {
@@ -331,97 +395,20 @@ export default function GeniusDashboard() {
         })()}
       </section>
 
-      {/* Audit History */}
-      <section className="mb-8">
-        <h2 className="text-xl font-semibold text-slate-900 mb-4">
-          Audit History
-        </h2>
-        <div className="card overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-slate-500 border-b border-slate-200">
-                <th className="pb-3 font-medium">Cycle</th>
-                <th className="pb-3 font-medium">Idiot</th>
-                <th className="pb-3 font-medium">QS Delta</th>
-                <th className="pb-3 font-medium">Outcome</th>
-                <th className="pb-3 font-medium">Earned</th>
-                <th className="pb-3 font-medium">Fee</th>
-                <th className="pb-3 font-medium">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auditsLoading ? (
-                <>
-                  {[1, 2, 3].map((i) => (
-                    <tr key={i} className="border-b border-slate-100 animate-pulse">
-                      <td className="py-3"><div className="h-4 bg-slate-100 rounded w-8" /></td>
-                      <td className="py-3"><div className="h-4 bg-slate-100 rounded w-20" /></td>
-                      <td className="py-3"><div className="h-4 bg-slate-100 rounded w-12" /></td>
-                      <td className="py-3"><div className="h-5 bg-slate-100 rounded-full w-16" /></td>
-                      <td className="py-3"><div className="h-4 bg-slate-100 rounded w-14" /></td>
-                      <td className="py-3"><div className="h-4 bg-slate-100 rounded w-10" /></td>
-                      <td className="py-3"><div className="h-4 bg-slate-100 rounded w-20" /></td>
-                    </tr>
-                  ))}
-                </>
-              ) : audits.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="text-center text-slate-500 py-8">
-                    No audit history yet. Audits happen automatically after every 10
-                    signals settle between you and a buyer.
-                  </td>
-                </tr>
-              ) : (
-                audits.map((a, i) => (
-                  <tr key={i} className="border-b border-slate-100">
-                    <td className="py-3">{a.cycle.toString()}</td>
-                    <td className="py-3">{truncateAddress(a.idiot)}</td>
-                    <td className="py-3">
-                      <span className={Number(a.qualityScore) >= 0 ? "text-green-600" : "text-red-500"}>
-                        {Number(a.qualityScore) >= 0 ? "+" : ""}{a.qualityScore.toString()}
-                      </span>
-                    </td>
-                    <td className="py-3">
-                      {a.isEarlyExit ? (
-                        <span className="rounded-full px-2 py-0.5 text-xs bg-yellow-100 text-yellow-700">Early Exit</span>
-                      ) : Number(a.qualityScore) >= 0 ? (
-                        <span className="rounded-full px-2 py-0.5 text-xs bg-green-100 text-green-700">Favorable</span>
-                      ) : (
-                        <span className="rounded-full px-2 py-0.5 text-xs bg-red-100 text-red-700">Unfavorable</span>
-                      )}
-                    </td>
-                    <td className="py-3">
-                      {a.trancheA > 0n ? (
-                        <span className="text-green-600">${formatUsdc(a.trancheA)}</span>
-                      ) : (
-                        <span className="text-slate-400">-</span>
-                      )}
-                    </td>
-                    <td className="py-3">
-                      {a.protocolFee > 0n ? (
-                        <span className="text-slate-500">${formatUsdc(a.protocolFee)}</span>
-                      ) : (
-                        <span className="text-slate-400">-</span>
-                      )}
-                    </td>
-                    <td className="py-3 text-slate-500">Block {a.blockNumber}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      {/* Active Relationships & Early Exit */}
+      <RelationshipsSection address={address} />
 
-      {/* Settlement History */}
+      {/* History */}
       <section className="mb-8">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-slate-900">
-            Settlement History
+            History
           </h2>
-          <Link href="/genius/track-record" className="text-sm text-genius-500 hover:text-genius-600 transition-colors">
-            View Full Track Record
-          </Link>
+          {audits.length > 0 && (
+            <Link href="/genius/track-record" className="text-sm text-genius-500 hover:text-genius-600 transition-colors">
+              View Full Track Record
+            </Link>
+          )}
         </div>
         {auditsLoading ? (
           <div className="animate-pulse space-y-3">
@@ -440,10 +427,10 @@ export default function GeniusDashboard() {
         ) : audits.length === 0 ? (
           <div className="card text-center py-8">
             <p className="text-slate-500 mb-3">
-              No settled audit sets yet.
+              No settled cycles yet.
             </p>
             <p className="text-xs text-slate-400">
-              Settlements occur after 10 signals with each buyer are resolved by validator consensus.
+              Every 10 signals between you and a buyer are settled automatically by validator consensus.
             </p>
           </div>
         ) : (
@@ -455,94 +442,35 @@ export default function GeniusDashboard() {
                     <p className="text-sm font-medium text-slate-900">
                       Cycle {a.cycle.toString()} &middot; {truncateAddress(a.idiot)}
                     </p>
-                    <div className="flex gap-4 mt-1 text-xs text-slate-500">
-                      <span>Tranche A: ${formatUsdc(a.trancheA)}</span>
-                      {a.trancheB > 0n && <span>Tranche B: ${formatUsdc(a.trancheB)}</span>}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-slate-500">
+                      <span>Earned: ${formatUsdc(a.trancheA)}</span>
+                      {a.trancheB > 0n && <span>Bonus: ${formatUsdc(a.trancheB)}</span>}
+                      {a.protocolFee > 0n && <span>Fee: ${formatUsdc(a.protocolFee)}</span>}
                       {a.isEarlyExit && <span className="text-amber-500">Early Exit</span>}
                     </div>
                   </div>
-                  <span className={`text-sm font-bold ${a.qualityScore >= 0n ? "text-green-600" : "text-red-500"}`}>
-                    {a.qualityScore >= 0n ? "+" : "-"}${formatUsdc(a.qualityScore < 0n ? -a.qualityScore : a.qualityScore)}
-                  </span>
+                  <div className="flex items-center gap-2 shrink-0 ml-4">
+                    {a.isEarlyExit ? (
+                      <span className="rounded-full px-2 py-0.5 text-xs bg-yellow-100 text-yellow-700">Early Exit</span>
+                    ) : a.qualityScore >= 0n ? (
+                      <span className="rounded-full px-2 py-0.5 text-xs bg-green-100 text-green-700">Favorable</span>
+                    ) : (
+                      <span className="rounded-full px-2 py-0.5 text-xs bg-red-100 text-red-700">Unfavorable</span>
+                    )}
+                    <span className={`text-sm font-bold ${a.qualityScore >= 0n ? "text-green-600" : "text-red-500"}`}>
+                      {a.qualityScore >= 0n ? "+" : "-"}${formatUsdc(a.qualityScore < 0n ? -a.qualityScore : a.qualityScore)}
+                    </span>
+                  </div>
                 </div>
               </div>
             ))}
             {audits.length > 5 && (
               <Link href="/genius/track-record" className="block text-center text-sm text-genius-500 hover:text-genius-600 py-2">
-                View all {audits.length} settlements &rarr;
+                View all {audits.length} settled cycles &rarr;
               </Link>
             )}
           </div>
         )}
-      </section>
-
-      {/* Active Relationships & Early Exit */}
-      <RelationshipsSection address={address} />
-
-      {/* Collateral Management */}
-      <section>
-        <h2 className="text-xl font-semibold text-slate-900 mb-4">
-          Collateral Management
-        </h2>
-        <div className="card">
-          {txSuccess && (
-            <div className="rounded-lg bg-green-50 border border-green-200 p-3 mb-4" role="status">
-              <p className="text-xs text-green-700">{txSuccess}</p>
-            </div>
-          )}
-          {txError && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 mb-4" role="alert">
-              <p className="text-xs text-red-600">{txError}</p>
-            </div>
-          )}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <form onSubmit={(e) => { e.preventDefault(); handleDeposit(); }}>
-              <label htmlFor="depositCollateral" className="label">Deposit USDC Collateral</label>
-              <div className="flex gap-2">
-                <input
-                  id="depositCollateral"
-                  type="number"
-                  inputMode="decimal"
-                  placeholder="Amount (USDC)"
-                  className="input flex-1"
-                  value={depositAmount}
-                  onChange={(e) => setDepositAmount(e.target.value)}
-                />
-                <button
-                  type="submit"
-                  className="btn-primary whitespace-nowrap"
-                  disabled={depositLoading || !depositAmount}
-                >
-                  {depositLoading ? "Depositing..." : "Deposit"}
-                </button>
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                First deposit requires a one-time USDC approval.
-              </p>
-            </form>
-            <form onSubmit={(e) => { e.preventDefault(); handleWithdraw(); }}>
-              <label htmlFor="withdrawCollateral" className="label">Withdraw Available Collateral</label>
-              <div className="flex gap-2">
-                <input
-                  id="withdrawCollateral"
-                  type="number"
-                  inputMode="decimal"
-                  placeholder="Amount (USDC)"
-                  className="input flex-1"
-                  value={withdrawAmount}
-                  onChange={(e) => setWithdrawAmount(e.target.value)}
-                />
-                <button
-                  type="submit"
-                  className="btn-secondary whitespace-nowrap"
-                  disabled={withdrawLoading || !withdrawAmount}
-                >
-                  {withdrawLoading ? "Withdrawing..." : "Withdraw"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
       </section>
     </div>
   );
