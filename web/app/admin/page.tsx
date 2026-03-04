@@ -2752,6 +2752,15 @@ async function fetchDelegateNames(): Promise<Record<string, string>> {
 // Metagraph Discovery Tab
 // ---------------------------------------------------------------------------
 
+interface MetagraphNode {
+  uid: number;
+  hotkey: string;
+  ip: string;
+  port: number;
+  stake: string;
+  version: string | null;
+}
+
 interface MetagraphData {
   env: Record<string, string>;
   discoveryMs: number;
@@ -2762,13 +2771,14 @@ interface MetagraphData {
   miners: number;
   minerUrl: string | null;
   cacheAge: number | null;
-  topMiners: { uid: number; ip: string; port: number }[];
-  topValidators: { uid: number; ip: string; port: number; stake: string }[];
+  topMiners: MetagraphNode[];
+  topValidators: MetagraphNode[];
   error?: string;
 }
 
 function MetagraphTab() {
   const [data, setData] = useState<MetagraphData | null>(null);
+  const [names, setNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -2776,7 +2786,11 @@ function MetagraphTab() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/debug/metagraph", { signal: AbortSignal.timeout(20_000) });
+      const [res, namesMap] = await Promise.all([
+        fetch("/api/debug/metagraph", { signal: AbortSignal.timeout(30_000) }),
+        fetchDelegateNames(),
+      ]);
+      setNames(namesMap);
       const json = await res.json();
       if (!res.ok || json.error) {
         setError(json.error || `HTTP ${res.status}`);
@@ -2792,6 +2806,11 @@ function MetagraphTab() {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  const nodeName = (hotkey: string) => {
+    if (!hotkey) return null;
+    return names[hotkey] || null;
+  };
 
   return (
     <div>
@@ -2871,16 +2890,34 @@ function MetagraphTab() {
                   <thead>
                     <tr className="text-left text-slate-500 border-b">
                       <th className="pb-2 pr-4">UID</th>
+                      <th className="pb-2 pr-4">Name</th>
                       <th className="pb-2 pr-4">Endpoint</th>
-                      <th className="pb-2">Stake</th>
+                      <th className="pb-2 pr-4">Stake</th>
+                      <th className="pb-2">Version</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.topValidators.map((v) => (
                       <tr key={v.uid} className="border-b border-slate-100">
                         <td className="py-2 pr-4 font-mono">{v.uid}</td>
+                        <td className="py-2 pr-4">
+                          {nodeName(v.hotkey) ? (
+                            <span className="font-semibold text-slate-700">{nodeName(v.hotkey)}</span>
+                          ) : (
+                            <span className="font-mono text-slate-400" title={v.hotkey}>{v.hotkey?.slice(0, 8)}...</span>
+                          )}
+                        </td>
                         <td className="py-2 pr-4 font-mono text-slate-600">{v.ip}:{v.port}</td>
-                        <td className="py-2 font-mono">{(Number(v.stake) / 1e9).toFixed(2)} α</td>
+                        <td className="py-2 pr-4 font-mono">{(Number(v.stake) / 1e9).toFixed(2)} α</td>
+                        <td className="py-2 font-mono">
+                          {v.version ? (
+                            <span className={Number(v.version) >= 509 ? "text-green-600" : "text-amber-600"}>
+                              {v.version}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -2892,20 +2929,40 @@ function MetagraphTab() {
           {/* Top miners */}
           {data.topMiners.length > 0 && (
             <div className="mb-6">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">First 5 Miners</h3>
+              <h3 className="text-sm font-semibold text-slate-700 mb-3">Top 10 Miners</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="text-left text-slate-500 border-b">
                       <th className="pb-2 pr-4">UID</th>
-                      <th className="pb-2">Endpoint</th>
+                      <th className="pb-2 pr-4">Name</th>
+                      <th className="pb-2 pr-4">Endpoint</th>
+                      <th className="pb-2 pr-4">Stake</th>
+                      <th className="pb-2">Version</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.topMiners.map((m) => (
                       <tr key={m.uid} className="border-b border-slate-100">
                         <td className="py-2 pr-4 font-mono">{m.uid}</td>
-                        <td className="py-2 font-mono text-slate-600">{m.ip}:{m.port}</td>
+                        <td className="py-2 pr-4">
+                          {nodeName(m.hotkey) ? (
+                            <span className="font-semibold text-slate-700">{nodeName(m.hotkey)}</span>
+                          ) : (
+                            <span className="font-mono text-slate-400" title={m.hotkey}>{m.hotkey?.slice(0, 8)}...</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-4 font-mono text-slate-600">{m.ip}:{m.port}</td>
+                        <td className="py-2 pr-4 font-mono">{(Number(m.stake) / 1e9).toFixed(2)} α</td>
+                        <td className="py-2 font-mono">
+                          {m.version ? (
+                            <span className={Number(m.version) >= 509 ? "text-green-600" : "text-amber-600"}>
+                              {m.version}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

@@ -30,6 +30,29 @@ export async function GET() {
     const minerUrl = await discoverMinerUrl();
     const minerDiscoveryMs = Date.now() - minerStart;
 
+    // Probe top validators + miners for version via /health (parallel, best-effort)
+    const probeHealth = async (ip: string, port: number): Promise<string | null> => {
+      try {
+        const res = await fetch(`http://${ip}:${port}/health`, {
+          signal: AbortSignal.timeout(3000),
+        });
+        const data = await res.json();
+        return data.version ?? null;
+      } catch {
+        return null;
+      }
+    };
+
+    const topValidators = validators
+      .sort((a, b) => (b.totalStake > a.totalStake ? 1 : b.totalStake < a.totalStake ? -1 : 0))
+      .slice(0, 10);
+    const topMiners = miners.slice(0, 10);
+
+    const [valVersions, minerVersions] = await Promise.all([
+      Promise.all(topValidators.map((n) => probeHealth(n.ip, n.port))),
+      Promise.all(topMiners.map((n) => probeHealth(n.ip, n.port))),
+    ]);
+
     return NextResponse.json({
       env,
       discoveryMs,
@@ -40,16 +63,21 @@ export async function GET() {
       miners: miners.length,
       minerUrl,
       cacheAge: snap.fetchedAt ? Date.now() - snap.fetchedAt : null,
-      topMiners: miners.slice(0, 5).map((n) => ({
+      topMiners: topMiners.map((n, i) => ({
         uid: n.uid,
-        ip: n.ip,
-        port: n.port,
-      })),
-      topValidators: validators.slice(0, 5).map((n) => ({
-        uid: n.uid,
+        hotkey: n.hotkey,
         ip: n.ip,
         port: n.port,
         stake: n.totalStake.toString(),
+        version: minerVersions[i],
+      })),
+      topValidators: topValidators.map((n, i) => ({
+        uid: n.uid,
+        hotkey: n.hotkey,
+        ip: n.ip,
+        port: n.port,
+        stake: n.totalStake.toString(),
+        version: valVersions[i],
       })),
     });
   } catch (err) {
