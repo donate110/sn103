@@ -100,9 +100,11 @@ export default function SecretModal({ open, title, message, variant = "local", f
 
         {children}
 
-        <p className="text-xs text-slate-500 mt-4">
-          {footer ?? config.defaultFooter}
-        </p>
+        {(footer || !children) && (
+          <p className="text-xs text-slate-500 mt-4">
+            {footer ?? config.defaultFooter}
+          </p>
+        )}
       </div>
     </div>
   );
