@@ -73,9 +73,6 @@ export const ESCROW_ABI = [
   "event Withdrawn(address indexed user, uint256 amount)",
   "event SignalPurchased(uint256 indexed signalId, address indexed buyer, uint256 purchaseId, uint256 notional, uint256 feePaid, uint256 creditUsed, uint256 usdcPaid)",
   "event OutcomeUpdated(uint256 indexed purchaseId, uint8 outcome)",
-  "function cancelPurchase(uint256 purchaseId) external",
-  "function purchaseCancelled(uint256 purchaseId) external view returns (bool)",
-  "event PurchaseCancelled(uint256 indexed purchaseId, address indexed buyer, uint256 refundAmount)",
 ] as const;
 
 export const COLLATERAL_ABI = [

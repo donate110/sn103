@@ -1470,21 +1470,23 @@ export default function CreateSignal() {
         <SecretModal
           open={isProcessing}
           variant={step === "preflight" ? "network" : step === "committing" ? "local" : "distribute"}
-          title={step === "preflight" ? "Verifying Signal" : step === "committing" ? "Encrypting & Committing Signal" : "Distributing Key Shares"}
+          title={step === "preflight" ? "Checking Your Lines" : step === "committing" ? "Locking In Your Pick" : "Securing Your Pick"}
           message={step === "preflight"
-            ? "Checking validator availability and verifying your lines are live on sportsbooks..."
+            ? "Making sure your picks are live at sportsbooks and can be bet on right now."
             : step === "committing"
-            ? "Your pick is being encrypted locally, then the encrypted blob is committed on-chain. Nobody can see your pick."
-            : "Splitting your encryption key into shares and distributing them to validators. Your full key never leaves this device."}
+            ? "Your pick is being sealed so nobody can see it, then recorded on-chain."
+            : "Your pick is being split up and distributed for safekeeping. Nobody can see it without enough pieces."}
         >
           <p className="text-xs text-slate-400">
             {step === "committing" ? "Typically 10\u201330 seconds" : "A few seconds"}
           </p>
-          {step === "committing" && (
-            <p className="text-xs text-slate-400 mt-2">
-              Your wallet will ask you to confirm the on-chain transaction.
-            </p>
-          )}
+          <p className="text-xs text-slate-500 mt-2">
+            {step === "preflight"
+              ? "Querying miners to independently verify line availability. Your real pick is hidden among decoys."
+              : step === "committing"
+              ? "Encrypting with AES-256 and committing the encrypted blob on-chain. Your wallet will ask you to confirm."
+              : "Splitting your encryption key into shares via Shamir secret sharing and distributing them to validators."}
+          </p>
         </SecretModal>
 
         {/* Collateral check — genius needs enough to cover SLA */}

@@ -14,19 +14,27 @@ import { ScaleReader, hexToBytes } from "./scale";
 // Config
 // ---------------------------------------------------------------------------
 
-const SUBTENSOR_HTTP: Record<string, string> = {
-  finney: "https://entrypoint-finney.opentensor.ai",
-  mainnet: "https://entrypoint-finney.opentensor.ai",
-  test: "https://test.finney.opentensor.ai",
-  local: "http://127.0.0.1:9933",
+const SUBTENSOR_HTTP: Record<string, string[]> = {
+  finney: [
+    "https://entrypoint-finney.opentensor.ai",
+    "https://lite.chain.opentensor.ai",
+  ],
+  mainnet: [
+    "https://entrypoint-finney.opentensor.ai",
+    "https://lite.chain.opentensor.ai",
+  ],
+  test: ["https://test.finney.opentensor.ai"],
+  local: ["http://127.0.0.1:9933"],
 };
 
 function getBtConfig() {
   const netuid = parseInt(process.env.BT_NETUID || "103", 10);
-  const network = process.env.BT_NETWORK || "test";
-  const rpcUrl =
-    process.env.BT_RPC_URL || SUBTENSOR_HTTP[network] || SUBTENSOR_HTTP.test;
-  return { netuid, network, rpcUrl };
+  const network = process.env.BT_NETWORK || "finney";
+  const customRpc = process.env.BT_RPC_URL;
+  const rpcUrls = customRpc
+    ? [customRpc]
+    : SUBTENSOR_HTTP[network] ?? SUBTENSOR_HTTP.finney;
+  return { netuid, network, rpcUrls };
 }
 
 // ---------------------------------------------------------------------------
@@ -261,14 +269,32 @@ async function callRpc(rpcUrl: string, method: string, params: unknown[]): Promi
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(8_000),
   });
   const json = await res.json();
   if (json.error) throw new Error(json.error.message || "RPC error");
   return json.result;
 }
 
-async function fetchNeurons(netuid: number, rpcUrl: string): Promise<DiscoveredNode[]> {
+/** Try RPC call against multiple endpoints, returning first success. */
+async function callRpcWithFallback(
+  rpcUrls: string[],
+  method: string,
+  params: unknown[],
+): Promise<string> {
+  let lastError: Error | null = null;
+  for (const url of rpcUrls) {
+    try {
+      return await callRpc(url, method, params);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.warn(`[bt-metagraph] RPC ${url} failed for ${method}:`, lastError.message);
+    }
+  }
+  throw lastError ?? new Error("No RPC endpoints available");
+}
+
+async function fetchNeurons(netuid: number, rpcUrls: string[]): Promise<DiscoveredNode[]> {
   // SCALE-encode netuid as u16 little-endian
   const lo = netuid & 0xff;
   const hi = (netuid >> 8) & 0xff;
@@ -276,11 +302,11 @@ async function fetchNeurons(netuid: number, rpcUrl: string): Promise<DiscoveredN
 
   // Fetch neurons and subnet state in parallel
   const [neuronsResult, stateResult] = await Promise.all([
-    callRpc(rpcUrl, "state_call", [
+    callRpcWithFallback(rpcUrls, "state_call", [
       "NeuronInfoRuntimeApi_get_neurons_lite",
       callData,
     ]),
-    callRpc(rpcUrl, "state_call", [
+    callRpcWithFallback(rpcUrls, "state_call", [
       "SubnetInfoRuntimeApi_get_subnet_state",
       callData,
     ]).catch((err) => {
@@ -320,10 +346,10 @@ export async function discoverMetagraph(): Promise<MetagraphSnapshot> {
   const now = Date.now();
   if (cached && now - cached.fetchedAt < CACHE_TTL_MS) return cached;
 
-  const { netuid, rpcUrl } = getBtConfig();
+  const { netuid, rpcUrls } = getBtConfig();
 
   try {
-    const nodes = await fetchNeurons(netuid, rpcUrl);
+    const nodes = await fetchNeurons(netuid, rpcUrls);
     cached = { nodes, fetchedAt: now };
     return cached;
   } catch (err) {
