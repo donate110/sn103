@@ -5,6 +5,8 @@
  * and raw hex public keys.
  */
 
+import { createHash } from "crypto";
+
 const BASE58_ALPHABET =
   "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
@@ -72,8 +74,6 @@ function hexToBytes(hex: string): Uint8Array {
 
 /** Encode a 32-byte hex public key to SS58 with the given prefix (default 42 for Substrate/Bittensor). */
 export function hexToSs58(hex: string, prefix = 42): string {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const crypto = require("crypto");
   const pubkey = hexToBytes(hex);
   if (pubkey.length !== 32) throw new Error("Expected 32-byte public key");
 
@@ -83,7 +83,7 @@ export function hexToSs58(hex: string, prefix = 42): string {
   payload[SS58_PREFIX.length] = prefix;
   payload.set(pubkey, SS58_PREFIX.length + 1);
 
-  const hash: Buffer = crypto.createHash("blake2b512").update(payload).digest();
+  const hash: Buffer = createHash("blake2b512").update(payload).digest();
   const checksum = hash.slice(0, 2);
 
   const full = new Uint8Array(1 + 32 + 2);
