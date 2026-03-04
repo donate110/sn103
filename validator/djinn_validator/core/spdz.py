@@ -39,6 +39,18 @@ from djinn_validator.utils.crypto import BN254_PRIME, _mod_inv
 
 log = structlog.get_logger()
 
+# Loud startup warning if simulation mode is enabled
+if os.environ.get("DJINN_SPDZ_SIMULATION") == "1":
+    import warnings
+
+    _msg = (
+        "DJINN_SPDZ_SIMULATION=1 is set. SPDZ MAC key (alpha) will be "
+        "reconstructable by the coordinator. This MUST NOT be enabled in "
+        "production — it defeats malicious-security guarantees."
+    )
+    warnings.warn(_msg, stacklevel=1)
+    log.warning("spdz_simulation_mode_enabled", detail=_msg)
+
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -491,6 +503,12 @@ class AuthenticatedMPCSession:
         # production — the coordinator learning alpha breaks SPDZ malicious
         # security.  Production must supply pre-distributed r_auth shares
         # from an offline preprocessing phase so alpha is never revealed.
+        if not self._SIMULATION_MODE:
+            raise RuntimeError(
+                "AuthenticatedMPCSession.run() requires simulation mode. "
+                "Production must use the distributed orchestrator with "
+                "pre-authenticated r shares from offline preprocessing."
+            )
         r = secrets.randbelow(p - 1) + 1
         r_auth = authenticate_value(
             r,

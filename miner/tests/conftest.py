@@ -17,7 +17,7 @@ MOCK_NBA_ODDS_RESPONSE: list[dict] = [
         "id": "event-lakers-celtics-001",
         "sport_key": "basketball_nba",
         "sport_title": "NBA",
-        "commence_time": "2025-02-15T00:00:00Z",
+        "commence_time": "2099-02-15T00:00:00Z",
         "home_team": "Los Angeles Lakers",
         "away_team": "Boston Celtics",
         "bookmakers": [
@@ -81,7 +81,7 @@ MOCK_NBA_ODDS_RESPONSE: list[dict] = [
         "id": "event-heat-warriors-002",
         "sport_key": "basketball_nba",
         "sport_title": "NBA",
-        "commence_time": "2025-02-15T02:00:00Z",
+        "commence_time": "2099-02-15T02:00:00Z",
         "home_team": "Miami Heat",
         "away_team": "Golden State Warriors",
         "bookmakers": [

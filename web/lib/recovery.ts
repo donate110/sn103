@@ -78,24 +78,60 @@ export async function decryptRecoveryBlob(
 ): Promise<RecoveryResult> {
   const packed = new TextDecoder().decode(blob);
   const colonIdx = packed.indexOf(":");
-  if (colonIdx < 0) throw new Error("Invalid recovery blob format");
+  if (colonIdx < 0) {
+    throw new Error(
+      "Recovery blob is corrupted (invalid format). " +
+      "This may happen if the blob was truncated during storage. " +
+      "Your on-chain data (purchases, settlements) is unaffected."
+    );
+  }
   const iv = packed.slice(0, colonIdx);
   const ciphertext = packed.slice(colonIdx + 1);
-  const json = await decrypt(ciphertext, iv, recoveryKey);
-  const payload = JSON.parse(json);
-  if (payload?.version !== 1 && payload?.version !== 2) {
-    throw new Error(`Unsupported recovery blob version: ${payload?.version}`);
+
+  let json: string;
+  try {
+    json = await decrypt(ciphertext, iv, recoveryKey);
+  } catch {
+    throw new Error(
+      "Could not decrypt recovery blob. This usually means the blob was stored " +
+      "with a different wallet or was corrupted. Your on-chain data is unaffected."
+    );
   }
-  if (!Array.isArray(payload.signals)) {
-    throw new Error("Invalid recovery blob: signals is not an array");
+
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    throw new Error(
+      "Recovery blob decrypted but contains invalid data. " +
+      "Your on-chain data (purchases, settlements) is unaffected."
+    );
   }
-  return {
-    signals: payload.signals as SavedSignalData[],
-    purchases:
-      payload.version === 2 && Array.isArray(payload.purchases)
-        ? (payload.purchases as PurchasedSignalData[])
-        : [],
-  };
+
+  if (raw?.version !== 1 && raw?.version !== 2) {
+    throw new Error(
+      `Unsupported recovery blob version: ${raw?.version}. ` +
+      "You may need a newer version of the app to read this backup."
+    );
+  }
+
+  const payload = raw as unknown as RecoveryBlobPayload;
+
+  // Graceful degradation: filter out malformed entries instead of failing entirely
+  const signals = Array.isArray(payload.signals)
+    ? payload.signals.filter(
+        (s): s is SavedSignalData => typeof s === "object" && s !== null && "signalId" in s
+      )
+    : [];
+
+  const purchases =
+    payload.version === 2 && Array.isArray(payload.purchases)
+      ? payload.purchases.filter(
+          (p): p is PurchasedSignalData => typeof p === "object" && p !== null && "signalId" in p
+        )
+      : [];
+
+  return { signals, purchases };
 }
 
 // ---- On-Chain Read (view, no gas) ----

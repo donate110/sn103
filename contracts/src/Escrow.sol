@@ -119,6 +119,7 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     error NotionalExceedsSignalMax(uint256 notional, uint256 maxNotional);
     error CycleNotSettled(address genius, address idiot, uint256 cycle);
     error NoFeesToClaim(address genius, address idiot, uint256 cycle);
+    error ClaimTooEarly(address genius, address idiot, uint256 cycle, uint256 claimableAt);
     error AlreadyPurchased(uint256 signalId, address idiot);
     error PurchaseNotFound(uint256 purchaseId);
     error OutcomeAlreadySet(uint256 purchaseId, Outcome current);
@@ -128,8 +129,8 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     /// @notice Minimum notional per purchase (1 USDC in 6 decimals — prevents dust griefing)
     uint256 public constant MIN_NOTIONAL = 1e6;
 
-    /// @notice Maximum notional per purchase (1 billion USDC in 6 decimals)
-    uint256 public constant MAX_NOTIONAL = 1e15;
+    /// @notice Maximum notional per purchase (1 million USDC in 6 decimals)
+    uint256 public constant MAX_NOTIONAL = 1e12;
 
     /// @notice Odds precision: 1e6 = 1.0x decimal
     uint256 public constant ODDS_PRECISION = 1e6;
@@ -139,6 +140,9 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
 
     /// @notice Maximum odds: 1000x (prevents unreasonable values)
     uint256 public constant MAX_ODDS = 1_000_000_000;
+
+    /// @notice Dispute window: 48 hours after settlement before fees can be claimed
+    uint256 public constant DISPUTE_WINDOW = 48 hours;
 
     // -------------------------------------------------------------------------
     // Modifiers
@@ -388,6 +392,12 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         (, , , , uint256 settledAt) = IAudit(auditContract).auditResults(msg.sender, idiot, cycle);
         if (settledAt == 0) revert CycleNotSettled(msg.sender, idiot, cycle);
 
+        // Enforce dispute window — fees cannot be claimed until 48h after settlement
+        uint256 claimableAt = settledAt + DISPUTE_WINDOW;
+        if (block.timestamp < claimableAt) {
+            revert ClaimTooEarly(msg.sender, idiot, cycle, claimableAt);
+        }
+
         uint256 amount = feePool[msg.sender][idiot][cycle];
         if (amount == 0) revert NoFeesToClaim(msg.sender, idiot, cycle);
 
@@ -408,6 +418,12 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         for (uint256 i; i < idiots.length; ++i) {
             (, , , , uint256 settledAt) = IAudit(auditContract).auditResults(msg.sender, idiots[i], cycles[i]);
             if (settledAt == 0) revert CycleNotSettled(msg.sender, idiots[i], cycles[i]);
+
+            // Enforce dispute window — fees cannot be claimed until 48h after settlement
+            uint256 claimableAt = settledAt + DISPUTE_WINDOW;
+            if (block.timestamp < claimableAt) {
+                revert ClaimTooEarly(msg.sender, idiots[i], cycles[i], claimableAt);
+            }
 
             uint256 amount = feePool[msg.sender][idiots[i]][cycles[i]];
             if (amount > 0) {

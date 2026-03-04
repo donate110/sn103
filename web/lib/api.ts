@@ -25,6 +25,7 @@ export interface PurchaseRequest {
   buyer_address: string;
   sportsbook: string;
   available_indices: number[];
+  buyer_signature?: string;
 }
 
 export interface PurchaseResponse {

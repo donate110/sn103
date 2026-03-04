@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import structlog
@@ -129,6 +130,22 @@ class LineChecker:
         markets_str = ",".join(sorted(markets_needed))
 
         events = await self._odds.get_odds(sport, markets=markets_str)
+
+        # Filter out events where the game has already started.
+        # This prevents geniuses from creating signals with expired lines.
+        now = datetime.now(timezone.utc)
+        filtered_events = []
+        for ev in events:
+            ct = ev.get("commence_time")
+            if ct:
+                try:
+                    game_start = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                    if game_start <= now:
+                        continue  # Game already started — skip
+                except (ValueError, TypeError):
+                    pass
+            filtered_events.append(ev)
+        events = filtered_events
 
         # Parse all events into BookmakerOdds
         all_odds: list[BookmakerOdds] = []

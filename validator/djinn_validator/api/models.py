@@ -64,6 +64,11 @@ class PurchaseRequest(BaseModel):
     buyer_address: str = Field(max_length=256)
     sportsbook: str = Field(max_length=256)
     available_indices: list[int] = Field(min_length=1, max_length=10)
+    buyer_signature: str = Field(
+        default="",
+        max_length=256,
+        description="EIP-191 signature of 'djinn:purchase:{signal_id}' proving buyer_address ownership",
+    )
 
     @field_validator("buyer_address")
     @classmethod

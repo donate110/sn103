@@ -333,7 +333,7 @@ def create_app(
     # from polynomials with threshold below this value regardless of client
     # configuration. This prevents a compromised frontend or custom client
     # from weakening signal secrecy by using threshold=1.
-    _MIN_SHAMIR_THRESHOLD = 3
+    _MIN_SHAMIR_THRESHOLD = 7
 
     @app.post("/v1/signal", response_model=StoreShareResponse)
     async def store_share(req: StoreShareRequest) -> StoreShareResponse:
@@ -366,6 +366,21 @@ def create_app(
 
         share = Share(x=req.share_x, y=share_y)
 
+        # Verify signal exists on-chain and genius address matches (non-blocking on chain errors)
+        if chain_client is not None:
+            try:
+                on_chain = await chain_client.get_signal(int(req.signal_id))
+                if on_chain and on_chain.get("genius"):
+                    if on_chain["genius"].lower() != req.genius_address.lower():
+                        raise HTTPException(
+                            status_code=403,
+                            detail=f"genius_address mismatch: on-chain={on_chain['genius']}, request={req.genius_address}",
+                        )
+            except HTTPException:
+                raise
+            except Exception as e:
+                log.warning("on_chain_signal_verification_failed", signal_id=req.signal_id, err=str(e))
+
         try:
             share_store.store(
                 signal_id=req.signal_id,
@@ -390,14 +405,40 @@ def create_app(
         """Handle a buyer's purchase request.
 
         Flow:
-        1. Verify signal exists and is active
-        2. Run MPC to check if real index ∈ available indices
-        3. If available, release encrypted key share
+        1. Verify buyer owns buyer_address (EIP-191 signature)
+        2. Verify signal exists and is active
+        3. Run MPC to check if real index ∈ available indices
+        4. If available, release encrypted key share
 
         Uses per-signal locking to prevent concurrent purchases for the
         same signal from racing through payment verification and share release.
         """
         _validate_signal_id_path(signal_id)
+
+        # Verify buyer owns the claimed address via EIP-191 signature
+        if req.buyer_signature:
+            try:
+                from eth_account.messages import encode_defunct
+                from eth_account import Account as EthAccount
+
+                msg = encode_defunct(text=f"djinn:purchase:{signal_id}")
+                recovered = EthAccount.recover_message(msg, signature=req.buyer_signature)
+                if recovered.lower() != req.buyer_address.lower():
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Signature does not match buyer_address (recovered {recovered})",
+                    )
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid buyer_signature: {e}")
+        else:
+            # Require signature in production; allow unsigned in dev mode for backwards compat
+            if os.environ.get("DJINN_REQUIRE_BUYER_AUTH", "0") == "1":
+                raise HTTPException(
+                    status_code=401,
+                    detail="buyer_signature is required. Sign 'djinn:purchase:{signal_id}' with your wallet.",
+                )
 
         # Acquire per-signal lock to prevent concurrent purchase races (R25-15)
         async with _purchase_locks_guard:

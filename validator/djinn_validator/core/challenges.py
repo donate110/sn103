@@ -639,8 +639,12 @@ async def _request_and_verify_proof(
                 if meta.get("type") == "tlsnotary" and meta.get("presentation"):
                     import base64
                     proof_bytes = base64.b64decode(meta["presentation"])
-            except (json.JSONDecodeError, ValueError):
-                pass
+            except (json.JSONDecodeError, ValueError, Exception) as e:
+                # Miner sent a message but it's malformed — reject the proof entirely.
+                # This prevents miners from gaming the system by submitting garbage
+                # metadata to get "submitted but unverified" credit.
+                log.warning("malformed_proof_metadata", uid=uid, err=str(e))
+                return False, False
 
         if proof_bytes is None:
             # No TLSNotary presentation — proof submitted but not verifiable

@@ -236,10 +236,24 @@ export default function PurchaseSignal() {
       setStep("purchasing_validator");
 
       const validators = await discoverValidatorClients();
+
+      // Sign a purchase message to prove buyer_address ownership
+      let buyerSig = "";
+      if (walletClient) {
+        try {
+          buyerSig = await walletClient.signMessage({
+            message: `djinn:purchase:${signalId}`,
+          });
+        } catch {
+          // Non-fatal: validator accepts unsigned in dev mode
+        }
+      }
+
       const purchaseReq = {
         buyer_address: buyerAddress,
         sportsbook: "",
         available_indices: checkResult.available_indices,
+        buyer_signature: buyerSig,
       };
 
       // First call: validators run MPC to check if real index ∈ available set.

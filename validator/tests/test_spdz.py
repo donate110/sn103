@@ -482,10 +482,10 @@ class TestAuthenticatedMPCSession:
             session._reconstruct_alpha()
 
     def test_run_blocked_outside_simulation(self) -> None:
-        """R25-07: run() fails when simulation mode is off because alpha reconstruction is blocked."""
+        """R25-07: run() fails when simulation mode is off (defense-in-depth check)."""
         session = self._setup_session(secret=3, available_indices={1, 2, 3})
         session._SIMULATION_MODE = False
-        with pytest.raises(RuntimeError, match="Cannot reconstruct alpha in production"):
+        with pytest.raises(RuntimeError, match="requires simulation mode"):
             session.run()
 
 

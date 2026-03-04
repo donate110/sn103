@@ -411,7 +411,11 @@ class ChainClient:
                 "sport": result[3],
                 "maxPriceBps": result[4],
                 "slaMultiplierBps": result[5],
+                "maxNotional": result[6],
+                "minNotional": result[7],
                 "expiresAt": result[8],
+                "decoyLines": list(result[9]),
+                "availableSportsbooks": list(result[10]),
                 "status": result[11],
                 "createdAt": result[12],
             }
