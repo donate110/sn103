@@ -170,7 +170,7 @@ interface TelemetryEvent {
   sourceUid: number;
 }
 
-type AdminTab = "overview" | "network" | "protocol" | "attestations" | "telemetry" | "feedback";
+type AdminTab = "overview" | "network" | "protocol" | "attestations" | "telemetry" | "feedback" | "metagraph";
 
 const GRAFANA_URL = process.env.NEXT_PUBLIC_GRAFANA_URL || "";
 const BASE_EXPLORER = process.env.NEXT_PUBLIC_BASE_EXPLORER || "https://basescan.org";
@@ -421,6 +421,7 @@ export default function AdminDashboard() {
             ["attestations", "Attest"],
             ["telemetry", "Telemetry"],
             ["feedback", "Feedback"],
+            ["metagraph", "Metagraph"],
           ] as const
         ).map(([tab, label]) => {
           const badge = getBadge(tab, {
@@ -797,6 +798,8 @@ export default function AdminDashboard() {
           loading={loading}
         />
       )}
+
+      {activeTab === "metagraph" && <MetagraphTab />}
     </div>
   );
 }
@@ -2743,4 +2746,175 @@ async function fetchDelegateNames(): Promise<Record<string, string>> {
   } catch {
     return {};
   }
+}
+
+// ---------------------------------------------------------------------------
+// Metagraph Discovery Tab
+// ---------------------------------------------------------------------------
+
+interface MetagraphData {
+  env: Record<string, string>;
+  discoveryMs: number;
+  minerDiscoveryMs: number;
+  totalNodes: number;
+  publicNodes: number;
+  validators: number;
+  miners: number;
+  minerUrl: string | null;
+  cacheAge: number | null;
+  topMiners: { uid: number; ip: string; port: number }[];
+  topValidators: { uid: number; ip: string; port: number; stake: string }[];
+  error?: string;
+}
+
+function MetagraphTab() {
+  const [data, setData] = useState<MetagraphData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/debug/metagraph", { signal: AbortSignal.timeout(20_000) });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        setError(json.error || `HTTP ${res.status}`);
+        setData(json.env ? json : null);
+      } else {
+        setData(json);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fetch failed");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-lg font-semibold text-slate-900">Metagraph Discovery</h2>
+        <button
+          onClick={refresh}
+          disabled={loading}
+          className="px-3 py-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg disabled:opacity-50"
+        >
+          {loading ? "Loading..." : "Refresh"}
+        </button>
+      </div>
+
+      {error && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm font-medium text-red-800">Discovery Error</p>
+          <p className="text-xs text-red-600 mt-1 font-mono">{error}</p>
+        </div>
+      )}
+
+      {data && (
+        <>
+          {/* Env vars */}
+          <div className="mb-6 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+            <h3 className="text-sm font-semibold text-slate-700 mb-3">Environment</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+              {Object.entries(data.env).map(([k, v]) => (
+                <div key={k}>
+                  <span className="text-slate-500 block">{k}</span>
+                  <span className={`font-mono ${v === "(unset)" ? "text-red-500" : "text-slate-800"}`}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Summary stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+            <div className="p-4 bg-white border border-slate-200 rounded-lg text-center">
+              <p className="text-2xl font-bold text-slate-900">{data.totalNodes}</p>
+              <p className="text-xs text-slate-500">Total Nodes</p>
+            </div>
+            <div className="p-4 bg-white border border-slate-200 rounded-lg text-center">
+              <p className="text-2xl font-bold text-slate-900">{data.miners}</p>
+              <p className="text-xs text-slate-500">Miners</p>
+            </div>
+            <div className="p-4 bg-white border border-slate-200 rounded-lg text-center">
+              <p className="text-2xl font-bold text-slate-900">{data.validators}</p>
+              <p className="text-xs text-slate-500">Validators</p>
+            </div>
+            <div className="p-4 bg-white border border-slate-200 rounded-lg text-center">
+              <p className="text-2xl font-bold text-slate-900">{data.discoveryMs}ms</p>
+              <p className="text-xs text-slate-500">Discovery Time</p>
+            </div>
+          </div>
+
+          {/* Miner URL */}
+          <div className="mb-6 p-4 bg-white border border-slate-200 rounded-lg">
+            <h3 className="text-sm font-semibold text-slate-700 mb-2">Discovered Miner URL</h3>
+            {data.minerUrl ? (
+              <p className="text-sm font-mono text-emerald-700 bg-emerald-50 px-3 py-2 rounded">{data.minerUrl}</p>
+            ) : (
+              <p className="text-sm font-mono text-red-700 bg-red-50 px-3 py-2 rounded">None — miner check will fail</p>
+            )}
+            <p className="text-xs text-slate-400 mt-2">
+              Miner discovery: {data.minerDiscoveryMs}ms
+              {data.cacheAge !== null && ` · Cache age: ${Math.round(data.cacheAge / 1000)}s`}
+            </p>
+          </div>
+
+          {/* Top validators */}
+          {data.topValidators.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-sm font-semibold text-slate-700 mb-3">Top Validators (by stake)</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-slate-500 border-b">
+                      <th className="pb-2 pr-4">UID</th>
+                      <th className="pb-2 pr-4">Endpoint</th>
+                      <th className="pb-2">Stake</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.topValidators.map((v) => (
+                      <tr key={v.uid} className="border-b border-slate-100">
+                        <td className="py-2 pr-4 font-mono">{v.uid}</td>
+                        <td className="py-2 pr-4 font-mono text-slate-600">{v.ip}:{v.port}</td>
+                        <td className="py-2 font-mono">{(Number(v.stake) / 1e9).toFixed(2)} TAO</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Top miners */}
+          {data.topMiners.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-sm font-semibold text-slate-700 mb-3">First 5 Miners</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-slate-500 border-b">
+                      <th className="pb-2 pr-4">UID</th>
+                      <th className="pb-2">Endpoint</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.topMiners.map((m) => (
+                      <tr key={m.uid} className="border-b border-slate-100">
+                        <td className="py-2 pr-4 font-mono">{m.uid}</td>
+                        <td className="py-2 font-mono text-slate-600">{m.ip}:{m.port}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
