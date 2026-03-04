@@ -34,6 +34,7 @@ interface ValidatorNode {
   port: number;
   hotkey?: string;
   coldkey?: string;
+  ss58Hotkey?: string;
   stake?: string;
   alphaStake?: string;
   taoStake?: string;
@@ -52,6 +53,7 @@ interface MinerNode {
   port: number;
   hotkey?: string;
   coldkey?: string;
+  ss58Hotkey?: string;
   stake?: string;
   alphaStake?: string;
   taoStake?: string;
@@ -66,6 +68,7 @@ interface ValidatorHealth {
   port: number;
   hotkey?: string;
   coldkey?: string;
+  ss58Hotkey?: string;
   stake?: string;
   alphaStake?: string;
   taoStake?: string;
@@ -86,6 +89,7 @@ interface MinerHealth {
   port: number;
   hotkey?: string;
   coldkey?: string;
+  ss58Hotkey?: string;
   stake?: string;
   alphaStake?: string;
   taoStake?: string;
@@ -505,7 +509,7 @@ export default function AdminDashboard() {
             <h2 className="text-xl font-semibold text-slate-900 mb-4">Validators</h2>
             <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
               <table className="w-full text-sm min-w-[900px]">
-                <thead className="bg-slate-50 text-slate-500">
+                <thead className="bg-slate-50 text-slate-500 sticky top-0 z-10">
                   <tr>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Unique identifier on the subnet">UID</th>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Delegate name or hotkey prefix">Name</th>
@@ -532,7 +536,9 @@ export default function AdminDashboard() {
                   {validators.map((v) => (
                     <tr key={v.uid} className="hover:bg-slate-50">
                       <td className="px-2 sm:px-4 py-2 font-mono text-slate-700">
-                        <a href={`https://taostats.io/subnet/103/uid/${v.uid}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{v.uid}</a>
+                        {v.ss58Hotkey ? (
+                          <a href={`https://taostats.io/accounts/${v.ss58Hotkey}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{v.uid}</a>
+                        ) : v.uid}
                       </td>
                       <td className="px-2 sm:px-4 py-2 text-xs" title={v.hotkey || ""}>
                         {lookupName(delegateNames, v.hotkey, v.coldkey) ? (
@@ -593,7 +599,7 @@ export default function AdminDashboard() {
             <h2 className="text-xl font-semibold text-slate-900 mb-4">Miners</h2>
             <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
               <table className="w-full text-sm min-w-[800px]">
-                <thead className="bg-slate-50 text-slate-500">
+                <thead className="bg-slate-50 text-slate-500 sticky top-0 z-10">
                   <tr>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Unique identifier on the subnet">UID</th>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Delegate name or hotkey prefix">Name</th>
@@ -619,7 +625,9 @@ export default function AdminDashboard() {
                   {miners.map((m) => (
                     <tr key={m.uid} className="hover:bg-slate-50">
                       <td className="px-2 sm:px-4 py-2 font-mono text-slate-700">
-                        <a href={`https://taostats.io/subnet/103/uid/${m.uid}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{m.uid}</a>
+                        {m.ss58Hotkey ? (
+                          <a href={`https://taostats.io/accounts/${m.ss58Hotkey}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{m.uid}</a>
+                        ) : m.uid}
                       </td>
                       <td className="px-2 sm:px-4 py-2 text-xs" title={m.hotkey || ""}>
                         {lookupName(delegateNames, m.hotkey, m.coldkey) ? (
@@ -2284,14 +2292,14 @@ async function fetchValidatorHealth(): Promise<ValidatorHealth[]> {
         });
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
-        return { ...data, uid: v.uid, ip: v.ip, port: v.port, hotkey: v.hotkey, stake: v.stake, alphaStake: v.alphaStake, taoStake: v.taoStake, validatorTrust: v.validatorTrust, incentive: v.incentive, emission: v.emission } as ValidatorHealth;
+        return { ...data, uid: v.uid, ip: v.ip, port: v.port, hotkey: v.hotkey, coldkey: v.coldkey, ss58Hotkey: v.ss58Hotkey, stake: v.stake, alphaStake: v.alphaStake, taoStake: v.taoStake, validatorTrust: v.validatorTrust, incentive: v.incentive, emission: v.emission } as ValidatorHealth;
       }),
     );
 
     return results.map((r, i) =>
       r.status === "fulfilled"
         ? r.value
-        : { uid: validators[i].uid, ip: validators[i].ip, port: validators[i].port, hotkey: validators[i].hotkey, stake: validators[i].stake, alphaStake: validators[i].alphaStake, taoStake: validators[i].taoStake, validatorTrust: validators[i].validatorTrust, incentive: validators[i].incentive, emission: validators[i].emission, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, error: String((r as PromiseRejectedResult).reason) },
+        : { uid: validators[i].uid, ip: validators[i].ip, port: validators[i].port, hotkey: validators[i].hotkey, coldkey: validators[i].coldkey, ss58Hotkey: validators[i].ss58Hotkey, stake: validators[i].stake, alphaStake: validators[i].alphaStake, taoStake: validators[i].taoStake, validatorTrust: validators[i].validatorTrust, incentive: validators[i].incentive, emission: validators[i].emission, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, error: String((r as PromiseRejectedResult).reason) },
     );
   } catch {
     return [];
@@ -2423,7 +2431,7 @@ async function fetchMinerHealth(): Promise<MinerHealth[]> {
           });
           if (!res.ok) throw new Error(`${res.status}`);
           const data = await res.json();
-          return { ...data, uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey, stake: m.stake, alphaStake: m.alphaStake, taoStake: m.taoStake, incentive: m.incentive, emission: m.emission } as MinerHealth;
+          return { ...data, uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey, coldkey: m.coldkey, ss58Hotkey: m.ss58Hotkey, stake: m.stake, alphaStake: m.alphaStake, taoStake: m.taoStake, incentive: m.incentive, emission: m.emission } as MinerHealth;
         }),
       );
       results.forEach((r, j) => {
@@ -2431,7 +2439,7 @@ async function fetchMinerHealth(): Promise<MinerHealth[]> {
         all.push(
           r.status === "fulfilled"
             ? r.value
-            : { uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey, stake: m.stake, alphaStake: m.alphaStake, taoStake: m.taoStake, incentive: m.incentive, emission: m.emission, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
+            : { uid: m.uid, ip: m.ip, port: m.port, hotkey: m.hotkey, coldkey: m.coldkey, ss58Hotkey: m.ss58Hotkey, stake: m.stake, alphaStake: m.alphaStake, taoStake: m.taoStake, incentive: m.incentive, emission: m.emission, status: "error", version: "", odds_api_connected: false, bt_connected: false, uptime_seconds: 0, error: String((r as PromiseRejectedResult).reason) },
         );
       });
     }
