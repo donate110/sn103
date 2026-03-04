@@ -33,6 +33,7 @@ interface ValidatorNode {
   ip: string;
   port: number;
   hotkey?: string;
+  coldkey?: string;
   stake?: string;
   alphaStake?: string;
   taoStake?: string;
@@ -50,6 +51,7 @@ interface MinerNode {
   ip: string;
   port: number;
   hotkey?: string;
+  coldkey?: string;
   stake?: string;
   alphaStake?: string;
   taoStake?: string;
@@ -63,6 +65,7 @@ interface ValidatorHealth {
   ip: string;
   port: number;
   hotkey?: string;
+  coldkey?: string;
   stake?: string;
   alphaStake?: string;
   taoStake?: string;
@@ -82,6 +85,7 @@ interface MinerHealth {
   ip: string;
   port: number;
   hotkey?: string;
+  coldkey?: string;
   stake?: string;
   alphaStake?: string;
   taoStake?: string;
@@ -100,6 +104,13 @@ function truncateHotkey(hotkey?: string): string {
   const h = hotkey.startsWith("0x") ? hotkey.slice(2) : hotkey;
   if (h.length <= 12) return `0x${h}`;
   return `0x${h.slice(0, 6)}...${h.slice(-6)}`;
+}
+
+/** Look up delegate name by hotkey first, then coldkey. */
+function lookupName(names: Record<string, string>, hotkey?: string, coldkey?: string): string | null {
+  if (hotkey && names[hotkey]) return names[hotkey];
+  if (coldkey && names[coldkey]) return names[coldkey];
+  return null;
 }
 
 function formatStake(raw?: string): string {
@@ -522,8 +533,8 @@ export default function AdminDashboard() {
                     <tr key={v.uid} className="hover:bg-slate-50">
                       <td className="px-2 sm:px-4 py-2 font-mono text-slate-700">{v.uid}</td>
                       <td className="px-2 sm:px-4 py-2 text-xs" title={v.hotkey || ""}>
-                        {v.hotkey && delegateNames[v.hotkey] ? (
-                          <span className="font-semibold text-slate-700">{delegateNames[v.hotkey]}</span>
+                        {lookupName(delegateNames, v.hotkey, v.coldkey) ? (
+                          <span className="font-semibold text-slate-700">{lookupName(delegateNames, v.hotkey, v.coldkey)}</span>
                         ) : (
                           <span className="font-mono text-slate-400">{truncateHotkey(v.hotkey)}</span>
                         )}
@@ -607,8 +618,8 @@ export default function AdminDashboard() {
                     <tr key={m.uid} className="hover:bg-slate-50">
                       <td className="px-2 sm:px-4 py-2 font-mono text-slate-700">{m.uid}</td>
                       <td className="px-2 sm:px-4 py-2 text-xs" title={m.hotkey || ""}>
-                        {m.hotkey && delegateNames[m.hotkey] ? (
-                          <span className="font-semibold text-slate-700">{delegateNames[m.hotkey]}</span>
+                        {lookupName(delegateNames, m.hotkey, m.coldkey) ? (
+                          <span className="font-semibold text-slate-700">{lookupName(delegateNames, m.hotkey, m.coldkey)}</span>
                         ) : (
                           <span className="font-mono text-slate-400">{truncateHotkey(m.hotkey)}</span>
                         )}
@@ -2755,8 +2766,10 @@ async function fetchDelegateNames(): Promise<Record<string, string>> {
 interface MetagraphNode {
   uid: number;
   hotkey: string;
+  coldkey: string;
   ip: string;
   port: number;
+  active?: boolean;
   stake: string;
   version: string | null;
 }
@@ -2807,9 +2820,8 @@ function MetagraphTab() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const nodeName = (hotkey: string) => {
-    if (!hotkey) return null;
-    return names[hotkey] || null;
+  const nodeName = (hotkey: string, coldkey?: string) => {
+    return lookupName(names, hotkey, coldkey);
   };
 
   return (
@@ -2901,13 +2913,15 @@ function MetagraphTab() {
                       <tr key={v.uid} className="border-b border-slate-100">
                         <td className="py-2 pr-4 font-mono">{v.uid}</td>
                         <td className="py-2 pr-4">
-                          {nodeName(v.hotkey) ? (
-                            <span className="font-semibold text-slate-700">{nodeName(v.hotkey)}</span>
+                          {nodeName(v.hotkey, v.coldkey) ? (
+                            <span className="font-semibold text-slate-700">{nodeName(v.hotkey, v.coldkey)}</span>
                           ) : (
                             <span className="font-mono text-slate-400" title={v.hotkey}>{v.hotkey?.slice(0, 8)}...</span>
                           )}
                         </td>
-                        <td className="py-2 pr-4 font-mono text-slate-600">{v.ip}:{v.port}</td>
+                        <td className="py-2 pr-4 font-mono text-slate-600">
+                          {v.active ? `${v.ip}:${v.port}` : <span className="text-slate-400 italic">stake only</span>}
+                        </td>
                         <td className="py-2 pr-4 font-mono">{(Number(v.stake) / 1e9).toFixed(2)} α</td>
                         <td className="py-2 font-mono">
                           {v.version ? (
@@ -2915,7 +2929,7 @@ function MetagraphTab() {
                               {v.version}
                             </span>
                           ) : (
-                            <span className="text-slate-400">-</span>
+                            <span className="text-slate-400">{v.active ? "?" : "-"}</span>
                           )}
                         </td>
                       </tr>
@@ -2946,8 +2960,8 @@ function MetagraphTab() {
                       <tr key={m.uid} className="border-b border-slate-100">
                         <td className="py-2 pr-4 font-mono">{m.uid}</td>
                         <td className="py-2 pr-4">
-                          {nodeName(m.hotkey) ? (
-                            <span className="font-semibold text-slate-700">{nodeName(m.hotkey)}</span>
+                          {nodeName(m.hotkey, m.coldkey) ? (
+                            <span className="font-semibold text-slate-700">{nodeName(m.hotkey, m.coldkey)}</span>
                           ) : (
                             <span className="font-mono text-slate-400" title={m.hotkey}>{m.hotkey?.slice(0, 8)}...</span>
                           )}

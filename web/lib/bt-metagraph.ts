@@ -44,6 +44,7 @@ function getBtConfig() {
 export interface DiscoveredNode {
   uid: number;
   hotkey: string; // hex-encoded 32-byte public key
+  coldkey: string; // hex-encoded 32-byte owner key
   ip: string;
   port: number;
   isValidator: boolean;
@@ -99,7 +100,7 @@ function decodeNeuronsLite(bytes: Uint8Array): DiscoveredNode[] {
 
   for (let i = 0; i < count; i++) {
     const hotkey = r.readAccountId();
-    r.skip(32); // coldkey
+    const coldkey = r.readAccountId();
     const uid = r.readCompactNumber();
     r.readCompact(); // netuid
     r.readBool(); // active
@@ -145,6 +146,7 @@ function decodeNeuronsLite(bytes: Uint8Array): DiscoveredNode[] {
     nodes.push({
       uid,
       hotkey: bytesToHex(hotkey),
+      coldkey: bytesToHex(coldkey),
       ip,
       port,
       isValidator: validatorPermit,

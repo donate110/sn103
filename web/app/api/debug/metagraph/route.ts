@@ -23,6 +23,8 @@ export async function GET() {
     const publicNodes = nodes.filter(
       (n) => n.port > 0 && n.ip !== "0.0.0.0" && !n.ip.startsWith("127.") && !n.ip.startsWith("10.") && !n.ip.startsWith("192.168."),
     );
+    // ALL validators (including stake-only with no axon)
+    const allValidators = nodes.filter((n) => n.isValidator);
     const validators = publicNodes.filter((n) => n.isValidator);
     const miners = publicNodes.filter((n) => !n.isValidator);
 
@@ -43,9 +45,9 @@ export async function GET() {
       }
     };
 
-    const topValidators = validators
+    const topValidators = allValidators
       .sort((a, b) => (b.totalStake > a.totalStake ? 1 : b.totalStake < a.totalStake ? -1 : 0))
-      .slice(0, 10);
+      .slice(0, 20);
     const topMiners = miners.slice(0, 10);
 
     const [valVersions, minerVersions] = await Promise.all([
@@ -59,13 +61,15 @@ export async function GET() {
       minerDiscoveryMs,
       totalNodes: nodes.length,
       publicNodes: publicNodes.length,
-      validators: validators.length,
+      validators: allValidators.length,
+      activeValidators: validators.length,
       miners: miners.length,
       minerUrl,
       cacheAge: snap.fetchedAt ? Date.now() - snap.fetchedAt : null,
       topMiners: topMiners.map((n, i) => ({
         uid: n.uid,
         hotkey: n.hotkey,
+        coldkey: n.coldkey,
         ip: n.ip,
         port: n.port,
         stake: n.totalStake.toString(),
@@ -74,8 +78,10 @@ export async function GET() {
       topValidators: topValidators.map((n, i) => ({
         uid: n.uid,
         hotkey: n.hotkey,
+        coldkey: n.coldkey,
         ip: n.ip,
         port: n.port,
+        active: n.port > 0 && n.ip !== "0.0.0.0",
         stake: n.totalStake.toString(),
         version: valVersions[i],
       })),
