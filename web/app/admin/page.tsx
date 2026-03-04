@@ -531,7 +531,9 @@ export default function AdminDashboard() {
                   )}
                   {validators.map((v) => (
                     <tr key={v.uid} className="hover:bg-slate-50">
-                      <td className="px-2 sm:px-4 py-2 font-mono text-slate-700">{v.uid}</td>
+                      <td className="px-2 sm:px-4 py-2 font-mono text-slate-700">
+                        <a href={`https://taostats.io/subnet/103/uid/${v.uid}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{v.uid}</a>
+                      </td>
                       <td className="px-2 sm:px-4 py-2 text-xs" title={v.hotkey || ""}>
                         {lookupName(delegateNames, v.hotkey, v.coldkey) ? (
                           <span className="font-semibold text-slate-700">{lookupName(delegateNames, v.hotkey, v.coldkey)}</span>
@@ -616,7 +618,9 @@ export default function AdminDashboard() {
                   )}
                   {miners.map((m) => (
                     <tr key={m.uid} className="hover:bg-slate-50">
-                      <td className="px-2 sm:px-4 py-2 font-mono text-slate-700">{m.uid}</td>
+                      <td className="px-2 sm:px-4 py-2 font-mono text-slate-700">
+                        <a href={`https://taostats.io/subnet/103/uid/${m.uid}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{m.uid}</a>
+                      </td>
                       <td className="px-2 sm:px-4 py-2 text-xs" title={m.hotkey || ""}>
                         {lookupName(delegateNames, m.hotkey, m.coldkey) ? (
                           <span className="font-semibold text-slate-700">{lookupName(delegateNames, m.hotkey, m.coldkey)}</span>
@@ -2236,8 +2240,8 @@ function formatEmission(raw?: string): string {
   if (!raw) return "-";
   const rao = BigInt(raw);
   if (rao === 0n) return "0";
-  const perBlock = Number(rao) / 1e9;
-  const perDay = perBlock * 7200; // ~12s blocks, 7200 blocks/day
+  const perTempo = Number(rao) / 1e9;
+  const perDay = perTempo * 20; // emission is per-tempo (360 blocks); 7200 blocks/day ÷ 360 = 20 tempos/day
   if (perDay >= 1) return `${perDay.toFixed(2)}α/d`;
   if (perDay >= 0.01) return `${perDay.toFixed(4)}α/d`;
   return `${perDay.toFixed(6)}α/d`;
