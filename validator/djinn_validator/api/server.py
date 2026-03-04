@@ -241,6 +241,13 @@ def create_app(
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if os.environ.get("DJINN_REQUIRE_BUYER_AUTH", "0") != "1":
+            log.warning(
+                "buyer_auth_disabled",
+                detail="DJINN_REQUIRE_BUYER_AUTH is not '1'. "
+                "Purchase endpoint will accept unsigned requests. "
+                "Set DJINN_REQUIRE_BUYER_AUTH=1 for production.",
+            )
         cleanup_task = asyncio.create_task(_periodic_state_cleanup())
         yield
         _shutdown_event.set()
