@@ -98,6 +98,7 @@ contract ZKVerifier is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         return abi.decode(result, (bool));
     }
 
-    /// @dev Required by UUPSUpgradeable — restricts upgrades to the owner
+    /// @dev Only the owner (TimelockController) can authorize upgrades.
+    ///      ZKVerifier holds no USDC — no balance guard needed.
     function _authorizeUpgrade(address) internal override onlyOwner {}
 }

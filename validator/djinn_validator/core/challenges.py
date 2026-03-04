@@ -37,6 +37,9 @@ _MAX_CONCURRENT_CHALLENGES = 16
 # Minimum miners needed for consensus to be meaningful
 MIN_MINERS_FOR_CONSENSUS = 3
 
+# Probability that an epoch requires ALL miners to submit TLSNotary proof
+FULL_PROOF_EPOCH_PROBABILITY = 0.20
+
 log = structlog.get_logger()
 
 
@@ -151,21 +154,35 @@ def build_challenge_lines(games: list[ESPNGame], sport: str) -> list[dict]:
     if not real_lines:
         return []
 
-    # Select up to 7 real lines
-    real_count = min(7, len(real_lines))
+    # Select up to 5 real lines (lower ratio to increase synthetic coverage)
+    real_count = min(5, len(real_lines))
     selected = random.sample(real_lines, real_count)
 
-    # Create synthetic unavailable lines (fake event IDs or extreme lines)
-    synthetic_count = min(10 - real_count, 3)
+    # Create synthetic unavailable lines — diversified to resist pattern matching
+    synthetic_count = min(10 - real_count, 5)
+    _synthetic_types = ["extreme_line", "fake_event", "wrong_market"]
     for i in range(synthetic_count):
         base = random.choice(real_lines)
+        synth_type = _synthetic_types[i % len(_synthetic_types)]
+        synth_line = base.get("line") or 0
+        synth_market = base["market"]
+
+        if synth_type == "extreme_line":
+            synth_line += random.uniform(500, 2000)
+        elif synth_type == "fake_event":
+            pass  # line stays plausible but event_id is fake
+        else:  # wrong_market
+            synth_market = "player_prop"
+
         selected.append({
             "sport": sport,
-            "event_id": hashlib.sha256(f"{base['event_id']}:synthetic:{i}".encode()).hexdigest()[:24],
+            "event_id": hashlib.sha256(
+                f"{base['event_id']}:synthetic:{i}:{random.random()}".encode()
+            ).hexdigest()[:24],
             "home_team": base["home_team"],
             "away_team": base["away_team"],
-            "market": base["market"],
-            "line": (base.get("line") or 0) + 999.5,  # Extreme line nobody offers
+            "market": synth_market,
+            "line": synth_line,
             "side": base["side"],
             "is_synthetic": True,
         })
@@ -563,17 +580,26 @@ async def challenge_miners(
             )
 
         # ── Phase 4: Request proofs from targeted miners ──
-        proof_targets = _select_proof_targets(
-            responses, consensus, synthetic_indices,
-        )
+        # Spot-check: 20% of epochs require ALL miners to submit proof
+        is_full_proof_epoch = random.random() < FULL_PROOF_EPOCH_PROBABILITY
+        if is_full_proof_epoch:
+            proof_targets = [r for r in responses if r.success and r.query_id]
+            log.info("full_proof_epoch", target_count=len(proof_targets))
+        else:
+            proof_targets = _select_proof_targets(
+                responses, consensus, synthetic_indices,
+            )
         result.proofs_requested = len(proof_targets)
         for target in proof_targets:
+            # Track that this miner was requested for proof
+            metrics = scorer.get_or_create(target.uid, target.hotkey)
+            metrics.proofs_requested += 1
+
             proof_submitted, proof_valid = await _request_and_verify_proof(
                 client, target.ip, target.port, target.query_id, target.uid,
                 wallet=wallet,
             )
             if proof_submitted:
-                metrics = scorer.get_or_create(target.uid, target.hotkey)
                 metrics.proofs_submitted += 1
                 result.proofs_submitted += 1
                 log.info(

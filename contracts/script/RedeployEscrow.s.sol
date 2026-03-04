@@ -6,7 +6,8 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {Escrow} from "../src/Escrow.sol";
 
 /// @title RedeployEscrow
-/// @notice Redeploys only the Escrow contract and re-wires all cross-contract references.
+/// @notice Redeploys only the Escrow contract, re-wires all cross-contract references,
+///         and transfers ownership to the TimelockController.
 contract RedeployEscrow is Script {
     function run() external {
         uint256 deployerKey = vm.envUint("DEPLOYER_KEY");
@@ -19,9 +20,12 @@ contract RedeployEscrow is Script {
         address cl = vm.envAddress("CREDIT_LEDGER_ADDRESS");
         address acct = vm.envAddress("ACCOUNT_ADDRESS");
         address aud = vm.envAddress("AUDIT_ADDRESS");
+        address timelock = vm.envAddress("TIMELOCK_ADDRESS");
+        address pauserAddr = vm.envOr("PAUSER_ADDRESS", deployer);
 
         console.log("Deployer:", deployer);
         console.log("Old Escrow:", oldEscrow);
+        console.log("Timelock:", timelock);
 
         vm.startBroadcast(deployerKey);
 
@@ -39,6 +43,9 @@ contract RedeployEscrow is Script {
         esc_.setCreditLedger(cl);
         esc_.setAccount(acct);
         esc_.setAuditContract(aud);
+
+        // Set pauser
+        esc_.setPauser(pauserAddr);
 
         // Update Audit to point to new Escrow
         _call(aud, abi.encodeWithSignature("setEscrow(address)", ne));
@@ -59,11 +66,26 @@ contract RedeployEscrow is Script {
         _call(sc, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", oldEscrow, false));
         _call(sc, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", ne, true));
 
+        // Transfer ownership to timelock (CRITICAL — do not skip)
+        esc_.transferOwnership(timelock);
+
         vm.stopBroadcast();
+
+        // Verify ownership transfer
+        require(esc_.owner() == timelock, "Escrow: owner not timelock after transfer");
+        require(esc_.pauser() == pauserAddr, "Escrow: pauser not set");
 
         console.log("");
         console.log("=== ESCROW REDEPLOYMENT COMPLETE ===");
         console.log("NEXT_PUBLIC_ESCROW_ADDRESS=", ne);
+        console.log("Owner:", esc_.owner());
+        console.log("");
+        console.log("PHASE-2 TIMELOCK OPERATIONS (if other contracts already owned by timelock):");
+        console.log("  - Audit.setEscrow(newEscrow) via timelock");
+        console.log("  - Collateral.setAuthorized(old, false) + setAuthorized(new, true) via timelock");
+        console.log("  - CreditLedger.setAuthorizedCaller(old, false) + setAuthorizedCaller(new, true) via timelock");
+        console.log("  - Account.setAuthorizedCaller(old, false) + setAuthorizedCaller(new, true) via timelock");
+        console.log("  - SignalCommitment.setAuthorizedCaller(old, false) + setAuthorizedCaller(new, true) via timelock");
     }
 
     function _call(address target, bytes memory data) internal {

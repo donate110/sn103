@@ -573,7 +573,53 @@ contract LifecycleIntegrationTest is Test {
         assertEq(result.qualityScore, expectedScore, "Stored score should match");
     }
 
-    // ─── Test 10: Protocol Fee Accuracy Across Varied Notionals ─────────
+    // ─── Test 10: Full Lifecycle Through Claim and Withdraw ─────────────
+
+    function test_fullLifecycle_throughClaimAndWithdraw() public {
+        // Step 1: Run a full favorable cycle
+        Outcome[] memory outcomes = new Outcome[](10);
+        for (uint256 i; i < 10; i++) {
+            outcomes[i] = Outcome.Favorable;
+        }
+        _fullCycle(genius1, idiot1, outcomes);
+
+        // Step 2: Settle
+        uint256 treasuryBefore = usdc.balanceOf(treasury);
+        audit.trigger(genius1, idiot1);
+
+        AuditResult memory result = audit.getAuditResult(genius1, idiot1, 0);
+        assertTrue(result.qualityScore > 0, "All favorable should give positive score");
+        assertTrue(result.timestamp > 0, "Settlement timestamp should be set");
+
+        // Step 3: Genius tries to claim fees immediately → ClaimTooEarly
+        uint256 claimableAt = result.timestamp + escrow.DISPUTE_WINDOW();
+        vm.expectRevert(
+            abi.encodeWithSelector(Escrow.ClaimTooEarly.selector, genius1, idiot1, 0, claimableAt)
+        );
+        vm.prank(genius1);
+        escrow.claimFees(idiot1, 0);
+
+        // Step 4: Warp past dispute window
+        vm.warp(result.timestamp + 48 hours + 1);
+
+        // Step 5: Genius claims fees → success
+        uint256 feePoolBalance = escrow.feePool(genius1, idiot1, 0);
+        assertTrue(feePoolBalance > 0, "Fee pool should have USDC");
+
+        uint256 geniusBalBefore = usdc.balanceOf(genius1);
+        vm.prank(genius1);
+        escrow.claimFees(idiot1, 0);
+
+        assertEq(usdc.balanceOf(genius1), geniusBalBefore + feePoolBalance, "Genius should receive fees");
+        assertEq(escrow.feePool(genius1, idiot1, 0), 0, "Fee pool should be zero after claim");
+
+        // Step 6: Verify cycle advanced and system is clean
+        assertEq(account.getCurrentCycle(genius1, idiot1), 1, "Should be on cycle 1");
+        assertEq(collateral.getLocked(genius1), 0, "All collateral locks released");
+        assertTrue(usdc.balanceOf(treasury) > treasuryBefore, "Treasury received protocol fee");
+    }
+
+    // ─── Test 11: Protocol Fee Accuracy Across Varied Notionals ─────────
 
     function test_protocolFee_variedNotionals() public {
         uint256 totalNotional = 0;

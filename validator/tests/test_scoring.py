@@ -19,7 +19,15 @@ class TestMinerMetrics:
         m = MinerMetrics(uid=1, hotkey="h1")
         m.record_query(correct=True, latency=0.1, proof_submitted=True)
         m.record_query(correct=True, latency=0.2, proof_submitted=False)
+        # coverage_score uses proofs_requested as denominator (not queries_total)
+        m.proofs_requested = 2
         assert m.coverage_score() == 0.5
+
+    def test_coverage_score_no_requests(self) -> None:
+        """When no proofs have been requested, coverage is 0."""
+        m = MinerMetrics(uid=1, hotkey="h1")
+        m.record_query(correct=True, latency=0.1, proof_submitted=True)
+        assert m.coverage_score() == 0.0  # proofs_requested still 0
 
     def test_uptime_score(self) -> None:
         m = MinerMetrics(uid=1, hotkey="h1")
@@ -102,11 +110,13 @@ class TestMinerScorer:
         m = scorer.get_or_create(0, "h0")
         m.record_query(correct=True, latency=0.1, proof_submitted=True)
         m.record_health_check(responded=True)
+        m.proofs_requested = 3
         m.consecutive_epochs = 5
 
         scorer.reset_epoch()
         assert m.queries_total == 0
         assert m.health_checks_total == 0
+        assert m.proofs_requested == 0  # Reset each epoch
         assert m.consecutive_epochs == 6  # Incremented (miner participated)
 
     def test_remove_miner(self) -> None:
@@ -464,6 +474,7 @@ class TestComputeWeightsDetailed:
         m = scorer.get_or_create(0, "h0")
         m.record_query(correct=True, latency=0.1, proof_submitted=True)
         m.record_query(correct=False, latency=0.2, proof_submitted=False)
+        m.proofs_requested = 2  # coverage = proofs_submitted / proofs_requested
         m.record_health_check(responded=True)
         m.record_health_check(responded=False)
 

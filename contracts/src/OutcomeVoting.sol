@@ -490,6 +490,7 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
         _unpause();
     }
 
-    /// @dev Required by UUPSUpgradeable — restricts upgrades to the owner
+    /// @dev Only the owner (TimelockController) can authorize upgrades.
+    ///      OutcomeVoting holds no USDC — no balance guard needed.
     function _authorizeUpgrade(address) internal override onlyOwner {}
 }

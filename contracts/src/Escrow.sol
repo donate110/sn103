@@ -59,6 +59,9 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     /// @notice Tracks whether an Idiot has already purchased a given signal (one purchase per Idiot per signal)
     mapping(uint256 => mapping(address => bool)) public hasPurchased;
 
+    /// @notice Tracks whether a purchase has been cancelled by the buyer
+    mapping(uint256 => bool) public purchaseCancelled;
+
     /// @notice Address authorized to pause this contract in emergencies
     address public pauser;
 
@@ -91,6 +94,9 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
 
     /// @notice Emitted when a purchase outcome is updated
     event OutcomeUpdated(uint256 indexed purchaseId, Outcome outcome);
+
+    /// @notice Emitted when a buyer cancels a purchase after MPC timeout
+    event PurchaseCancelled(uint256 indexed purchaseId, address indexed buyer, uint256 refundAmount);
 
     /// @notice Emitted when a protocol contract address is updated
     event ContractAddressUpdated(string name, address addr);
@@ -125,6 +131,10 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     error OutcomeAlreadySet(uint256 purchaseId, Outcome current);
     error InvalidOutcome(Outcome outcome);
     error NotPauserOrOwner(address caller);
+    error PurchaseAlreadyCancelled(uint256 purchaseId);
+    error CancelTooEarly(uint256 purchaseId, uint256 cancelableAt);
+    error NotPurchaseBuyer(uint256 purchaseId, address caller, address buyer);
+    error PurchaseAlreadySettled(uint256 purchaseId);
 
     /// @notice Minimum notional per purchase (1 USDC in 6 decimals — prevents dust griefing)
     uint256 public constant MIN_NOTIONAL = 1e6;
@@ -143,6 +153,9 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
 
     /// @notice Dispute window: 48 hours after settlement before fees can be claimed
     uint256 public constant DISPUTE_WINDOW = 48 hours;
+
+    /// @notice Cancellation timeout: buyer can cancel a purchase after this delay
+    uint256 public constant CANCEL_TIMEOUT = 1 hours;
 
     // -------------------------------------------------------------------------
     // Modifiers
@@ -233,6 +246,7 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         if (!authorizedCallers[msg.sender]) revert Unauthorized();
         if (outcome == Outcome.Pending) revert InvalidOutcome(outcome);
         if (purchaseId >= nextPurchaseId) revert PurchaseNotFound(purchaseId);
+        if (purchaseCancelled[purchaseId]) revert PurchaseAlreadyCancelled(purchaseId);
         Outcome current = _purchases[purchaseId].outcome;
         if (current != Outcome.Pending) revert OutcomeAlreadySet(purchaseId, current);
         _purchases[purchaseId].outcome = outcome;
@@ -375,6 +389,64 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         balances[idiot] += amount;
 
         emit Refunded(genius, idiot, cycle, amount);
+    }
+
+    // -------------------------------------------------------------------------
+    // Buyer-initiated cancellation (MPC timeout recovery)
+    // -------------------------------------------------------------------------
+
+    /// @notice Cancel a purchase and recover USDC after timeout.
+    ///         Designed for situations where the off-chain MPC fails and the buyer
+    ///         never receives decryption key shares. Only callable by the original
+    ///         buyer after CANCEL_TIMEOUT has elapsed from the purchase timestamp.
+    /// @param purchaseId The purchase to cancel
+    function cancelPurchase(uint256 purchaseId) external whenNotPaused nonReentrant {
+        if (purchaseId >= nextPurchaseId) revert PurchaseNotFound(purchaseId);
+        if (purchaseCancelled[purchaseId]) revert PurchaseAlreadyCancelled(purchaseId);
+
+        Purchase storage p = _purchases[purchaseId];
+        if (msg.sender != p.idiot) revert NotPurchaseBuyer(purchaseId, msg.sender, p.idiot);
+        if (p.outcome != Outcome.Pending) revert PurchaseAlreadySettled(purchaseId);
+
+        uint256 cancelableAt = p.purchasedAt + CANCEL_TIMEOUT;
+        if (block.timestamp < cancelableAt) revert CancelTooEarly(purchaseId, cancelableAt);
+
+        if (address(signalCommitment) == address(0)) revert ContractNotSet("SignalCommitment");
+        if (address(collateral) == address(0)) revert ContractNotSet("Collateral");
+
+        Signal memory sig = signalCommitment.getSignal(p.signalId);
+
+        // --- Effects ---
+        purchaseCancelled[purchaseId] = true;
+        p.outcome = Outcome.Void;
+
+        // Refund USDC from fee pool back to buyer's balance
+        uint256 cycle = account.getCurrentCycle(sig.genius, p.idiot);
+        uint256 poolBal = feePool[sig.genius][p.idiot][cycle];
+        uint256 refundAmount = p.usdcPaid < poolBal ? p.usdcPaid : poolBal;
+        if (refundAmount > 0) {
+            feePool[sig.genius][p.idiot][cycle] -= refundAmount;
+            balances[p.idiot] += refundAmount;
+        }
+
+        // Reverse notional tracking
+        if (signalNotionalFilled[p.signalId] >= p.notional) {
+            signalNotionalFilled[p.signalId] -= p.notional;
+        }
+
+        // Allow buyer to re-purchase this signal
+        hasPurchased[p.signalId][p.idiot] = false;
+
+        // --- Interactions: release genius collateral lock ---
+        uint256 lockAmount = (p.notional * sig.slaMultiplierBps) / 10_000;
+        uint256 actualLock = collateral.getSignalLock(sig.genius, p.signalId);
+        uint256 releaseAmount = lockAmount < actualLock ? lockAmount : actualLock;
+        if (releaseAmount > 0) {
+            collateral.release(p.signalId, sig.genius, releaseAmount);
+        }
+
+        emit PurchaseCancelled(purchaseId, msg.sender, refundAmount);
+        emit OutcomeUpdated(purchaseId, Outcome.Void);
     }
 
     // -------------------------------------------------------------------------

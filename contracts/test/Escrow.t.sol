@@ -1243,6 +1243,7 @@ contract EscrowFeeClaimTest is Test {
 
         // Mark cycle as settled in mock audit
         mockAudit.markSettled(genius, idiot, cycle);
+        vm.warp(block.timestamp + 48 hours + 1);
 
         uint256 geniusBalBefore = usdc.balanceOf(genius);
 
@@ -1266,6 +1267,7 @@ contract EscrowFeeClaimTest is Test {
     function test_claimFees_revertNoFees() public {
         // No purchase made, so fee pool is empty
         mockAudit.markSettled(genius, idiot, 0);
+        vm.warp(block.timestamp + 48 hours + 1);
 
         vm.expectRevert(abi.encodeWithSelector(Escrow.NoFeesToClaim.selector, genius, idiot, 0));
         vm.prank(genius);
@@ -1276,6 +1278,7 @@ contract EscrowFeeClaimTest is Test {
         uint256 expectedFee = _createSignalAndPurchase();
         uint256 cycle = account.getCurrentCycle(genius, idiot);
         mockAudit.markSettled(genius, idiot, cycle);
+        vm.warp(block.timestamp + 48 hours + 1);
 
         vm.prank(genius);
         escrow.claimFees(idiot, cycle);
@@ -1290,6 +1293,7 @@ contract EscrowFeeClaimTest is Test {
         _createSignalAndPurchase();
         uint256 cycle = account.getCurrentCycle(genius, idiot);
         mockAudit.markSettled(genius, idiot, cycle);
+        vm.warp(block.timestamp + 48 hours + 1);
 
         // Idiot tries to claim genius's fees — should get CycleNotSettled
         // because auditResults is keyed by msg.sender (idiot), not genius
@@ -1347,6 +1351,7 @@ contract EscrowFeeClaimTest is Test {
         // Mark both cycles as settled
         mockAudit.markSettled(genius, idiot, cycle1);
         mockAudit.markSettled(genius, idiot2, cycle2);
+        vm.warp(block.timestamp + 48 hours + 1);
 
         uint256 geniusBalBefore = usdc.balanceOf(genius);
 
@@ -1365,6 +1370,7 @@ contract EscrowFeeClaimTest is Test {
 
     function test_claimFeesBatch_revertAllEmpty() public {
         mockAudit.markSettled(genius, idiot, 0);
+        vm.warp(block.timestamp + 48 hours + 1);
 
         address[] memory idiots = new address[](1);
         idiots[0] = idiot;
@@ -1380,11 +1386,338 @@ contract EscrowFeeClaimTest is Test {
         uint256 expectedFee = _createSignalAndPurchase();
         uint256 cycle = account.getCurrentCycle(genius, idiot);
         mockAudit.markSettled(genius, idiot, cycle);
+        vm.warp(block.timestamp + 48 hours + 1);
 
         vm.expectEmit(true, true, false, true);
         emit Escrow.FeesClaimed(genius, idiot, cycle, expectedFee);
 
         vm.prank(genius);
         escrow.claimFees(idiot, cycle);
+    }
+
+    // ─── Dispute Window Tests ──────────────────────────────────────────
+
+    function test_claimFees_reverts_before_dispute_window() public {
+        _createSignalAndPurchase();
+        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        uint256 settledAt = block.timestamp;
+        mockAudit.markSettled(genius, idiot, cycle);
+
+        // Warp 1 second after settlement (within 48h window)
+        vm.warp(settledAt + 1);
+
+        uint256 claimableAt = settledAt + 48 hours;
+        vm.expectRevert(
+            abi.encodeWithSelector(Escrow.ClaimTooEarly.selector, genius, idiot, cycle, claimableAt)
+        );
+        vm.prank(genius);
+        escrow.claimFees(idiot, cycle);
+    }
+
+    function test_claimFees_succeeds_after_dispute_window() public {
+        uint256 expectedFee = _createSignalAndPurchase();
+        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        mockAudit.markSettled(genius, idiot, cycle);
+
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        uint256 geniusBalBefore = usdc.balanceOf(genius);
+        vm.prank(genius);
+        escrow.claimFees(idiot, cycle);
+
+        assertEq(usdc.balanceOf(genius), geniusBalBefore + expectedFee, "Genius should receive fees");
+        assertEq(escrow.feePool(genius, idiot, cycle), 0, "Fee pool should be zero");
+    }
+
+    function test_claimFeesBatch_reverts_before_dispute_window() public {
+        _createSignalAndPurchase();
+        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        uint256 settledAt = block.timestamp;
+        mockAudit.markSettled(genius, idiot, cycle);
+
+        vm.warp(settledAt + 1);
+
+        address[] memory idiots_ = new address[](1);
+        idiots_[0] = idiot;
+        uint256[] memory cycles_ = new uint256[](1);
+        cycles_[0] = cycle;
+
+        uint256 claimableAt = settledAt + 48 hours;
+        vm.expectRevert(
+            abi.encodeWithSelector(Escrow.ClaimTooEarly.selector, genius, idiot, cycle, claimableAt)
+        );
+        vm.prank(genius);
+        escrow.claimFeesBatch(idiots_, cycles_);
+    }
+
+    function test_claimFeesBatch_succeeds_after_dispute_window() public {
+        uint256 expectedFee = _createSignalAndPurchase();
+        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        mockAudit.markSettled(genius, idiot, cycle);
+
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        address[] memory idiots_ = new address[](1);
+        idiots_[0] = idiot;
+        uint256[] memory cycles_ = new uint256[](1);
+        cycles_[0] = cycle;
+
+        uint256 geniusBalBefore = usdc.balanceOf(genius);
+        vm.prank(genius);
+        escrow.claimFeesBatch(idiots_, cycles_);
+
+        assertEq(usdc.balanceOf(genius), geniusBalBefore + expectedFee, "Genius should receive batched fees");
+    }
+
+    function test_claimFees_at_exact_boundary_succeeds() public {
+        uint256 expectedFee = _createSignalAndPurchase();
+        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        uint256 settledAt = block.timestamp;
+        mockAudit.markSettled(genius, idiot, cycle);
+
+        // At exact boundary: block.timestamp == settledAt + 48h
+        // The check is `block.timestamp < claimableAt`, so this should SUCCEED
+        vm.warp(settledAt + 48 hours);
+
+        uint256 geniusBalBefore = usdc.balanceOf(genius);
+        vm.prank(genius);
+        escrow.claimFees(idiot, cycle);
+
+        assertTrue(usdc.balanceOf(genius) > geniusBalBefore, "Claim at exact boundary should succeed");
+    }
+
+    function test_claimFees_one_second_before_boundary_reverts() public {
+        _createSignalAndPurchase();
+        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        uint256 settledAt = block.timestamp;
+        mockAudit.markSettled(genius, idiot, cycle);
+
+        vm.warp(settledAt + 48 hours - 1);
+
+        uint256 claimableAt = settledAt + 48 hours;
+        vm.expectRevert(
+            abi.encodeWithSelector(Escrow.ClaimTooEarly.selector, genius, idiot, cycle, claimableAt)
+        );
+        vm.prank(genius);
+        escrow.claimFees(idiot, cycle);
+    }
+}
+
+/// @title EscrowCancelPurchaseTest
+/// @notice Tests for the buyer-initiated purchase cancellation (MPC timeout recovery)
+contract EscrowCancelPurchaseTest is Test {
+    MockUSDC usdc;
+    SignalCommitment signalCommitment;
+    Escrow escrow;
+    Collateral collateral;
+    CreditLedger creditLedger;
+    DjinnAccount account;
+
+    address owner;
+    address genius = address(0xBEEF);
+    address idiot = address(0xCAFE);
+
+    uint256 constant SIGNAL_ID = 1;
+    uint256 constant MAX_PRICE_BPS = 500;
+    uint256 constant SLA_MULTIPLIER_BPS = 15_000;
+    uint256 constant NOTIONAL = 1000e6;
+    uint256 constant ODDS = 1_910_000;
+
+    function setUp() public {
+        owner = address(this);
+
+        usdc = new MockUSDC();
+        signalCommitment = SignalCommitment(_deployProxy(address(new SignalCommitment()), abi.encodeCall(SignalCommitment.initialize, (owner))));
+        escrow = Escrow(_deployProxy(address(new Escrow()), abi.encodeCall(Escrow.initialize, (address(usdc), owner))));
+        collateral = Collateral(_deployProxy(address(new Collateral()), abi.encodeCall(Collateral.initialize, (address(usdc), owner))));
+        creditLedger = CreditLedger(_deployProxy(address(new CreditLedger()), abi.encodeCall(CreditLedger.initialize, (owner))));
+        account = DjinnAccount(_deployProxy(address(new DjinnAccount()), abi.encodeCall(DjinnAccount.initialize, (owner))));
+
+        escrow.setSignalCommitment(address(signalCommitment));
+        escrow.setCollateral(address(collateral));
+        escrow.setCreditLedger(address(creditLedger));
+        escrow.setAccount(address(account));
+        escrow.setAuditContract(owner);
+
+        signalCommitment.setAuthorizedCaller(address(escrow), true);
+        collateral.setAuthorized(address(escrow), true);
+        creditLedger.setAuthorizedCaller(address(escrow), true);
+        account.setAuthorizedCaller(address(escrow), true);
+        account.setAuthorizedCaller(owner, true);
+        escrow.setAuthorizedCaller(owner, true); // for setOutcome in tests
+    }
+
+    function _buildDecoyLines() internal pure returns (string[] memory) {
+        string[] memory decoys = new string[](10);
+        for (uint256 i; i < 10; i++) decoys[i] = "decoy";
+        return decoys;
+    }
+
+    function _buildSportsbooks() internal pure returns (string[] memory) {
+        string[] memory books = new string[](2);
+        books[0] = "DraftKings";
+        books[1] = "FanDuel";
+        return books;
+    }
+
+    function _createSignalAndPurchase() internal returns (uint256 purchaseId, uint256 fee) {
+        vm.prank(genius);
+        signalCommitment.commit(
+            SignalCommitment.CommitParams({
+                signalId: SIGNAL_ID,
+                encryptedBlob: hex"deadbeef",
+                commitHash: keccak256("signal"),
+                sport: "NFL",
+                maxPriceBps: MAX_PRICE_BPS,
+                slaMultiplierBps: SLA_MULTIPLIER_BPS,
+                maxNotional: 10_000e6,
+                minNotional: 0,
+                expiresAt: block.timestamp + 1 days,
+                decoyLines: _buildDecoyLines(),
+                availableSportsbooks: _buildSportsbooks()
+            })
+        );
+
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        usdc.mint(genius, requiredCollateral);
+        vm.startPrank(genius);
+        usdc.approve(address(collateral), requiredCollateral);
+        collateral.deposit(requiredCollateral);
+        vm.stopPrank();
+
+        fee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
+        usdc.mint(idiot, fee);
+        vm.startPrank(idiot);
+        usdc.approve(address(escrow), fee);
+        escrow.deposit(fee);
+        purchaseId = escrow.purchase(SIGNAL_ID, NOTIONAL, ODDS);
+        vm.stopPrank();
+    }
+
+    function test_cancelPurchase_succeeds_after_timeout() public {
+        (uint256 purchaseId, uint256 fee) = _createSignalAndPurchase();
+
+        uint256 idiotBalBefore = escrow.getBalance(idiot);
+        uint256 notionalBefore = escrow.signalNotionalFilled(SIGNAL_ID);
+        uint256 collateralLockedBefore = collateral.getSignalLock(genius, SIGNAL_ID);
+
+        vm.warp(block.timestamp + 1 hours + 1);
+
+        vm.prank(idiot);
+        escrow.cancelPurchase(purchaseId);
+
+        // Verify state
+        assertTrue(escrow.purchaseCancelled(purchaseId), "Should be cancelled");
+        assertEq(escrow.getBalance(idiot), idiotBalBefore + fee, "USDC refunded to balance");
+        assertEq(escrow.signalNotionalFilled(SIGNAL_ID), notionalBefore - NOTIONAL, "Notional reversed");
+        assertFalse(escrow.hasPurchased(SIGNAL_ID, idiot), "hasPurchased reset");
+        assertEq(collateral.getSignalLock(genius, SIGNAL_ID), 0, "Collateral released");
+
+        Purchase memory p = escrow.getPurchase(purchaseId);
+        assertEq(uint8(p.outcome), uint8(Outcome.Void), "Outcome set to Void");
+    }
+
+    function test_cancelPurchase_reverts_before_timeout() public {
+        (uint256 purchaseId,) = _createSignalAndPurchase();
+
+        Purchase memory p = escrow.getPurchase(purchaseId);
+        uint256 cancelableAt = p.purchasedAt + 1 hours;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Escrow.CancelTooEarly.selector, purchaseId, cancelableAt)
+        );
+        vm.prank(idiot);
+        escrow.cancelPurchase(purchaseId);
+    }
+
+    function test_cancelPurchase_reverts_non_buyer() public {
+        (uint256 purchaseId,) = _createSignalAndPurchase();
+        vm.warp(block.timestamp + 1 hours + 1);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Escrow.NotPurchaseBuyer.selector, purchaseId, genius, idiot)
+        );
+        vm.prank(genius);
+        escrow.cancelPurchase(purchaseId);
+    }
+
+    function test_cancelPurchase_reverts_already_cancelled() public {
+        (uint256 purchaseId,) = _createSignalAndPurchase();
+        vm.warp(block.timestamp + 1 hours + 1);
+
+        vm.prank(idiot);
+        escrow.cancelPurchase(purchaseId);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Escrow.PurchaseAlreadyCancelled.selector, purchaseId)
+        );
+        vm.prank(idiot);
+        escrow.cancelPurchase(purchaseId);
+    }
+
+    function test_cancelPurchase_reverts_if_outcome_set() public {
+        (uint256 purchaseId,) = _createSignalAndPurchase();
+
+        // Owner acts as authorized caller to set outcome
+        escrow.setOutcome(purchaseId, Outcome.Favorable);
+
+        vm.warp(block.timestamp + 1 hours + 1);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Escrow.PurchaseAlreadySettled.selector, purchaseId)
+        );
+        vm.prank(idiot);
+        escrow.cancelPurchase(purchaseId);
+    }
+
+    function test_cancelPurchase_allows_repurchase() public {
+        (uint256 purchaseId, uint256 fee) = _createSignalAndPurchase();
+        vm.warp(block.timestamp + 1 hours + 1);
+
+        vm.prank(idiot);
+        escrow.cancelPurchase(purchaseId);
+
+        // Re-deposit collateral for genius
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        usdc.mint(genius, requiredCollateral);
+        vm.startPrank(genius);
+        usdc.approve(address(collateral), requiredCollateral);
+        collateral.deposit(requiredCollateral);
+        vm.stopPrank();
+
+        // Buyer still has the refunded balance, can repurchase
+        vm.prank(idiot);
+        uint256 newPurchaseId = escrow.purchase(SIGNAL_ID, NOTIONAL, ODDS);
+
+        assertTrue(newPurchaseId != purchaseId, "New purchase ID");
+        assertTrue(escrow.hasPurchased(SIGNAL_ID, idiot), "hasPurchased set again");
+    }
+
+    function test_cancelPurchase_refunds_correctly() public {
+        (uint256 purchaseId, uint256 fee) = _createSignalAndPurchase();
+        vm.warp(block.timestamp + 1 hours + 1);
+
+        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        uint256 feePoolBefore = escrow.feePool(genius, idiot, cycle);
+        assertEq(feePoolBefore, fee, "Fee pool should have the fee");
+
+        vm.prank(idiot);
+        escrow.cancelPurchase(purchaseId);
+
+        assertEq(escrow.feePool(genius, idiot, cycle), 0, "Fee pool drained");
+        assertEq(escrow.getBalance(idiot), fee, "Buyer balance restored");
+    }
+
+    function test_setOutcome_reverts_on_cancelled() public {
+        (uint256 purchaseId,) = _createSignalAndPurchase();
+        vm.warp(block.timestamp + 1 hours + 1);
+
+        vm.prank(idiot);
+        escrow.cancelPurchase(purchaseId);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Escrow.PurchaseAlreadyCancelled.selector, purchaseId)
+        );
+        escrow.setOutcome(purchaseId, Outcome.Favorable);
     }
 }

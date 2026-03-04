@@ -349,6 +349,7 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         if (idiot == address(0)) revert ZeroIdiotAddress();
     }
 
-    /// @dev Only the owner can authorize contract upgrades
+    /// @dev Only the owner (TimelockController) can authorize upgrades.
+    ///      Account holds no USDC — no balance guard needed.
     function _authorizeUpgrade(address) internal override onlyOwner {}
 }

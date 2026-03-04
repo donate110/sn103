@@ -9,6 +9,7 @@ import pytest
 
 from djinn_validator.core.challenges import (
     ConsensusResult,
+    FULL_PROOF_EPOCH_PROBABILITY,
     LineConsensus,
     MinerResponse,
     MIN_MINERS_FOR_CONSENSUS,
@@ -814,3 +815,144 @@ async def test_consensus_proof_requested_from_outlier() -> None:
     assert result.challenged == 4
     # Proof was requested (at least check + proof calls)
     assert mock_http.post.call_count > 4
+
+
+# ---------------------------------------------------------------------------
+# Part 4: Full-proof epoch + synthetic count + proofs_requested tracking
+# ---------------------------------------------------------------------------
+
+
+class TestFullProofEpoch:
+    """Tests for the 20% full-proof spot-check epoch mechanism."""
+
+    def test_full_proof_probability_constant(self) -> None:
+        assert FULL_PROOF_EPOCH_PROBABILITY == 0.20
+
+    @pytest.mark.asyncio
+    async def test_full_proof_epoch_selects_all_miners(self) -> None:
+        """When random triggers full-proof, ALL miners with query_ids get proofed."""
+        mock_espn = AsyncMock(spec=ESPNClient)
+        mock_espn.get_scoreboard = AsyncMock(return_value=[
+            _make_game(), _make_game("evt2"),
+        ])
+        scorer = MinerScorer()
+        axons = [
+            {"uid": i, "hotkey": f"hk{i}", "ip": "127.0.0.1", "port": 8080 + i}
+            for i in range(5)
+        ]
+
+        with (
+            patch("djinn_validator.core.challenges.httpx.AsyncClient") as mock_http_cls,
+            patch("djinn_validator.core.challenges.random.random", return_value=0.05),  # < 0.20 → full proof
+        ):
+            mock_http = AsyncMock()
+            mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+            mock_http.__aexit__ = AsyncMock(return_value=False)
+            # 5 check responses + 5 proof responses (all miners proofed)
+            mock_http.post = AsyncMock(side_effect=[
+                _mock_check_response([1, 2, 3], query_id=f"q-{i}") for i in range(5)
+            ] + [
+                _mock_proof_response() for _ in range(5)
+            ])
+            mock_http_cls.return_value = mock_http
+
+            result = await challenge_miners(scorer, axons, espn_client=mock_espn)
+
+        assert result.challenged == 5
+        # All 5 miners should have proofs_requested incremented
+        for i in range(5):
+            m = scorer.get_or_create(i, f"hk{i}")
+            assert m.proofs_requested >= 1, f"Miner {i} should have proofs_requested >= 1"
+
+    @pytest.mark.asyncio
+    async def test_normal_epoch_uses_standard_selection(self) -> None:
+        """When random > 0.20, standard proof target selection (max 4)."""
+        mock_espn = AsyncMock(spec=ESPNClient)
+        mock_espn.get_scoreboard = AsyncMock(return_value=[
+            _make_game(), _make_game("evt2"),
+        ])
+        scorer = MinerScorer()
+        axons = [
+            {"uid": i, "hotkey": f"hk{i}", "ip": "127.0.0.1", "port": 8080 + i}
+            for i in range(10)
+        ]
+
+        with (
+            patch("djinn_validator.core.challenges.httpx.AsyncClient") as mock_http_cls,
+            patch("djinn_validator.core.challenges.random.random", return_value=0.50),  # > 0.20 → normal
+        ):
+            mock_http = AsyncMock()
+            mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+            mock_http.__aexit__ = AsyncMock(return_value=False)
+            # 10 check responses + up to 4 proof responses
+            mock_http.post = AsyncMock(side_effect=[
+                _mock_check_response([1, 2, 3], query_id=f"q-{i}") for i in range(10)
+            ] + [
+                _mock_proof_response() for _ in range(4)
+            ])
+            mock_http_cls.return_value = mock_http
+
+            result = await challenge_miners(scorer, axons, espn_client=mock_espn)
+
+        assert result.challenged == 10
+        # At most 4 miners should have proofs_requested
+        proofed = sum(
+            1 for i in range(10)
+            if scorer.get_or_create(i, f"hk{i}").proofs_requested > 0
+        )
+        assert proofed <= 4
+
+
+class TestSyntheticLineCount:
+    """Tests that synthetic line ratio is now 5 real + 5 synthetic."""
+
+    def test_synthetic_count_is_five(self) -> None:
+        """With enough games, synthetic lines should be 5 out of 10."""
+        games = [_make_game(f"evt{i}") for i in range(10)]  # plenty of games
+        lines = build_challenge_lines(games, "basketball_nba")
+        synthetic = [l for l in lines if l.get("is_synthetic")]
+        real = [l for l in lines if not l.get("is_synthetic")]
+        assert len(lines) == 10
+        assert len(synthetic) == 5
+        assert len(real) == 5
+
+    def test_synthetic_types_diversified(self) -> None:
+        """Synthetic lines should have varied event IDs (not all same pattern)."""
+        games = [_make_game(f"evt{i}") for i in range(10)]
+        lines = build_challenge_lines(games, "basketball_nba")
+        synthetic = [l for l in lines if l.get("is_synthetic")]
+        # All synthetic event_ids should be 24-char hex hashes
+        for s in synthetic:
+            assert len(s["event_id"]) == 24
+        # Event IDs should be unique
+        ids = [s["event_id"] for s in synthetic]
+        assert len(ids) == len(set(ids))
+
+
+class TestProofsRequestedTracking:
+    """Tests for proofs_requested field on MinerMetrics."""
+
+    def test_proofs_requested_reset_on_epoch(self) -> None:
+        scorer = MinerScorer()
+        m = scorer.get_or_create(0, "h0")
+        m.proofs_requested = 5
+        m.record_health_check(responded=True)
+        scorer.reset_epoch()
+        assert m.proofs_requested == 0
+
+    def test_coverage_score_uses_proofs_requested(self) -> None:
+        from djinn_validator.core.scoring import MinerMetrics
+        m = MinerMetrics(uid=0, hotkey="h0")
+        m.record_query(correct=True, latency=0.1, proof_submitted=True)
+        m.record_query(correct=True, latency=0.2, proof_submitted=True)
+        m.record_query(correct=True, latency=0.3, proof_submitted=False)
+        # 2 proofs submitted out of 3 queries — but proofs_requested is what matters
+        m.proofs_requested = 3
+        assert m.coverage_score() == pytest.approx(2 / 3)
+
+    def test_coverage_score_zero_when_never_requested(self) -> None:
+        from djinn_validator.core.scoring import MinerMetrics
+        m = MinerMetrics(uid=0, hotkey="h0")
+        m.record_query(correct=True, latency=0.1, proof_submitted=True)
+        # proofs_requested is 0 — coverage should be 0, not inf
+        assert m.coverage_score() == 0.0

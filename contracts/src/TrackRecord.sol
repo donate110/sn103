@@ -231,6 +231,7 @@ contract TrackRecord is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         return records[recordId];
     }
 
-    /// @dev Required by UUPSUpgradeable — restricts upgrades to the owner
+    /// @dev Only the owner (TimelockController) can authorize upgrades.
+    ///      TrackRecord holds no USDC — no balance guard needed.
     function _authorizeUpgrade(address) internal override onlyOwner {}
 }

@@ -52,6 +52,9 @@ class MinerMetrics:
     attestations_valid: int = 0  # TLSNotary proof verified
     attestation_latencies: list[float] = field(default_factory=list)
 
+    # ── Proof-request tracking ──
+    proofs_requested: int = 0  # times miner was asked to submit proof
+
     # ── Shared metrics ──
     health_checks_total: int = 0
     health_checks_responded: int = 0
@@ -64,10 +67,10 @@ class MinerMetrics:
         return self.queries_correct / self.queries_total
 
     def coverage_score(self) -> float:
-        """Fraction of sports queries with valid TLSNotary proof."""
-        if self.queries_total == 0:
+        """Fraction of proof requests where miner submitted a valid proof."""
+        if self.proofs_requested == 0:
             return 0.0
-        return self.proofs_submitted / self.queries_total
+        return self.proofs_submitted / self.proofs_requested
 
     def uptime_score(self) -> float:
         """Fraction of health checks responded to."""
@@ -500,6 +503,7 @@ class MinerScorer:
             m.queries_correct = 0
             m.latencies.clear()
             m.proofs_submitted = 0
+            m.proofs_requested = 0
             # Reset attestation metrics
             m.attestations_total = 0
             m.attestations_valid = 0
