@@ -95,6 +95,7 @@ export interface StructuredLine {
   line: number | null; // point value (null for h2h)
   side: string; // team name or "Over"/"Under"
   price?: number; // decimal odds (e.g. 1.91); display-only, not part of signal secrecy
+  commence_time?: string; // ISO 8601 game start time
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +293,7 @@ export function betToLine(bet: AvailableBet): StructuredLine {
     line: bet.line,
     side: bet.side,
     price: bet.avgPrice,
+    commence_time: bet.event.commence_time,
   };
 }
 

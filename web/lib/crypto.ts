@@ -273,6 +273,11 @@ export function isMasterSeedCached(): boolean {
   return _cachedMasterSeed !== null;
 }
 
+/** Get the cached master seed bytes, or null if not yet derived. No wallet interaction. */
+export function getCachedMasterSeed(): Uint8Array | null {
+  return _cachedMasterSeed ? new Uint8Array(_cachedMasterSeed) : null;
+}
+
 /**
  * Derive a master seed from the Genius's wallet signature.
  * Signs a fixed message — same wallet always produces the same seed (RFC 6979).

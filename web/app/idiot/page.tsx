@@ -12,7 +12,8 @@ import { useActiveRelationships, type ActiveRelationship } from "@/lib/hooks/use
 import { useLeaderboard } from "@/lib/hooks/useLeaderboard";
 import { formatUsdc, parseUsdc, formatBps, truncateAddress } from "@/lib/types";
 import { getPurchasedSignals, savePurchasedSignal } from "@/lib/preferences";
-import { getSavedSignals, saveSavedSignals } from "@/lib/hooks/useSettledSignals";
+import { getSavedSignals, saveSavedSignalsEncrypted } from "@/lib/hooks/useSettledSignals";
+import { getCachedMasterSeed } from "@/lib/crypto";
 import { readRecoveryBlobFromChain, loadRecovery } from "@/lib/recovery";
 import SignalPlot from "@/components/SignalPlot";
 
@@ -75,7 +76,7 @@ export default function IdiotDashboard() {
       );
       if (result && (result.signals.length > 0 || result.purchases.length > 0)) {
         if (result.signals.length > 0) {
-          saveSavedSignals(address, result.signals);
+          await saveSavedSignalsEncrypted(address, result.signals, getCachedMasterSeed());
         }
         for (const p of result.purchases) {
           savePurchasedSignal(address, p);

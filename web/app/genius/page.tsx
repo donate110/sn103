@@ -1,13 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useAccount } from "wagmi";
+import { useAccount, useWalletClient } from "wagmi";
 import QualityScore from "@/components/QualityScore";
 import { useCollateral, useDepositCollateral, useWithdrawCollateral, useWalletUsdcBalance, useEarlyExit, useCancelSignal, humanizeError } from "@/lib/hooks";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
 import { useAuditHistory } from "@/lib/hooks/useAuditHistory";
-import { getSavedSignals } from "@/lib/hooks/useSettledSignals";
+import { useEncryptedSignals } from "@/lib/hooks/useEncryptedSignals";
+import { saveSavedSignalsEncrypted } from "@/lib/hooks/useSettledSignals";
+import { readRecoveryBlobFromChain, loadRecovery } from "@/lib/recovery";
 import { useActiveRelationships, type ActiveRelationship } from "@/lib/hooks/useActiveRelationships";
 import { formatUsdc, parseUsdc, formatBps, truncateAddress } from "@/lib/types";
 
@@ -19,13 +21,60 @@ export default function GeniusDashboard() {
   const { withdraw: withdrawCollateral, loading: withdrawLoading } = useWithdrawCollateral();
   const { signals: mySignals, loading: signalsLoading } = useActiveSignals(undefined, address, true);
   const { audits, loading: auditsLoading, aggregateQualityScore } = useAuditHistory(address);
-  // Map signal IDs to their minerVerified status from localStorage
+  const { data: walletClient } = useWalletClient();
+
+  // Encrypted signal data from localStorage
+  const {
+    signals: savedSignals,
+    loading: savedLoading,
+    locked: savedLocked,
+    unlock: unlockSaved,
+    refresh: refreshSaved,
+  } = useEncryptedSignals();
+
   const verifiedMap = useMemo(() => {
-    const saved = getSavedSignals(address);
     const map = new Map<string, boolean>();
-    for (const s of saved) map.set(s.signalId, s.minerVerified === true);
+    for (const s of savedSignals) map.set(s.signalId, s.minerVerified === true);
     return map;
-  }, [address]);
+  }, [savedSignals]);
+
+  // On-chain recovery state machine
+  const [recoveryState, setRecoveryState] = useState<
+    "idle" | "checking" | "prompting" | "loading" | "recovered" | "none" | "failed"
+  >("idle");
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!address || savedLoading || savedSignals.length > 0 || savedLocked || recoveryState !== "idle") return;
+    setRecoveryState("checking");
+    readRecoveryBlobFromChain(address)
+      .then((blob) => setRecoveryState(blob ? "prompting" : "none"))
+      .catch(() => setRecoveryState("none"));
+  }, [address, savedLoading, savedSignals.length, savedLocked, recoveryState]);
+
+  const handleRecover = useCallback(async () => {
+    if (!address || !walletClient) return;
+    setRecoveryState("loading");
+    setRecoveryError(null);
+    try {
+      const result = await loadRecovery(
+        address,
+        (params) => walletClient.signTypedData(params),
+      );
+      if (result && result.signals.length > 0) {
+        const { getCachedMasterSeed } = await import("@/lib/crypto");
+        await saveSavedSignalsEncrypted(address, result.signals, getCachedMasterSeed());
+        await refreshSaved();
+        setRecoveryState("recovered");
+      } else {
+        setRecoveryState("failed");
+        setRecoveryError("Recovery blob was empty or could not be decrypted");
+      }
+    } catch (err) {
+      setRecoveryState("failed");
+      setRecoveryError(err instanceof Error ? err.message : "Recovery failed");
+    }
+  }, [address, walletClient, refreshSaved]);
 
   const { cancelSignal, loading: cancelLoading } = useCancelSignal();
   const [cancellingAll, setCancellingAll] = useState(false);
@@ -191,6 +240,76 @@ export default function GeniusDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Locked data banner */}
+      {savedLocked && (
+        <div className="rounded-lg border border-genius-200 bg-genius-50 p-4 mb-8">
+          <div className="flex items-start gap-3">
+            <svg className="w-5 h-5 text-genius-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-genius-800">Signal Data Locked</p>
+              <p className="text-xs text-genius-700 mt-1">
+                Your private signal data is encrypted. Sign to unlock real picks and verification status.
+              </p>
+              <button
+                type="button"
+                onClick={unlockSaved}
+                className="mt-3 px-4 py-1.5 text-xs font-medium rounded-lg bg-genius-600 text-white hover:bg-genius-700 transition-colors"
+              >
+                Unlock Data
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recovery banner */}
+      {recoveryState === "prompting" && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 mb-8">
+          <div className="flex items-start gap-3">
+            <svg className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-amber-800">Recovery Backup Detected</p>
+              <p className="text-xs text-amber-700 mt-1">
+                No local signal data found, but a recovery backup exists on-chain. Restore it to see your real picks and verification status.
+              </p>
+              <button
+                type="button"
+                onClick={handleRecover}
+                className="mt-3 px-4 py-1.5 text-xs font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+              >
+                Restore from Backup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {recoveryState === "loading" && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 mb-8">
+          <p className="text-sm text-blue-700 animate-pulse">Restoring data from on-chain backup...</p>
+        </div>
+      )}
+      {recoveryState === "recovered" && (
+        <div className="rounded-lg border border-green-200 bg-green-50 p-4 mb-8">
+          <p className="text-sm text-green-700">Data restored successfully from on-chain backup.</p>
+        </div>
+      )}
+      {recoveryState === "failed" && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 mb-8">
+          <p className="text-sm text-red-600">{recoveryError || "Recovery failed"}</p>
+          <button
+            type="button"
+            onClick={() => setRecoveryState("idle")}
+            className="mt-2 text-xs text-red-500 hover:text-red-700 underline"
+          >
+            Try again
+          </button>
+        </div>
+      )}
 
       {/* Collateral Management */}
       <section className="mb-8">

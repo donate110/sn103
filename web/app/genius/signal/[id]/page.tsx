@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAccount } from "wagmi";
 import { useSignal, useCancelSignal, useSignalPurchases, useSignalNotionalFilled, humanizeError } from "@/lib/hooks";
-import { getSavedSignals } from "@/lib/hooks/useSettledSignals";
+import { useEncryptedSignals } from "@/lib/hooks/useEncryptedSignals";
 import { SignalStatus, formatUsdc, formatBps, truncateAddress } from "@/lib/types";
 import { parseLine, formatLine, type StructuredLine } from "@/lib/odds";
 
@@ -27,26 +27,25 @@ export default function GeniusSignalDetail() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   // Find local private data for this signal (real pick, decoys, etc.)
+  const {
+    signals: allSavedSignals,
+    locked: savedLocked,
+    unlock: unlockSaved,
+    save: saveSavedSignals,
+  } = useEncryptedSignals();
+
   const [localCleared, setLocalCleared] = useState(false);
   const savedData = useMemo(() => {
     if (localCleared || !address) return null;
-    const saved = getSavedSignals(address);
-    return saved.find((s) => s.signalId === signalId) ?? null;
-  }, [address, signalId, localCleared]);
+    return allSavedSignals.find((s) => s.signalId === signalId) ?? null;
+  }, [allSavedSignals, address, signalId, localCleared]);
 
-  const clearLocalData = useCallback(() => {
+  const clearLocalData = useCallback(async () => {
     if (!address) return;
-    const key = `djinn-signal-data:${address.toLowerCase()}`;
-    try {
-      const raw = localStorage.getItem(key);
-      if (raw) {
-        const arr = JSON.parse(raw) as Array<{ signalId: string }>;
-        const filtered = arr.filter((s) => s.signalId !== signalId);
-        localStorage.setItem(key, JSON.stringify(filtered));
-      }
-    } catch { /* ignore */ }
+    const filtered = allSavedSignals.filter((s) => s.signalId !== signalId);
+    await saveSavedSignals(filtered);
     setLocalCleared(true);
-  }, [address, signalId]);
+  }, [address, allSavedSignals, signalId, saveSavedSignals]);
 
   const isOwner = signal && address
     ? signal.genius.toLowerCase() === address.toLowerCase()
@@ -322,8 +321,42 @@ export default function GeniusSignalDetail() {
             </div>
           )}
         </div>
+      ) : savedLocked ? (
+        /* Data is encrypted and seed not cached — show unlock prompt */
+        <div className="card mb-6">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">Lines</h2>
+          {signal.decoyLines.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {signal.decoyLines.map((raw, i) => {
+                const structured = parseLine(raw);
+                return (
+                  <div key={i} className="px-3 py-2.5 rounded-lg text-sm bg-slate-50 border border-slate-200 text-slate-600">
+                    {structured ? (
+                      <LineDisplay line={structured} index={i + 1} isReal={false} />
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500">Line {i + 1}:</span>
+                        <span className="font-mono text-xs break-all">{raw}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="rounded-lg border border-genius-200 bg-genius-50 p-3">
+            <p className="text-sm text-genius-700">Your signal data is encrypted. Sign to reveal your real pick.</p>
+            <button
+              type="button"
+              onClick={unlockSaved}
+              className="mt-2 px-4 py-1.5 text-xs font-medium rounded-lg bg-genius-600 text-white hover:bg-genius-700 transition-colors"
+            >
+              Unlock Data
+            </button>
+          </div>
+        </div>
       ) : (
-        /* Light card when no local data — just public lines, no secret revealed */
+        /* No local data at all — show lines without highlighting */
         <div className="card mb-6">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Lines</h2>
           {signal.decoyLines.length === 0 ? (
@@ -361,18 +394,27 @@ export default function GeniusSignalDetail() {
       {isOwner && !cancelSuccess && (
         <div className="card">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Actions</h2>
-          {!isActive || signal.status === SignalStatus.Cancelled ? (
+          {isExpired ? (
             <p className="text-slate-500 text-sm">
-              This signal is {statusLabel.toLowerCase()} and no actions are available.
-              {hasPurchases && signal.status === SignalStatus.Cancelled && (
+              This signal has expired. No further actions are available.
+              {hasPurchases && (
                 <span className="block mt-1">
                   Existing purchases will settle through the normal audit cycle.
                 </span>
               )}
             </p>
-          ) : isExpired ? (
+          ) : signal.status === SignalStatus.Cancelled ? (
             <p className="text-slate-500 text-sm">
-              This signal has expired. No further actions are available.
+              This signal has been cancelled.
+              {hasPurchases && (
+                <span className="block mt-1">
+                  Existing purchases will settle through the normal audit cycle.
+                </span>
+              )}
+            </p>
+          ) : signal.status === SignalStatus.Settled ? (
+            <p className="text-slate-500 text-sm">
+              This signal has been settled. No further actions are available.
             </p>
           ) : showConfirmCancel ? (
             <div>
@@ -490,6 +532,12 @@ function LineDisplay({
         <span className="truncate max-w-[180px]">
           {line.home_team} vs {line.away_team}
         </span>
+        {line.commence_time && (
+          <>
+            <span>&middot;</span>
+            <span>{new Date(line.commence_time).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+          </>
+        )}
       </div>
     </div>
   );

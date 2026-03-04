@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAccount, useWalletClient } from "wagmi";
 import { useCommitSignal, useCollateral, useDepositCollateral, useWalletUsdcBalance } from "@/lib/hooks";
-import { getSavedSignals, saveSavedSignals } from "@/lib/hooks/useSettledSignals";
+import { saveSavedSignalsEncrypted, getSavedSignalsEncrypted } from "@/lib/hooks/useSettledSignals";
 import { ADDRESSES } from "@/lib/contracts";
 import SecretModal from "@/components/SecretModal";
 import PrivateWorkspace from "@/components/PrivateWorkspace";
@@ -539,9 +539,32 @@ export default function CreateSignal() {
         createdAt: Math.floor(Date.now() / 1000),
         minerVerified,
       };
-      const existing = getSavedSignals(geniusAddress);
-      const updated = [...existing, newEntry];
-      saveSavedSignals(geniusAddress, updated);
+      const { getCachedMasterSeed } = await import("@/lib/crypto");
+      const seed = getCachedMasterSeed();
+      const existingResult = await getSavedSignalsEncrypted(geniusAddress, seed);
+      const updated = [...existingResult.signals, newEntry];
+      await saveSavedSignalsEncrypted(geniusAddress, updated, seed);
+
+      // Store recovery blob on-chain (non-blocking — localStorage is primary)
+      if (walletClient) {
+        import("@/lib/contracts").then(({ ADDRESSES }) => {
+          if (ADDRESSES.keyRecovery === "0x0000000000000000000000000000000000000000") return;
+          Promise.all([
+            import("@wagmi/core"),
+            import("@/app/providers"),
+            import("@/lib/recovery"),
+          ]).then(([{ waitForTransactionReceipt }, { wagmiConfig }, { storeRecovery }]) => {
+            storeRecovery(
+              (params: Parameters<typeof walletClient.signTypedData>[0]) => walletClient.signTypedData(params),
+              walletClient,
+              updated,
+              async (h: `0x${string}`) => { await waitForTransactionReceipt(wagmiConfig, { hash: h }); },
+            ).catch((err: unknown) => {
+              console.warn("[recovery] Failed to store genius recovery blob:", err);
+            });
+          });
+        });
+      }
 
       setStep("success");
       setTimeout(() => router.push("/genius"), 3000);

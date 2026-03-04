@@ -225,26 +225,26 @@ export async function getActiveSignals(
   );
   const filter = contract.filters.SignalCommitted();
 
-  // If cache is fresh, filter out expired and return
+  let all: SignalEvent[];
+
   if (cached && signalCache.isFresh(cacheKey)) {
-    const now = BigInt(Math.floor(Date.now() / 1000));
-    return cached.events.filter((s) => s.expiresAt > now);
-  }
+    all = cached.events;
+  } else {
+    // Incremental: start from last cached block + 1
+    const startBlock = cached ? cached.lastBlock + 1 : effectiveFrom;
+    const events = await queryFilterChunked(contract, filter, startBlock);
+    const parsed = parseSignalEvents(events);
 
-  // Incremental: start from last cached block + 1
-  const startBlock = cached ? cached.lastBlock + 1 : effectiveFrom;
-  const events = await queryFilterChunked(contract, filter, startBlock);
-  const parsed = parseSignalEvents(events);
-
-  const all = cached ? signalCache.merge(cacheKey, parsed, getMaxBlock(parsed, cached.lastBlock)) : parsed;
-  if (!cached) {
-    signalCache.set(cacheKey, all, getMaxBlock(parsed, effectiveFrom));
+    all = cached ? signalCache.merge(cacheKey, parsed, getMaxBlock(parsed, cached.lastBlock)) : parsed;
+    if (!cached) {
+      signalCache.set(cacheKey, all, getMaxBlock(parsed, effectiveFrom));
+    }
   }
 
   const now = BigInt(Math.floor(Date.now() / 1000));
   const notExpired = all.filter((s) => s.expiresAt > now);
 
-  // Check on-chain status and fetch minNotional (for exclusive badge)
+  // Always check on-chain status (cheap view calls) to avoid stale data
   const enriched = await Promise.all(
     notExpired.map(async (s) => {
       const id = BigInt(s.signalId);

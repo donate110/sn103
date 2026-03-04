@@ -4,8 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getReadProvider } from "../hooks";
 import { getEscrowContract, getSignalCommitmentContract } from "../contracts";
 import { fetchGeniusSignals, type SubgraphSignal } from "../subgraph";
-import { deriveMasterSeedTyped, deriveSignalKey, decrypt, keyToBigInt } from "../crypto";
+import { deriveMasterSeedTyped, deriveSignalKey, decrypt, encrypt, keyToBigInt } from "../crypto";
 import type { SignTypedDataParams } from "../crypto";
+
+/** Encrypted localStorage envelope format. */
+interface EncryptedStorageEnvelope {
+  _encrypted: true;
+  ciphertext: string;
+  iv: string;
+}
 
 /** Private signal data saved to localStorage during signal creation. */
 export interface SavedSignalData {
@@ -70,6 +77,8 @@ export function getSavedSignals(address?: string): SavedSignalData[] {
 
     if (!raw) return [];
     const parsed = JSON.parse(raw);
+    // If encrypted, return empty — caller needs async version with seed
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed._encrypted === true) return [];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -81,6 +90,80 @@ export function saveSavedSignals(address: string, signals: SavedSignalData[]): v
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(signalStorageKey(address), JSON.stringify(signals));
+  } catch {
+    console.warn("Failed to save signal data to localStorage");
+  }
+}
+
+/** Async read that can decrypt encrypted localStorage data. */
+export async function getSavedSignalsEncrypted(
+  address: string | undefined,
+  masterSeed: Uint8Array | null,
+): Promise<{ signals: SavedSignalData[]; encrypted: boolean; locked: boolean }> {
+  if (typeof window === "undefined" || !address) {
+    return { signals: [], encrypted: false, locked: false };
+  }
+
+  const key = signalStorageKey(address);
+  let raw = localStorage.getItem(key);
+
+  // Legacy migration
+  if (!raw) {
+    const legacyRaw = localStorage.getItem(LEGACY_KEY);
+    if (legacyRaw) {
+      localStorage.setItem(key, legacyRaw);
+      localStorage.removeItem(LEGACY_KEY);
+      raw = legacyRaw;
+    }
+  }
+
+  if (!raw) return { signals: [], encrypted: false, locked: false };
+
+  try {
+    const parsed = JSON.parse(raw);
+
+    // Encrypted envelope
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed._encrypted === true) {
+      if (!masterSeed) {
+        return { signals: [], encrypted: true, locked: true };
+      }
+      const plaintext = await decrypt(parsed.ciphertext, parsed.iv, masterSeed);
+      const signals = JSON.parse(plaintext);
+      return {
+        signals: Array.isArray(signals) ? signals : [],
+        encrypted: true,
+        locked: false,
+      };
+    }
+
+    // Legacy plaintext array
+    return {
+      signals: Array.isArray(parsed) ? parsed : [],
+      encrypted: false,
+      locked: false,
+    };
+  } catch {
+    return { signals: [], encrypted: false, locked: false };
+  }
+}
+
+/** Async write that encrypts data when master seed is available. */
+export async function saveSavedSignalsEncrypted(
+  address: string,
+  signals: SavedSignalData[],
+  masterSeed: Uint8Array | null,
+): Promise<void> {
+  if (typeof window === "undefined") return;
+
+  try {
+    if (masterSeed) {
+      const plaintext = JSON.stringify(signals);
+      const { ciphertext, iv } = await encrypt(plaintext, masterSeed);
+      const envelope: EncryptedStorageEnvelope = { _encrypted: true, ciphertext, iv };
+      localStorage.setItem(signalStorageKey(address), JSON.stringify(envelope));
+    } else {
+      localStorage.setItem(signalStorageKey(address), JSON.stringify(signals));
+    }
   } catch {
     console.warn("Failed to save signal data to localStorage");
   }
