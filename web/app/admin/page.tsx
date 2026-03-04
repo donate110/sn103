@@ -106,10 +106,10 @@ function formatStake(raw?: string): string {
   if (!raw) return "-";
   const rao = BigInt(raw);
   const val = Number(rao) / 1e9;
-  if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(1)}M`;
-  if (val >= 1_000) return `${(val / 1_000).toFixed(1)}K`;
-  if (val >= 1) return `${val.toFixed(1)}`;
-  return `${val.toFixed(4)}`;
+  if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(1)}Mα`;
+  if (val >= 1_000) return `${(val / 1_000).toFixed(1)}Kα`;
+  if (val >= 1) return `${val.toFixed(1)}α`;
+  return `${val.toFixed(4)}α`;
 }
 
 function stakeTooltip(alphaRaw?: string, taoRaw?: string): string {
@@ -499,10 +499,10 @@ export default function AdminDashboard() {
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Unique identifier on the subnet">UID</th>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Delegate name or hotkey prefix">Name</th>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Axon IP address and port registered on-chain">IP</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Total alpha staked on this validator (alpha TAO)">Stake</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Total alpha staked on this validator (α)">Stake</th>
                     <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Validator trust — consensus agreement with other validators on miner weights">VTrust</th>
                     <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Fraction of miner-side emission earned — typically 0 for validators who earn via dividends instead">Incentive</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="TAO earned per day from subnet emission">Emission</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Alpha earned per day from subnet emission">Emission</th>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Health check result — Healthy if /health responds OK">Status</th>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Software version reported by /health endpoint">Version</th>
                     <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Shamir key shares held for signal encryption">Shares</th>
@@ -585,9 +585,9 @@ export default function AdminDashboard() {
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Unique identifier on the subnet">UID</th>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Delegate name or hotkey prefix">Name</th>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Axon IP address and port registered on-chain">IP</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Total alpha staked on this miner (alpha TAO)">Stake</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Total alpha staked on this miner (α)">Stake</th>
                     <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Fraction of miner-side emission earned based on validator weight consensus">Incentive</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="TAO earned per day from subnet emission">Emission</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Alpha earned per day from subnet emission">Emission</th>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Health check result — Healthy if /health responds OK">Status</th>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Software version reported by /health endpoint">Version</th>
                     <th className="px-2 sm:px-4 py-3 text-center font-medium" title="Connected to The Odds API for live sports data">Odds</th>
@@ -2225,11 +2225,11 @@ function formatEmission(raw?: string): string {
   if (!raw) return "-";
   const rao = BigInt(raw);
   if (rao === 0n) return "0";
-  const taoPerBlock = Number(rao) / 1e9;
-  const taoPerDay = taoPerBlock * 7200; // ~12s blocks, 7200 blocks/day
-  if (taoPerDay >= 1) return `${taoPerDay.toFixed(2)}/d`;
-  if (taoPerDay >= 0.01) return `${taoPerDay.toFixed(4)}/d`;
-  return `${taoPerDay.toFixed(6)}/d`;
+  const perBlock = Number(rao) / 1e9;
+  const perDay = perBlock * 7200; // ~12s blocks, 7200 blocks/day
+  if (perDay >= 1) return `${perDay.toFixed(2)}α/d`;
+  if (perDay >= 0.01) return `${perDay.toFixed(4)}α/d`;
+  return `${perDay.toFixed(6)}α/d`;
 }
 
 function formatTimeAgo(ts: number): string {
@@ -2880,7 +2880,7 @@ function MetagraphTab() {
                       <tr key={v.uid} className="border-b border-slate-100">
                         <td className="py-2 pr-4 font-mono">{v.uid}</td>
                         <td className="py-2 pr-4 font-mono text-slate-600">{v.ip}:{v.port}</td>
-                        <td className="py-2 font-mono">{(Number(v.stake) / 1e9).toFixed(2)} TAO</td>
+                        <td className="py-2 font-mono">{(Number(v.stake) / 1e9).toFixed(2)} α</td>
                       </tr>
                     ))}
                   </tbody>
