@@ -17,7 +17,7 @@ import {
   deriveSignalKey,
   isMasterSeedCached,
 } from "@/lib/crypto";
-import { discoverValidatorClients, getMinerClient } from "@/lib/api";
+import { discoverValidatorClients, getValidatorClient } from "@/lib/api";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
 import { fetchProtocolStats } from "@/lib/subgraph";
 import { formatUsdc } from "@/lib/types";
@@ -330,8 +330,8 @@ export default function CreateSignal() {
       const minerVerified = true; // Always true — signal creation is blocked if miner check fails
       const candidateLines = allLines.map((line, i) => toCandidateLine(line, i + 1));
       try {
-        const minerClient = getMinerClient();
-        const checkResult = await minerClient.checkLines({ lines: candidateLines });
+        const validatorClient = getValidatorClient();
+        const checkResult = await validatorClient.checkLines({ lines: candidateLines });
 
         // If the miner's upstream data source returned an error (e.g. 401, 500),
         // surface it distinctly so the user knows it's a data-source problem, not

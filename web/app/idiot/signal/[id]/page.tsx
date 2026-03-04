@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAccount, useWalletClient } from "wagmi";
 import { useSignal, usePurchaseSignal, useSignalNotionalFilled, useEscrowBalance, useDepositEscrow, useWalletUsdcBalance, humanizeError } from "@/lib/hooks";
-import { discoverValidatorClients, getMinerClient } from "@/lib/api";
+import { discoverValidatorClients, getValidatorClient } from "@/lib/api";
 import { decrypt, fromHex, bigIntToKey, reconstructSecret } from "@/lib/crypto";
 import type { ShamirShare } from "@/lib/crypto";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
@@ -186,7 +186,7 @@ export default function PurchaseSignal() {
       // Step 1: Check line availability with miner (any sportsbook)
       setStep("checking_lines");
 
-      const miner = getMinerClient();
+      const validator = getValidatorClient();
       const candidateLines: CandidateLine[] = signal.decoyLines.map(
         (raw, i) =>
           decoyLineToCandidateLine(
@@ -199,7 +199,7 @@ export default function PurchaseSignal() {
 
       let checkResult: CheckResponse | null = null;
       try {
-        const result = await miner.checkLines({ lines: candidateLines });
+        const result = await validator.checkLines({ lines: candidateLines });
         if (result.available_indices.length > 0) {
           checkResult = result;
         }

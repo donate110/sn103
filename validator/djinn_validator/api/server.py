@@ -1129,6 +1129,72 @@ def create_app(
             return {"attestations": []}
         return {"attestations": attestation_log.recent_attestations(max(1, min(limit, 200)))}
 
+    @app.post("/v1/check")
+    async def check_lines(request: Request) -> dict:
+        """Proxy a line-check request to a miner with signed auth.
+
+        The web client cannot call miners directly because miner auth
+        requires the caller IP to be a registered subnet neuron or
+        a signed request from a validator hotkey.  This endpoint lets
+        buyers verify lines by routing through the validator.
+        """
+        import json as _json
+        import random as _random
+        from djinn_validator.api.middleware import create_signed_headers
+
+        body = await request.body()
+
+        # Validate payload is JSON with a "lines" array
+        try:
+            payload = _json.loads(body)
+            if not isinstance(payload.get("lines"), list):
+                raise HTTPException(status_code=400, detail="Missing 'lines' array")
+            if len(payload["lines"]) > 20:
+                raise HTTPException(status_code=400, detail="Too many lines (max 20)")
+        except _json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid JSON")
+
+        # Find a reachable miner
+        if not neuron:
+            raise HTTPException(status_code=503, detail="Validator not connected to network")
+
+        miner_uids = neuron.get_miner_uids()
+        if not miner_uids:
+            raise HTTPException(status_code=503, detail="No miners available")
+
+        _random.shuffle(miner_uids)
+        last_error = ""
+        for uid in miner_uids[:5]:  # try up to 5 miners
+            axon = neuron.get_axon_info(uid)
+            ip = axon.get("ip", "")
+            port = axon.get("port", 0)
+            if not ip or not port or ip in ("0.0.0.0", "127.0.0.1"):
+                continue
+
+            check_url = f"http://{ip}:{port}/v1/check"
+            auth_headers: dict[str, str] = {}
+            if neuron.wallet:
+                auth_headers = create_signed_headers("/v1/check", body, neuron.wallet)
+
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        check_url,
+                        content=body,
+                        headers={"Content-Type": "application/json", **auth_headers},
+                        timeout=10.0,
+                    )
+                    if resp.status_code == 200:
+                        log.info("check_proxy_ok", miner_uid=uid)
+                        return resp.json()
+                    last_error = f"Miner {uid} returned HTTP {resp.status_code}"
+                    log.warning("check_proxy_error", miner_uid=uid, status=resp.status_code)
+            except Exception as e:
+                last_error = f"Miner {uid}: {e}"
+                log.warning("check_proxy_failed", miner_uid=uid, error=str(e))
+
+        raise HTTPException(status_code=502, detail=f"All miners unreachable: {last_error}")
+
     @app.post("/v1/analytics/attempt")
     async def analytics(req: AnalyticsRequest) -> dict:
         """Fire-and-forget analytics endpoint."""

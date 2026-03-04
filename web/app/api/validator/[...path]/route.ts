@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { discoverValidatorUrl } from "@/lib/bt-metagraph";
 import { getIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
 
-const ALLOWED_PATHS = new Set(["health", "v1/signal", "v1/attest"]);
+const ALLOWED_PATHS = new Set(["health", "v1/signal", "v1/attest", "v1/check"]);
 const PURCHASE_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/purchase$/;
 const STATUS_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/status$/;
 const ATTEST_CREDITS_RE = /^v1\/attest\/credits\/[a-fA-F0-9x]+$/;

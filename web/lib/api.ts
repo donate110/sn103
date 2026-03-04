@@ -221,6 +221,10 @@ export class ValidatorClient {
     );
   }
 
+  async checkLines(req: CheckRequest): Promise<CheckResponse> {
+    return post<CheckResponse>(`${this.baseUrl}/v1/check`, req);
+  }
+
   async health(): Promise<ValidatorHealthResponse> {
     return get<ValidatorHealthResponse>(`${this.baseUrl}/health`);
   }
