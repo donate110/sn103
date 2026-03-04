@@ -276,14 +276,6 @@ export default function GeniusSignalDetail() {
                 </svg>
                 Only visible to you
               </span>
-              <button
-                type="button"
-                onClick={clearLocalData}
-                className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors"
-                title="Clear local data for this signal (simulates a new browser)"
-              >
-                clear
-              </button>
             </div>
           </div>
           {signal.decoyLines.length === 0 ? (

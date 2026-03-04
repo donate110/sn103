@@ -260,21 +260,50 @@ export function bigIntToKey(val: bigint): Uint8Array {
 
 const SIGNAL_KEY_SIGN_MESSAGE = "djinn:signal-keys:v1";
 
-// Session-level cache so wallet signMessage/signTypedData popup only fires once
-let _cachedMasterSeed: Uint8Array | null = null;
+// Session-level cache so wallet signMessage/signTypedData popup only fires once.
+// Backed by sessionStorage so it survives page refreshes within the same tab.
+const SESSION_SEED_KEY = "djinn:masterSeed";
+
+function _loadFromSession(): Uint8Array | null {
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    const hex = sessionStorage.getItem(SESSION_SEED_KEY);
+    if (!hex) return null;
+    return fromHex(hex);
+  } catch {
+    return null;
+  }
+}
+
+function _saveToSession(seed: Uint8Array): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(SESSION_SEED_KEY, toHex(seed));
+  } catch { /* quota exceeded — degrade gracefully */ }
+}
+
+function _clearSession(): void {
+  if (typeof sessionStorage === "undefined") return;
+  try { sessionStorage.removeItem(SESSION_SEED_KEY); } catch { /* ignore */ }
+}
+
+let _cachedMasterSeed: Uint8Array | null = _loadFromSession();
 
 /** Clear the cached master seed (for tests or wallet disconnect). */
 export function clearMasterSeedCache(): void {
   _cachedMasterSeed = null;
+  _clearSession();
 }
 
 /** Check whether the master seed is already cached (no wallet interaction). */
 export function isMasterSeedCached(): boolean {
+  if (!_cachedMasterSeed) _cachedMasterSeed = _loadFromSession();
   return _cachedMasterSeed !== null;
 }
 
 /** Get the cached master seed bytes, or null if not yet derived. No wallet interaction. */
 export function getCachedMasterSeed(): Uint8Array | null {
+  if (!_cachedMasterSeed) _cachedMasterSeed = _loadFromSession();
   return _cachedMasterSeed ? new Uint8Array(_cachedMasterSeed) : null;
 }
 
@@ -291,6 +320,7 @@ export async function deriveMasterSeed(
   const sigBytes = fromHex(signature.replace(/^0x/, ""));
   const hashBuffer = await crypto.subtle.digest("SHA-256", toArrayBuffer(sigBytes));
   _cachedMasterSeed = new Uint8Array(hashBuffer);
+  _saveToSession(_cachedMasterSeed);
   return _cachedMasterSeed;
 }
 
@@ -343,6 +373,7 @@ export async function deriveMasterSeedTyped(
   const sigBytes = fromHex(signature.replace(/^0x/, ""));
   const hashBuffer = await crypto.subtle.digest("SHA-256", toArrayBuffer(sigBytes));
   _cachedMasterSeed = new Uint8Array(hashBuffer);
+  _saveToSession(_cachedMasterSeed);
   return _cachedMasterSeed;
 }
 

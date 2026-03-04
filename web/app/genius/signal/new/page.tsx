@@ -327,7 +327,7 @@ export default function CreateSignal() {
       // Pre-flight: miner executability check — ALL 10 lines must be available.
       // Miners are blind to which line is real. If any line fails, the signal cannot be created.
       // This prevents Geniuses from creating signals with fake/expired lines to game results.
-      let minerVerified = false;
+      const minerVerified = true; // Always true — signal creation is blocked if miner check fails
       const candidateLines = allLines.map((line, i) => toCandidateLine(line, i + 1));
       try {
         const minerClient = getMinerClient();
@@ -382,9 +382,15 @@ export default function CreateSignal() {
           return;
         }
 
-        minerVerified = true;
       } catch (minerErr) {
-        console.warn("Miner executability check failed, signal will be marked unverified:", minerErr);
+        console.warn("Miner executability check failed:", minerErr);
+        setStepError(
+          "No miner is available to verify your lines right now. " +
+          "Every signal must be independently verified before it can be created. " +
+          "Please try again in a few minutes.",
+        );
+        setStep("configure");
+        return;
       }
 
       setStep("committing");

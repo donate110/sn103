@@ -486,9 +486,12 @@ export default function GeniusDashboard() {
                           </p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0 ml-2">
-                          {!verifiedMap.get(s.signalId.toString()) && (
-                            <span className="rounded-full px-3 py-1 text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">
-                              Unverified
+                          {verifiedMap.has(s.signalId.toString()) && !verifiedMap.get(s.signalId.toString()) && (
+                            <span
+                              className="rounded-full px-3 py-1 text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200 cursor-help"
+                              title="A miner couldn't confirm your lines were available at sportsbooks when you created this signal. Your signal still works — this just means the pre-check was skipped (usually because a miner was offline)."
+                            >
+                              Lines Not Checked
                             </span>
                           )}
                           {isActive ? (
