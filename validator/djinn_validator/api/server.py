@@ -908,8 +908,8 @@ def create_app(
         selected: dict | None = None
         proof_hex: str | None = None
 
-        async def _try_miner(axon: dict, tier: str) -> tuple[dict, dict, str] | None:
-            """Try one miner. Returns (axon, data, proof_hex) on success, None on failure."""
+        async def _try_miner(axon: dict, tier: str) -> tuple[dict, dict, str, float] | None:
+            """Try one miner. Returns (axon, data, proof_hex, elapsed_s) on success, None on failure."""
             attempt_start = _t.perf_counter()
             miner_url = axon.get("_url") or f"http://{axon['ip']}:{axon['port']}/v1/attest"
             timeout = 210.0 if tier == "proven" else 60.0 if tier == "redemption" else 120.0
@@ -975,7 +975,7 @@ def create_app(
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
                 return None
 
-            return (axon, data, phex)
+            return (axon, data, phex, _t.perf_counter() - attempt_start)
 
         # Launch parallel tasks for all candidates (up to 3)
         import asyncio as _aio
@@ -983,33 +983,45 @@ def create_app(
         pick = candidates[:3]
         tasks = [_aio.create_task(_try_miner(axon, tier)) for axon, tier in pick]
 
+        async def _score_runner_ups(
+            remaining: list[_aio.Task],
+            _scorer: object,
+            _url: str,
+        ) -> None:
+            """Background: let remaining miners finish and credit them."""
+            for t in remaining:
+                try:
+                    result = await t
+                except Exception:
+                    continue
+                if result is not None:
+                    axon, _data, _phex, elapsed = result
+                    if _scorer is not None and axon["uid"] >= 0:
+                        m = _scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
+                        m.record_attestation(latency=elapsed, proof_valid=True)
+                        log.info(
+                            "attest_runner_up_credited",
+                            miner_uid=axon["uid"],
+                            elapsed_s=round(elapsed, 1),
+                            url=_url,
+                        )
+
         # Process results as they complete — first success wins
         for coro in _aio.as_completed(tasks):
             try:
                 result = await coro
-            except _aio.CancelledError:
-                continue
             except Exception as e:
                 log.warning("attest_miner_task_error", error=str(e))
                 continue
             if result is not None:
-                selected, miner_data, proof_hex = result
-                # Cancel remaining tasks
-                for t in tasks:
-                    if not t.done():
-                        t.cancel()
+                selected, miner_data, proof_hex = result[0], result[1], result[2]
+                # Let remaining miners finish in background — they deserve credit
+                remaining = [t for t in tasks if not t.done()]
+                if remaining and scorer is not None:
+                    _aio.create_task(_score_runner_ups(remaining, scorer, req.url))
                 break
             else:
                 last_error = "All attempted miners failed or were busy"
-
-        # Suppress CancelledError from cancelled tasks
-        for t in tasks:
-            if t.cancelled():
-                continue
-            try:
-                await t
-            except (_aio.CancelledError, Exception):
-                pass
 
         # All attempts failed
         if selected is None or miner_data is None or proof_hex is None:
