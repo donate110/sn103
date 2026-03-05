@@ -1802,6 +1802,139 @@ interface TestAttestResult {
   server_name?: string;
   elapsed_s?: number;
   error?: string;
+  proof_hex?: string;
+  response_body?: string;
+}
+
+function TestResultViewer({ result }: { result: TestAttestResult }) {
+  const [viewMode, setViewMode] = useState<"source" | "preview">("source");
+  const proofSize = result.proof_hex ? result.proof_hex.length / 2 : 0;
+  const hasBody = !!result.response_body;
+
+  const handleDownload = () => {
+    if (!result.proof_hex) return;
+    const matches = result.proof_hex.match(/.{1,2}/g);
+    if (!matches) return;
+    const bytes = new Uint8Array(matches.map((b) => parseInt(b, 16)));
+    const blob = new Blob([bytes], { type: "application/octet-stream" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `attestation-${Date.now()}.bin`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  return (
+    <div className={`rounded-lg border text-xs ${result.success ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
+      <div className="p-3">
+        <div className="flex items-center gap-2 mb-2">
+          <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold ${result.success ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+            {result.success ? "SUCCESS" : "FAILED"}
+          </span>
+          {result.success && result.verified !== undefined && (
+            <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold ${result.verified ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
+              {result.verified ? "VERIFIED" : "UNVERIFIED"}
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {result.miner_uid !== undefined && (
+            <div>
+              <span className="text-slate-500 block">Miner</span>
+              <span className="text-slate-800 font-mono">UID {result.miner_uid}</span>
+            </div>
+          )}
+          {result.server_name && (
+            <div>
+              <span className="text-slate-500 block">Server</span>
+              <span className="text-slate-800 font-mono">{result.server_name}</span>
+            </div>
+          )}
+          {result.elapsed_s !== undefined && (
+            <div>
+              <span className="text-slate-500 block">Latency</span>
+              <span className="text-slate-800 font-mono">{result.elapsed_s}s</span>
+            </div>
+          )}
+          {proofSize > 0 && (
+            <div>
+              <span className="text-slate-500 block">Proof Size</span>
+              <span className="text-slate-800 font-mono">{proofSize.toLocaleString()} bytes</span>
+            </div>
+          )}
+          {hasBody && (
+            <div>
+              <span className="text-slate-500 block">Response</span>
+              <span className="text-slate-800 font-mono">{result.response_body!.length.toLocaleString()} chars</span>
+            </div>
+          )}
+          {result.error && (
+            <div className="col-span-2">
+              <span className="text-red-500 block">Error</span>
+              <span className="text-red-700 font-mono">{result.error}</span>
+            </div>
+          )}
+        </div>
+        {result.proof_hex && (
+          <button
+            onClick={handleDownload}
+            className="mt-2 px-3 py-1 text-[10px] font-medium border border-slate-300 rounded-md text-slate-600 hover:bg-white"
+          >
+            Download proof
+          </button>
+        )}
+      </div>
+
+      {/* Response body viewer */}
+      {hasBody && (
+        <div className="border-t border-slate-200 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-xs font-semibold text-slate-700">Response Content</h4>
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+              <button
+                onClick={() => setViewMode("source")}
+                className={`px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                  viewMode === "source"
+                    ? "bg-slate-900 text-white"
+                    : "bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                Source
+              </button>
+              <button
+                onClick={() => setViewMode("preview")}
+                className={`px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                  viewMode === "preview"
+                    ? "bg-slate-900 text-white"
+                    : "bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                Preview
+              </button>
+            </div>
+          </div>
+          {viewMode === "preview" && (
+            <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-2">
+              Preview only &mdash; external resources (CSS, images, scripts) are not included in the proof.
+            </p>
+          )}
+          {viewMode === "source" ? (
+            <pre className="bg-slate-800 text-slate-100 rounded-lg p-3 text-[10px] overflow-auto max-h-[400px] whitespace-pre-wrap break-all">
+              {result.response_body}
+            </pre>
+          ) : (
+            <iframe
+              srcDoc={result.response_body!}
+              sandbox=""
+              className="w-full rounded-lg border border-slate-200 bg-white"
+              style={{ height: "400px" }}
+              title="Attested page preview"
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function AttestationsTab({
@@ -1921,46 +2054,7 @@ function AttestationsTab({
             </div>
           )}
 
-          {testResult && (
-            <div className={`p-3 rounded-lg border text-xs ${testResult.success ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
-              <div className="flex items-center gap-2 mb-2">
-                <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold ${testResult.success ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                  {testResult.success ? "SUCCESS" : "FAILED"}
-                </span>
-                {testResult.success && testResult.verified !== undefined && (
-                  <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold ${testResult.verified ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
-                    {testResult.verified ? "VERIFIED" : "UNVERIFIED"}
-                  </span>
-                )}
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {testResult.miner_uid !== undefined && (
-                  <div>
-                    <span className="text-slate-500 block">Miner</span>
-                    <span className="text-slate-800 font-mono">UID {testResult.miner_uid}</span>
-                  </div>
-                )}
-                {testResult.server_name && (
-                  <div>
-                    <span className="text-slate-500 block">Server</span>
-                    <span className="text-slate-800 font-mono">{testResult.server_name}</span>
-                  </div>
-                )}
-                {testResult.elapsed_s !== undefined && (
-                  <div>
-                    <span className="text-slate-500 block">Latency</span>
-                    <span className="text-slate-800 font-mono">{testResult.elapsed_s}s</span>
-                  </div>
-                )}
-                {testResult.error && (
-                  <div className="col-span-2">
-                    <span className="text-red-500 block">Error</span>
-                    <span className="text-red-700 font-mono">{testResult.error}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+          {testResult && <TestResultViewer result={testResult} />}
 
           {testError && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
