@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
@@ -17,6 +17,7 @@ from djinn_miner.api.metrics import (
     ATTESTATION_REQUESTS,
     CHECKS_PROCESSED,
     LINES_CHECKED,
+    NOTARY_SESSIONS,
     PROOFS_GENERATED,
     metrics_response,
 )
@@ -34,6 +35,7 @@ from djinn_miner.api.models import (
     CheckRequest,
     CheckResponse,
     HealthResponse,
+    NotaryInfoResponse,
     ProofRequest,
     ProofResponse,
     ReadinessResponse,
@@ -60,6 +62,7 @@ def create_app(
     rate_limit_rate: int = 5,
     neuron: DjinnMiner | None = None,
     telemetry: TelemetryStore | None = None,
+    notary_sidecar: Any | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with all routes wired."""
 
@@ -227,6 +230,83 @@ def create_app(
         log.info("proof_generated", query_id=request.query_id, status=result.status, type=proof_type)
         return result
 
+    @app.get("/v1/notary/info", response_model=NotaryInfoResponse)
+    async def notary_info() -> NotaryInfoResponse:
+        """Return notary sidecar status for peer discovery.
+
+        Validators query this to find miners that can serve as peer notaries.
+        Returns enabled=false if the miner doesn't run a notary sidecar,
+        allowing old miners to coexist with notary-capable ones.
+        """
+        if notary_sidecar is None:
+            return NotaryInfoResponse(enabled=False)
+        info = notary_sidecar.info
+        return NotaryInfoResponse(
+            enabled=info.enabled,
+            pubkey_hex=info.pubkey_hex,
+            port=info.port,
+        )
+
+    @app.websocket("/v1/notary/ws")
+    async def notary_ws_proxy(ws: WebSocket) -> None:
+        """WebSocket-to-TCP proxy for the peer notary MPC handshake.
+
+        A peer miner's prover connects here via WebSocket. We proxy bytes
+        bidirectionally to the local notary sidecar on localhost:7047.
+        This lets peers reach the notary through the existing API port
+        with zero firewall changes.
+        """
+        if notary_sidecar is None or not notary_sidecar.is_running():
+            await ws.close(code=1013, reason="notary not available")
+            return
+
+        await ws.accept()
+        NOTARY_SESSIONS.labels(status="connected").inc()
+
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", notary_sidecar.info.port),
+                timeout=5.0,
+            )
+        except (ConnectionRefusedError, TimeoutError, OSError) as e:
+            log.warning("notary_ws_connect_failed", error=str(e))
+            NOTARY_SESSIONS.labels(status="error").inc()
+            await ws.close(code=1013, reason="notary connection failed")
+            return
+
+        async def ws_to_tcp() -> None:
+            try:
+                while True:
+                    data = await ws.receive_bytes()
+                    writer.write(data)
+                    await writer.drain()
+            except Exception:
+                pass
+            finally:
+                writer.close()
+
+        async def tcp_to_ws() -> None:
+            try:
+                while True:
+                    data = await reader.read(65536)
+                    if not data:
+                        break
+                    await ws.send_bytes(data)
+            except Exception:
+                pass
+
+        try:
+            await asyncio.gather(ws_to_tcp(), tcp_to_ws())
+            NOTARY_SESSIONS.labels(status="completed").inc()
+        except Exception:
+            NOTARY_SESSIONS.labels(status="error").inc()
+        finally:
+            writer.close()
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
     @app.get("/v1/attest/capacity")
     async def attest_miner_capacity() -> dict:
         """Return current attestation capacity so validators can route around busy miners."""
@@ -288,7 +368,13 @@ def create_app(
         task_started()
         try:
             result = await asyncio.wait_for(
-                tlsn_module.generate_proof(request.url, timeout=180.0),
+                tlsn_module.generate_proof(
+                    request.url,
+                    notary_host=request.notary_host,
+                    notary_port=request.notary_port,
+                    notary_ws=request.notary_ws,
+                    timeout=180.0,
+                ),
                 timeout=210.0,
             )
         except TimeoutError:

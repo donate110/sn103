@@ -42,6 +42,10 @@ struct Args {
     #[arg(long, default_value_t = 7047)]
     port: u16,
 
+    /// Bind address (default: 127.0.0.1 — use the WebSocket proxy for external access)
+    #[arg(long, default_value = "127.0.0.1")]
+    bind: String,
+
     /// Path to the secp256k1 signing key (32 raw bytes). Generated if missing.
     #[arg(long, default_value = "notary-key.bin")]
     key: PathBuf,
@@ -57,8 +61,8 @@ async fn main() -> Result<()> {
     let pubkey_hex = hex::encode(signing_key.verifying_key().to_sec1_bytes());
     info!(pubkey = %pubkey_hex, "Notary public key");
 
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", args.port)).await?;
-    info!(port = args.port, "Listening for connections");
+    let listener = tokio::net::TcpListener::bind((args.bind.as_str(), args.port)).await?;
+    info!(bind = %args.bind, port = args.port, "Listening for connections");
 
     loop {
         let (socket, addr) = listener.accept().await?;

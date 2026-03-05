@@ -58,6 +58,7 @@ async def generate_proof(
     *,
     notary_host: str | None = None,
     notary_port: int | None = None,
+    notary_ws: bool = False,
     output_dir: str | None = None,
     timeout: float = 180.0,
 ) -> TLSNProofResult:
@@ -67,6 +68,9 @@ async def generate_proof(
         url: Full URL to fetch (with query params, including API key).
         notary_host: Notary server hostname. Defaults to TLSN_NOTARY_HOST env.
         notary_port: Notary server port. Defaults to TLSN_NOTARY_PORT env.
+        notary_ws: If True, connect to the peer notary via WebSocket proxy
+            at ws://notary_host:notary_port/v1/notary/ws. A local TCP bridge
+            is created so the prover binary can connect as usual.
         output_dir: Directory for the presentation file. Uses tempdir if None.
         timeout: Max seconds to wait for proof generation.
 
@@ -100,6 +104,10 @@ async def generate_proof(
         output_path = os.path.join(tmp_dir, "presentation.bin")
 
     try:
+        if notary_ws and notary_host:
+            return await _run_prover_via_ws(
+                url, notary_host, port, output_path, timeout,
+            )
         return await _run_prover(url, host, port, output_path, timeout)
     except Exception:
         # Ensure temp dir is cleaned up on any unexpected exception
@@ -229,6 +237,97 @@ async def _run_prover(
         presentation_bytes=presentation_bytes,
         server=summary.get("server", ""),
     )
+
+
+async def _run_prover_via_ws(
+    url: str,
+    notary_host: str,
+    notary_api_port: int,
+    output_path: str,
+    timeout: float,
+) -> TLSNProofResult:
+    """Run the prover via a WebSocket bridge to a peer notary.
+
+    The peer notary's miner exposes /v1/notary/ws which proxies to its local
+    notary sidecar. We create a local TCP server, point the prover at it, and
+    bridge bytes between the prover's TCP connection and the peer's WebSocket.
+    """
+    import websockets.client
+
+    ws_url = f"ws://{notary_host}:{notary_api_port}/v1/notary/ws"
+    log.info("tlsn_ws_bridge_connecting", ws_url=ws_url)
+
+    # Find a free local port for the bridge
+    bridge_server = await asyncio.start_server(
+        lambda r, w: None, "127.0.0.1", 0,
+    )
+    bridge_port = bridge_server.sockets[0].getsockname()[1]
+    bridge_server.close()
+    await bridge_server.wait_closed()
+
+    # We'll start the bridge when the prover connects
+    bridge_ready = asyncio.Event()
+    bridge_error: str = ""
+
+    async def _bridge_server() -> None:
+        nonlocal bridge_error
+        server = await asyncio.start_server(
+            _handle_bridge, "127.0.0.1", bridge_port,
+        )
+        bridge_ready.set()
+        async with server:
+            await server.serve_forever()
+
+    async def _handle_bridge(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        nonlocal bridge_error
+        try:
+            async with websockets.client.connect(
+                ws_url,
+                max_size=10 * 1024 * 1024,  # 10 MB — MPC messages can be large
+                open_timeout=10.0,
+                close_timeout=5.0,
+            ) as ws:
+                async def tcp_to_ws() -> None:
+                    while True:
+                        data = await reader.read(65536)
+                        if not data:
+                            break
+                        await ws.send(data)
+
+                async def ws_to_tcp() -> None:
+                    async for msg in ws:
+                        if isinstance(msg, bytes):
+                            writer.write(msg)
+                            await writer.drain()
+
+                await asyncio.gather(tcp_to_ws(), ws_to_tcp())
+        except Exception as e:
+            bridge_error = str(e)
+            log.warning("tlsn_ws_bridge_error", error=str(e))
+        finally:
+            writer.close()
+
+    # Start the bridge server
+    bridge_task = asyncio.create_task(_bridge_server())
+    await bridge_ready.wait()
+
+    try:
+        # Run the prover pointing at our local bridge
+        result = await _run_prover(
+            url, "127.0.0.1", bridge_port, output_path, timeout,
+        )
+        if not result.success and bridge_error:
+            result.error = f"WebSocket bridge: {bridge_error}; {result.error}"
+        return result
+    finally:
+        bridge_task.cancel()
+        try:
+            await bridge_task
+        except asyncio.CancelledError:
+            pass
 
 
 def _cleanup_dir(file_path: str) -> None:

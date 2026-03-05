@@ -79,6 +79,17 @@ ATTESTATION_DURATION = Histogram(
     buckets=(1.0, 5.0, 10.0, 20.0, 30.0, 45.0, 60.0),
 )
 
+NOTARY_ENABLED = Gauge(
+    "djinn_miner_notary_enabled",
+    "Whether the peer notary sidecar is running (1=yes, 0=no)",
+)
+
+NOTARY_SESSIONS = Counter(
+    "djinn_miner_notary_sessions_total",
+    "Total peer notary MPC sessions handled via WebSocket proxy",
+    ["status"],  # connected, completed, error
+)
+
 
 def metrics_response() -> bytes:
     """Generate Prometheus-compatible metrics text."""

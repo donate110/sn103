@@ -55,6 +55,10 @@ class MinerMetrics:
     # ── Proof-request tracking ──
     proofs_requested: int = 0  # times miner was asked to submit proof
 
+    # ── Notary service metrics (peer-to-peer notarization) ──
+    notary_duties_assigned: int = 0  # times assigned as notary for another miner
+    notary_duties_completed: int = 0  # times the proof using this notary verified
+
     # ── Shared metrics ──
     health_checks_total: int = 0
     health_checks_responded: int = 0
@@ -122,6 +126,18 @@ class MinerMetrics:
         if proof_valid:
             self.attestations_valid += 1
         self.attestation_latencies.append(latency)
+
+    def notary_reliability(self) -> float:
+        """Fraction of notary assignments that produced a verified proof."""
+        if self.notary_duties_assigned == 0:
+            return 0.0
+        return self.notary_duties_completed / self.notary_duties_assigned
+
+    def record_notary_duty(self, proof_valid: bool) -> None:
+        """Record that this miner served as notary for another miner's proof."""
+        self.notary_duties_assigned += 1
+        if proof_valid:
+            self.notary_duties_completed += 1
 
 
 class MinerScorer:
@@ -264,6 +280,9 @@ class MinerScorer:
                 "health_checks_total": m.health_checks_total,
                 "health_checks_responded": m.health_checks_responded,
                 "consecutive_epochs": m.consecutive_epochs,
+                "notary_duties_assigned": m.notary_duties_assigned,
+                "notary_duties_completed": m.notary_duties_completed,
+                "notary_reliability": round(m.notary_reliability(), 4),
             }
 
         return self._normalize(raw), breakdowns
@@ -273,19 +292,26 @@ class MinerScorer:
 
         Miners with no sports queries get 0 — no free speed credit for
         miners that haven't been challenged or haven't responded.
+
+        Notary bonus: miners who reliably serve as peer notaries get up to
+        a 10% bonus on their uptime component. This rewards network service
+        without changing weight structure (backwards compatible).
         """
         speed_scores = self._normalize_speed(miners, use_attestation=False)
 
         scores: dict[int, float] = {}
         for m in miners:
+            # Notary bonus: up to 10% boost on the uptime component
+            notary_bonus = 1.0 + 0.10 * m.notary_reliability()
+            uptime = m.uptime_score() * notary_bonus
             if m.queries_total == 0:
-                scores[m.uid] = self.W_UPTIME * m.uptime_score()
+                scores[m.uid] = self.W_UPTIME * uptime
             else:
                 scores[m.uid] = (
                     self.W_ACCURACY * m.accuracy_score()
                     + self.W_SPEED * speed_scores.get(m.uid, 0.0)
                     + self.W_COVERAGE * m.coverage_score()
-                    + self.W_UPTIME * m.uptime_score()
+                    + self.W_UPTIME * uptime
                 )
         return scores
 
@@ -360,6 +386,9 @@ class MinerScorer:
                 "health_checks_total": m.health_checks_total,
                 "health_checks_responded": m.health_checks_responded,
                 "consecutive_epochs": m.consecutive_epochs,
+                "notary_duties_assigned": m.notary_duties_assigned,
+                "notary_duties_completed": m.notary_duties_completed,
+                "notary_reliability": round(m.notary_reliability(), 4),
             }
 
         return self._normalize(raw), breakdowns
@@ -493,6 +522,7 @@ class MinerScorer:
                 m.queries_total > 0
                 or m.health_checks_responded > 0
                 or m.attestations_total > 0
+                or m.notary_duties_assigned > 0
             )
             if participated:
                 m.consecutive_epochs += 1
@@ -508,6 +538,9 @@ class MinerScorer:
             m.attestations_total = 0
             m.attestations_valid = 0
             m.attestation_latencies.clear()
+            # Reset notary metrics
+            m.notary_duties_assigned = 0
+            m.notary_duties_completed = 0
             # Reset health checks
             m.health_checks_total = 0
             m.health_checks_responded = 0

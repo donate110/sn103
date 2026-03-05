@@ -24,7 +24,7 @@ log = structlog.get_logger()
 
 GITHUB_REPO = "Djinn-Inc/djinn"
 INSTALL_DIR = os.path.expanduser("~/.local/bin")
-BINARIES = ("djinn-tlsn-prover", "djinn-tlsn-verifier")
+BINARIES = ("djinn-tlsn-prover", "djinn-tlsn-verifier", "djinn-tlsn-notary")
 
 
 def _detect_platform() -> str | None:
@@ -99,7 +99,8 @@ def ensure_binary(name: str) -> str:
         Path to the binary (may be just the name if it's on PATH).
     """
     # Check env override
-    env_key = "TLSN_PROVER_BINARY" if "prover" in name else "TLSN_VERIFIER_BINARY"
+    _ENV_KEYS = {"prover": "TLSN_PROVER_BINARY", "verifier": "TLSN_VERIFIER_BINARY", "notary": "TLSN_NOTARY_BINARY"}
+    env_key = next((v for k, v in _ENV_KEYS.items() if k in name), "TLSN_PROVER_BINARY")
     env_val = os.getenv(env_key)
     if env_val:
         if shutil.which(env_val) or (os.path.isfile(env_val) and os.access(env_val, os.X_OK)):

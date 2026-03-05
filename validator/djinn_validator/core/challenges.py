@@ -44,6 +44,77 @@ log = structlog.get_logger()
 
 
 # ---------------------------------------------------------------------------
+# Peer Notary Discovery
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PeerNotary:
+    """A miner that can serve as a peer notary for other miners."""
+
+    uid: int
+    ip: str
+    port: int  # miner API port
+    notary_port: int  # TCP port of the notary sidecar
+    pubkey_hex: str
+
+
+async def discover_peer_notaries(
+    client: httpx.AsyncClient,
+    axons: list[dict],
+    concurrency: int = 20,
+) -> list[PeerNotary]:
+    """Discover miners running notary sidecars via /v1/notary/info.
+
+    Old miners without the endpoint return 404/405 and are silently skipped.
+    This ensures full backwards compatibility.
+    """
+    sem = asyncio.Semaphore(concurrency)
+    notaries: list[PeerNotary] = []
+
+    async def _probe(axon: dict) -> None:
+        ip = axon.get("ip", "")
+        port = axon.get("port", 0)
+        if not ip or not port:
+            return
+        url = f"http://{ip}:{port}/v1/notary/info"
+        async with sem:
+            try:
+                resp = await client.get(url, timeout=5.0)
+                if resp.status_code != 200:
+                    return
+                data = resp.json()
+                if data.get("enabled") and data.get("pubkey_hex"):
+                    notaries.append(PeerNotary(
+                        uid=axon["uid"],
+                        ip=ip,
+                        port=port,
+                        notary_port=data["port"],
+                        pubkey_hex=data["pubkey_hex"],
+                    ))
+            except (httpx.HTTPError, Exception):
+                pass
+
+    await asyncio.gather(*[_probe(a) for a in axons])
+    return notaries
+
+
+def assign_peer_notary(
+    prover_uid: int,
+    notaries: list[PeerNotary],
+) -> PeerNotary | None:
+    """Randomly assign a peer notary for a prover miner.
+
+    The notary must be a different miner than the prover.
+    Returns None if no eligible notary is available.
+    """
+    eligible = [n for n in notaries if n.uid != prover_uid]
+    if not eligible:
+        return None
+    return random.choice(eligible)
+
+
+# ---------------------------------------------------------------------------
 # Data classes for the 4-phase challenge flow
 # ---------------------------------------------------------------------------
 
@@ -753,10 +824,13 @@ async def challenge_miners_attestation(
 ) -> AttestationResult:
     """Run a TLSNotary attestation challenge against capable miners.
 
-    Two phases:
+    Three phases:
     1. Fast probe (5s): POST empty body to all miners to find which ones
        have /v1/attest (422 = has it, 404/timeout = doesn't)
-    2. Full challenge (210s): send real attestation to capable miners only
+    1b. Notary discovery: GET /v1/notary/info from all miners to find peer
+        notaries. Old miners without the endpoint are silently skipped.
+    2. Full challenge (210s): send real attestation to capable miners,
+       assigning a random peer notary where available.
 
     Returns an AttestationResult with per-miner details.
     """
@@ -769,9 +843,23 @@ async def challenge_miners_attestation(
 
     async with httpx.AsyncClient() as client:
         # Phase 1: fast probe all miners (~15s for 246 miners at concurrency 20)
-        capable = await _probe_attest_capability(client, reachable)
+        # Run capability probe and notary discovery in parallel
+        capable_task = asyncio.create_task(
+            _probe_attest_capability(client, reachable)
+        )
+        notary_task = asyncio.create_task(
+            discover_peer_notaries(client, reachable)
+        )
+        capable = await capable_task
+        peer_notaries = await notary_task
+
         ar.capable = len(capable)
-        log.info("attest_probe_complete", total=len(reachable), capable=len(capable))
+        log.info(
+            "attest_probe_complete",
+            total=len(reachable),
+            capable=len(capable),
+            peer_notaries=len(peer_notaries),
+        )
 
         if not capable:
             return ar
@@ -789,10 +877,25 @@ async def challenge_miners_attestation(
             request_id = f"challenge-{uid}-{int(time.time())}"
             mr: dict = {"uid": uid}
 
+            # Assign a peer notary if available (backwards-compat: omit fields
+            # for old miners that don't understand notary_host/notary_port)
+            assigned_notary = assign_peer_notary(uid, peer_notaries)
+
             async with sem:
                 start = time.perf_counter()
                 try:
-                    body = json.dumps({"url": url, "request_id": request_id}).encode()
+                    payload: dict[str, Any] = {"url": url, "request_id": request_id}
+                    if assigned_notary:
+                        # Use WebSocket proxy on the peer miner's existing API port.
+                        # The prover connects to ws://<ip>:<api_port>/v1/notary/ws
+                        # which proxies to the notary sidecar on localhost:7047.
+                        payload["notary_host"] = assigned_notary.ip
+                        payload["notary_port"] = assigned_notary.port  # API port, not TCP notary port
+                        payload["notary_ws"] = True  # signal to use WebSocket transport
+                        mr["notary_uid"] = assigned_notary.uid
+                        mr["notary_pubkey"] = assigned_notary.pubkey_hex[:16]
+
+                    body = json.dumps(payload).encode()
                     auth_headers = _sign_miner_request("/v1/attest", body, wallet)
                     resp = await client.post(
                         miner_url,
@@ -834,8 +937,16 @@ async def challenge_miners_attestation(
 
                             proof_bytes = bytes.fromhex(data["proof_hex"])
                             expected_server = urlparse(url).hostname
+                            # Pass the assigned notary's pubkey so the verifier
+                            # accepts proofs signed by peer miners (in addition
+                            # to the statically configured TRUSTED_NOTARY_KEYS).
+                            notary_key = assigned_notary.pubkey_hex if assigned_notary else None
                             verify_result = await asyncio.wait_for(
-                                tlsn_verifier.verify_proof(proof_bytes, expected_server=expected_server),
+                                tlsn_verifier.verify_proof(
+                                    proof_bytes,
+                                    expected_server=expected_server,
+                                    expected_notary_key=notary_key,
+                                ),
                                 timeout=30.0,
                             )
                             proof_valid = verify_result.verified
@@ -844,10 +955,29 @@ async def challenge_miners_attestation(
                             proof_valid = False
 
                     metrics.record_attestation(latency=latency, proof_valid=proof_valid)
+
+                    # Record notary duty on the notary miner's metrics
+                    if assigned_notary:
+                        notary_metrics = scorer.get_or_create(
+                            assigned_notary.uid,
+                            # hotkey lookup: find it from the axon list
+                            next(
+                                (a["hotkey"] for a in miner_axons if a["uid"] == assigned_notary.uid),
+                                f"notary-{assigned_notary.uid}",
+                            ),
+                        )
+                        notary_metrics.record_notary_duty(proof_valid)
+
                     mr["valid"] = proof_valid
                     mr["server"] = data.get("server_name", "")
+                    if assigned_notary:
+                        mr["peer_notary"] = True
                     per_miner.append(mr)
-                    log.info("attest_challenge_scored", uid=uid, proof_valid=proof_valid, latency_s=round(latency, 3))
+                    log.info(
+                        "attest_challenge_scored", uid=uid,
+                        proof_valid=proof_valid, latency_s=round(latency, 3),
+                        peer_notary=assigned_notary.uid if assigned_notary else None,
+                    )
                     return True, proof_valid
 
                 except Exception as e:

@@ -27,6 +27,7 @@ from djinn_miner.config import Config
 from djinn_miner.core.checker import LineChecker
 from djinn_miner.core.health import HealthTracker
 from djinn_miner.core.proof import ProofGenerator, SessionCapture
+from djinn_miner.core.notary_sidecar import NotarySidecar
 from djinn_miner.core.telemetry import TelemetryStore
 from djinn_miner.data.odds_api import OddsApiClient
 from djinn_miner.utils.watchtower import watch_loop as watchtower_loop
@@ -169,6 +170,19 @@ async def async_main() -> None:
             msg="Miner API will start but won't be discoverable on subnet",
         )
 
+    # Peer notary sidecar (enabled by default, disable with NOTARY_ENABLED=false)
+    from djinn_miner.api.metrics import NOTARY_ENABLED as NOTARY_ENABLED_GAUGE
+    notary_sidecar = NotarySidecar()
+    if notary_sidecar.enabled:
+        started = await notary_sidecar.start()
+        if started:
+            NOTARY_ENABLED_GAUGE.set(1)
+            telemetry.record("notary_sidecar_started", "Peer notary sidecar running",
+                             port=notary_sidecar.info.port,
+                             pubkey=notary_sidecar.info.pubkey_hex[:16] + "...")
+        else:
+            log.warning("notary_sidecar_failed", msg="Could not start peer notary sidecar")
+
     app = create_app(
         checker=checker,
         proof_gen=proof_gen,
@@ -177,6 +191,7 @@ async def async_main() -> None:
         rate_limit_rate=config.rate_limit_rate,
         neuron=neuron if bt_ok else None,
         telemetry=telemetry,
+        notary_sidecar=notary_sidecar if notary_sidecar.enabled else None,
     )
 
     log.info(
@@ -188,6 +203,7 @@ async def async_main() -> None:
         bt_network=config.bt_network,
         bt_connected=bt_ok,
         odds_api_configured=bool(config.odds_api_key),
+        notary_enabled=notary_sidecar.enabled,
         log_format=os.getenv("LOG_FORMAT", "console"),
     )
 
@@ -222,6 +238,8 @@ async def async_main() -> None:
         )
     except TimeoutError:
         log.warning("shutdown_timeout", msg="Tasks did not finish within 15s")
+    if notary_sidecar.enabled:
+        await notary_sidecar.stop()
     try:
         await odds_client.close()
     except Exception as e:

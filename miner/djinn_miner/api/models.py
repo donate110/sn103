@@ -117,11 +117,31 @@ class ReadinessResponse(BaseModel):
     checks: dict[str, bool] = Field(default_factory=dict)
 
 
+class NotaryInfoResponse(BaseModel):
+    """GET /v1/notary/info — Notary sidecar status for peer discovery."""
+
+    enabled: bool = Field(description="Whether this miner is running a notary sidecar")
+    pubkey_hex: str = Field(default="", description="secp256k1 public key (hex) of the notary")
+    port: int = Field(default=0, description="TCP port the notary listens on")
+
+
 class AttestRequest(BaseModel):
     """POST /v1/attest — Request TLSNotary attestation of a web page."""
 
     url: str = Field(max_length=2048, description="HTTPS URL to attest")
     request_id: str = Field(max_length=256, description="Unique request ID for tracking")
+    notary_host: str | None = Field(
+        default=None, max_length=256,
+        description="Peer notary hostname (assigned by validator). Uses default if omitted.",
+    )
+    notary_port: int | None = Field(
+        default=None, ge=1, le=65535,
+        description="Peer notary port (API port when notary_ws=True). Uses default if omitted.",
+    )
+    notary_ws: bool = Field(
+        default=False,
+        description="If True, connect to peer notary via WebSocket proxy at /v1/notary/ws.",
+    )
 
     @field_validator("url")
     @classmethod

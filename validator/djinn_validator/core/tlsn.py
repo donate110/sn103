@@ -66,6 +66,7 @@ async def verify_proof(
     presentation_bytes: bytes,
     *,
     expected_server: str | None = None,
+    expected_notary_key: str | None = None,
     timeout: float = 30.0,
 ) -> TLSNVerifyResult:
     """Verify a TLSNotary presentation and extract disclosed data.
@@ -73,6 +74,8 @@ async def verify_proof(
     Args:
         presentation_bytes: Serialized Presentation from the miner.
         expected_server: If set, verify the server name matches.
+        expected_notary_key: If set, also try this peer notary pubkey (hex).
+            Used for peer-to-peer notarization where a miner acts as notary.
         timeout: Max seconds to wait for verification.
 
     Returns:
@@ -85,8 +88,11 @@ async def verify_proof(
 
     base_cmd = [VERIFIER_BINARY, "--presentation", presentation_path]
 
-    # Try each trusted notary key until one succeeds
-    keys_to_try = list(TRUSTED_NOTARY_KEYS) if TRUSTED_NOTARY_KEYS else [None]
+    # Build the set of keys to try: configured trusted keys + optional peer key
+    all_keys = set(TRUSTED_NOTARY_KEYS)
+    if expected_notary_key and _HEX_KEY_RE.match(expected_notary_key):
+        all_keys.add(expected_notary_key)
+    keys_to_try = list(all_keys) if all_keys else [None]
     last_error = ""
     proc = None
     stdout = b""
