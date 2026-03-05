@@ -530,6 +530,7 @@ class AttestResponse(BaseModel):
     server_name: str | None = None
     timestamp: int = Field(default=0, description="Unix timestamp of attestation")
     miner_uid: int | None = Field(default=None, description="UID of the miner that generated the proof")
+    blocked: bool = Field(default=False, description="True if the site served a bot challenge/wall instead of actual content")
     error: str | None = None
     busy: bool = False
     retry_after: int | None = Field(default=None, description="Seconds to wait before retrying")

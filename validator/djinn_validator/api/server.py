@@ -169,6 +169,32 @@ if TYPE_CHECKING:
 log = structlog.get_logger()
 
 
+def _detect_bot_challenge(response_body: str | None) -> bool:
+    """Check if a response body looks like a bot protection challenge page."""
+    if not response_body:
+        return False
+    lower = response_body[:4000].lower()
+    indicators = [
+        "<title>client challenge</title>",
+        "<title>just a moment...</title>",
+        "<title>attention required</title>",
+        "<title>access denied</title>",
+        "cf-challenge-running",
+        "cf_chl_opt",
+        "_cf_chl_tk",
+        "jschl_vc",
+        "jschl-answer",
+        "managed_checking_msg",
+        "challenges.cloudflare.com",
+        "cdn-cgi/challenge-platform",
+        "please verify you are a human",
+        "checking your browser",
+        "ddos-guard",
+        "please wait while we verify",
+    ]
+    return any(ind in lower for ind in indicators)
+
+
 def create_app(
     share_store: ShareStore,
     purchase_orch: PurchaseOrchestrator,
@@ -1115,11 +1141,15 @@ def create_app(
                 latency=elapsed, proof_valid=verify_result.verified
             )
 
+        # Detect bot challenge / protection walls in the response
+        is_blocked = _detect_bot_challenge(verify_result.response_body)
+
         log.info(
             "attest_complete",
             url=req.url,
             request_id=req.request_id,
             verified=verify_result.verified,
+            blocked=is_blocked,
             server=verify_result.server_name,
             elapsed_s=round(elapsed, 1),
         )
@@ -1133,7 +1163,7 @@ def create_app(
                 server_name=verify_result.server_name,
                 miner_uid=selected["uid"],
                 elapsed_s=round(elapsed, 2),
-                error=verify_result.error if not verify_result.verified else None,
+                error="Site served bot challenge" if is_blocked else (verify_result.error if not verify_result.verified else None),
             )
 
         return AttestResponse(
@@ -1146,6 +1176,7 @@ def create_app(
             server_name=verify_result.server_name or miner_data.get("server_name"),
             timestamp=miner_data.get("timestamp", 0),
             miner_uid=selected["uid"] if selected else None,
+            blocked=is_blocked,
             error=verify_result.error if not verify_result.verified else None,
         )
 

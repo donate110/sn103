@@ -9,6 +9,8 @@ interface AttestResult {
   verified: boolean;
   /** Who performed verification: validator (server-side) or client (browser WASM) */
   verifiedBy?: "validator" | "client" | null;
+  /** True if the site served a bot challenge/wall instead of actual content */
+  blocked?: boolean;
   proof_hex: string | null;
   response_body: string | null;
   server_name: string | null;
@@ -370,8 +372,24 @@ function ResultCard({
         >
           {result.verified ? "Verified" : "Unverified"}
         </span>
+        {result.blocked && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium cursor-default bg-orange-100 text-orange-700 border border-orange-200"
+            title="The website served a bot protection page instead of actual content. The proof is cryptographically valid but may not contain the content you expected."
+          >
+            Bot Protected
+          </span>
+        )}
         <h2 className="text-lg font-semibold text-slate-900">Attestation Result</h2>
       </div>
+
+      {result.blocked && (
+        <div className="mb-4 rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-700">
+          This website served a bot protection page (e.g. Cloudflare challenge) instead of the actual content.
+          The proof is cryptographically valid but contains the challenge page, not the real page content.
+          Try a different URL or a page that doesn&apos;t require browser JavaScript to load.
+        </div>
+      )}
 
       <dl className="space-y-3 text-sm">
         <div>
