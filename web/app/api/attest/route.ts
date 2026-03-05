@@ -115,13 +115,15 @@ function humanizeError(raw: string): string {
 }
 
 /**
- * Try one validator. Returns the JSON response on success, null on failure.
+ * Try one validator. Returns { data } on success, { error } on failure.
+ * Each validator already races up to 3 miners internally and cancels losers,
+ * so the proxy just needs sequential failover with smart ordering.
  */
 async function tryValidator(
   target: string,
   body: string,
   timeoutMs: number,
-): Promise<{ data: Record<string, unknown>; error?: never } | { data?: never; error: string }> {
+): Promise<{ data: Record<string, unknown> } | { error: string }> {
   try {
     const res = await fetch(`${target}/v1/attest`, {
       method: "POST",
@@ -130,32 +132,28 @@ async function tryValidator(
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) {
-      if (res.status === 404 || res.status === 422 || res.status === 405) {
-        return { error: "Validator doesn't support attestation" };
-      }
-      return { error: `Validator returned ${res.status}` };
+      const msg =
+        res.status === 404 || res.status === 422 || res.status === 405
+          ? "Validator doesn't support attestation"
+          : `Validator returned ${res.status}`;
+      return { error: msg };
     }
     const data = await res.json();
-    if (data && data.busy) {
-      return { error: "Validator busy" };
-    }
-    if (data && data.success) {
-      return { data };
-    }
-    return { error: data?.error || "Attestation failed" };
+    if (data?.busy) return { error: "Validator busy" };
+    if (!data?.success) return { error: data?.error || "Attestation failed" };
+    return { data };
   } catch (err) {
-    if (err instanceof DOMException && err.name === "TimeoutError") {
-      return { error: "Timeout" };
-    }
-    return { error: String(err) };
+    return { error: err instanceof Error ? err.message : String(err) };
   }
 }
 
 /**
  * POST /api/attest — Proxy attestation requests to validators.
  *
- * Tries up to 3 validators in parallel (race), takes the first success.
- * Validators are sorted by attest_capable health flag.
+ * Each validator already races up to 3 miners internally and cancels losers
+ * on first success. So the proxy uses sequential failover: try the best
+ * validator first (attest-capable, healthy), fall back to the next one only
+ * if it fails outright. This avoids redundant network load.
  *
  * Body: { url: string, request_id: string }
  * Response: AttestResponse from the validator
@@ -220,39 +218,22 @@ export async function POST(request: NextRequest) {
 
   const validators = await getValidatorUrls();
   const startedAt = Date.now();
-
-  // Wave 1: Try first 3 validators in parallel (these should be attest-capable)
-  // Wave 2: If wave 1 all fail, try next 3, etc.
-  const WAVE_SIZE = 3;
   let lastError = "No attestation services are currently available on the network. Please try again in a few minutes.";
 
-  for (let wave = 0; wave * WAVE_SIZE < validators.length; wave++) {
-    const elapsed = Date.now() - startedAt;
-    const remaining = TOTAL_DEADLINE_MS - elapsed;
+  // Sequential failover: try each validator in order (attest-capable first).
+  // Each validator internally races up to 3 miners, so one validator call
+  // is usually enough. We only fall back if the validator itself is down.
+  for (const url of validators) {
+    const remaining = TOTAL_DEADLINE_MS - (Date.now() - startedAt);
     if (remaining < 10_000) break;
 
-    const batch = validators.slice(wave * WAVE_SIZE, (wave + 1) * WAVE_SIZE);
-    if (batch.length === 0) break;
-
     const timeoutMs = Math.min(PER_VALIDATOR_TIMEOUT_MS, remaining);
+    const result = await tryValidator(url, sanitizedBody, timeoutMs);
 
-    // Race all validators in this wave — first success wins
-    const results = await Promise.allSettled(
-      batch.map((url) => tryValidator(url, sanitizedBody, timeoutMs)),
-    );
-
-    for (const result of results) {
-      if (result.status === "fulfilled" && result.value.data) {
-        return NextResponse.json(result.value.data);
-      }
+    if ("data" in result) {
+      return NextResponse.json(result.data);
     }
-
-    // Collect errors for reporting
-    for (const result of results) {
-      if (result.status === "fulfilled" && result.value.error) {
-        lastError = result.value.error;
-      }
-    }
+    lastError = result.error;
   }
 
   return NextResponse.json(
