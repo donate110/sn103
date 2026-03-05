@@ -1133,6 +1133,7 @@ def create_app(
             response_body=verify_result.response_body or None,
             server_name=verify_result.server_name or miner_data.get("server_name"),
             timestamp=miner_data.get("timestamp", 0),
+            miner_uid=selected["uid"] if selected else None,
             error=verify_result.error if not verify_result.verified else None,
         )
 
@@ -1246,6 +1247,7 @@ def create_app(
                 log.warning("chain_health_check_failed", error=str(e))
 
         from djinn_validator import __version__
+        from djinn_validator.core import tlsn as _tlsn_mod
         return HealthResponse(
             status="ok",
             version=__version__,
@@ -1254,6 +1256,7 @@ def create_app(
             pending_outcomes=len(outcome_attestor.get_pending_signals()),
             chain_connected=chain_ok,
             bt_connected=neuron is not None and neuron.uid is not None,
+            attest_capable=_tlsn_mod.is_available(),
         )
 
     # Cache Config for readiness checks (avoid re-loading dotenv on every probe)

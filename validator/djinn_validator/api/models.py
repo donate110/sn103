@@ -188,6 +188,7 @@ class HealthResponse(BaseModel):
     pending_outcomes: int = 0
     chain_connected: bool = False
     bt_connected: bool = False
+    attest_capable: bool = False
 
 
 class ReadinessResponse(BaseModel):
@@ -528,6 +529,7 @@ class AttestResponse(BaseModel):
     response_body: str | None = Field(default=None, description="HTTP response body extracted from the verified proof")
     server_name: str | None = None
     timestamp: int = Field(default=0, description="Unix timestamp of attestation")
+    miner_uid: int | None = Field(default=None, description="UID of the miner that generated the proof")
     error: str | None = None
     busy: bool = False
     retry_after: int | None = Field(default=None, description="Seconds to wait before retrying")

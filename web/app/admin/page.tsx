@@ -80,6 +80,7 @@ interface ValidatorHealth {
   shares_held: number;
   chain_connected: boolean;
   bt_connected: boolean;
+  attest_capable: boolean;
   error?: string;
 }
 
@@ -390,7 +391,7 @@ export default function AdminDashboard() {
   // ── Network Health Breakdown ──
   // Validators: running djinn code = has a version string that's not empty
   const djinnValidators = validators.filter((v) => !v.error && v.version && v.version !== "-" && v.version !== "0");
-  const attestCapableValidators = validators.filter((v) => !v.error && v.version && parseInt(v.version, 10) >= 512);
+  const attestCapableValidators = validators.filter((v) => !v.error && v.attest_capable);
   const chainConnectedValidators = validators.filter((v) => !v.error && v.chain_connected);
   const btConnectedValidators = validators.filter((v) => !v.error && v.bt_connected);
   const sharesHoldingValidators = validators.filter((v) => !v.error && v.shares_held > 0);
@@ -2454,7 +2455,7 @@ async function fetchValidatorHealth(): Promise<ValidatorHealth[]> {
     return results.map((r, i) =>
       r.status === "fulfilled"
         ? r.value
-        : { uid: validators[i].uid, ip: validators[i].ip, port: validators[i].port, hotkey: validators[i].hotkey, coldkey: validators[i].coldkey, ss58Hotkey: validators[i].ss58Hotkey, stake: validators[i].stake, alphaStake: validators[i].alphaStake, taoStake: validators[i].taoStake, validatorTrust: validators[i].validatorTrust, incentive: validators[i].incentive, emission: validators[i].emission, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, error: String((r as PromiseRejectedResult).reason) },
+        : { uid: validators[i].uid, ip: validators[i].ip, port: validators[i].port, hotkey: validators[i].hotkey, coldkey: validators[i].coldkey, ss58Hotkey: validators[i].ss58Hotkey, stake: validators[i].stake, alphaStake: validators[i].alphaStake, taoStake: validators[i].taoStake, validatorTrust: validators[i].validatorTrust, incentive: validators[i].incentive, emission: validators[i].emission, status: "error", version: "", shares_held: 0, chain_connected: false, bt_connected: false, attest_capable: false, error: String((r as PromiseRejectedResult).reason) },
     );
   } catch {
     return [];

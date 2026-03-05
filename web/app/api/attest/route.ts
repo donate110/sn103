@@ -11,7 +11,21 @@ function shuffle<T>(arr: T[]): T[] {
   return arr;
 }
 
-/** Get validator URLs — metagraph discovery (shuffled), with optional fallback. */
+/** Check if a validator has attest_capable=true via its /health endpoint. */
+async function checkAttestCapable(baseUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${baseUrl}/health`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return !!data.attest_capable;
+  } catch {
+    return false;
+  }
+}
+
+/** Get validator URLs — metagraph discovery, sorted by attest capability. */
 async function getValidatorUrls(): Promise<string[]> {
   const envUrl = process.env.VALIDATOR_URL || process.env.NEXT_PUBLIC_VALIDATOR_URL;
   if (envUrl) return [envUrl];
@@ -20,8 +34,25 @@ async function getValidatorUrls(): Promise<string[]> {
     const urls = await discoverValidatorUrls();
     if (urls.length > 0) {
       const shuffled = shuffle([...urls]);
-      if (fallback && !shuffled.includes(fallback)) shuffled.push(fallback);
-      return shuffled;
+
+      // Quick health check to find attest-capable validators (3s timeout per check, all in parallel)
+      const checks = await Promise.allSettled(
+        shuffled.map(async (url) => ({ url, capable: await checkAttestCapable(url) })),
+      );
+
+      const capable: string[] = [];
+      const rest: string[] = [];
+      for (const result of checks) {
+        if (result.status === "fulfilled") {
+          if (result.value.capable) capable.push(result.value.url);
+          else rest.push(result.value.url);
+        }
+      }
+
+      // Attest-capable validators first, then the rest
+      const sorted = [...capable, ...rest];
+      if (fallback && !sorted.includes(fallback)) sorted.push(fallback);
+      return sorted;
     }
   } catch {
     // fall through
@@ -29,38 +60,30 @@ async function getValidatorUrls(): Promise<string[]> {
   return fallback ? [fallback] : ["http://localhost:8421"];
 }
 
-const DISCOVERY_TIMEOUT_MS = 45_000; // 45s for discovered validators — fast-fail if they can't attest
-const FALLBACK_TIMEOUT_MS = 240_000; // 240s for fallback — give it full time for proof generation
-const TOTAL_DEADLINE_MS = 270_000; // 4.5 min total — must finish before client's 5 min timeout
+const PER_VALIDATOR_TIMEOUT_MS = 120_000;
+const TOTAL_DEADLINE_MS = 180_000; // 3 min total
 
 /**
  * Translate raw backend errors into helpful human-readable messages.
- * Users see these directly — make them actionable.
  */
 function humanizeError(raw: string): string {
   const lower = raw.toLowerCase();
 
-  // Response too large for the configured TLSNotary buffer
   if (lower.includes("more data than was configured") || lower.includes("max_recv")) {
     return "This page is too large to attest (over 2 MB uncompressed). Try attesting a specific article or API endpoint instead of a homepage.";
   }
-  // TLS certificate issues
   if (lower.includes("badcertificate") || lower.includes("certificate")) {
     return "Could not verify this site's TLS certificate. The site may use an unusual certificate authority or have an expired certificate.";
   }
-  // Connection closed / interrupted
   if (lower.includes("connection closed") || lower.includes("connection reset")) {
     return "The target website closed the connection before the proof could complete. This can happen with sites that block automated requests. Try a different page or URL.";
   }
-  // Timeouts
   if (lower.includes("timed out") || lower.includes("timeout")) {
     return "The proof took too long to generate. Large or slow-loading pages need more time. Try a smaller page, a specific article URL, or try again in a moment.";
   }
-  // Binary not found (miner misconfigured)
   if (lower.includes("binary not found") || lower.includes("binary not available")) {
     return "The attestation service is temporarily misconfigured. This has been logged and the team has been notified. Please try again later.";
   }
-  // Server returned non-200 (e.g. 403, 401)
   if (lower.includes("status 403") || lower.includes("forbidden")) {
     return "This website blocked the attestation request (403 Forbidden). Some sites require login or block automated access. Try a publicly accessible page.";
   }
@@ -70,44 +93,74 @@ function humanizeError(raw: string): string {
   if (lower.includes("status 404") || lower.includes("not found")) {
     return "The page was not found (404). Double-check the URL and make sure the page exists.";
   }
-  // DNS / unreachable
   if (lower.includes("unreachable") || lower.includes("dns") || lower.includes("resolve")) {
     return "Could not reach this website. Check that the URL is correct and the site is online.";
   }
-  // Miner internal error / 500
   if (lower.includes("status 500") || lower.includes("internal server error")) {
     return "The attestation miner encountered an internal error. This is usually temporary — please try again.";
   }
-  // Miner busy / 503 / at capacity
   if (lower.includes("service shutting down") || lower.includes("503")) {
     return "The attestation service is temporarily busy. Please try again in a minute.";
   }
   if (lower.includes("at capacity")) {
     return "The attestation network is busy right now. Please wait about 30 seconds and try again.";
   }
-  // No miners/validators
   if (lower.includes("no reachable miners") || lower.includes("no validators")) {
     return "No attestation services are currently available on the network. Please try again in a few minutes.";
   }
-  // Proof verification failed
   if (lower.includes("verification") && lower.includes("failed")) {
     return "The proof was generated but could not be verified. This is unusual — please try again.";
   }
-  // Fallback: return the raw error but with a help suffix
   return `${raw}. If this persists, please report it at github.com/djinn-inc/djinn/issues.`;
 }
 
 /**
- * POST /api/attest — Proxy attestation requests to validators with fallback.
+ * Try one validator. Returns the JSON response on success, null on failure.
+ */
+async function tryValidator(
+  target: string,
+  body: string,
+  timeoutMs: number,
+): Promise<{ data: Record<string, unknown>; error?: never } | { data?: never; error: string }> {
+  try {
+    const res = await fetch(`${target}/v1/attest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) {
+      if (res.status === 404 || res.status === 422 || res.status === 405) {
+        return { error: "Validator doesn't support attestation" };
+      }
+      return { error: `Validator returned ${res.status}` };
+    }
+    const data = await res.json();
+    if (data && data.busy) {
+      return { error: "Validator busy" };
+    }
+    if (data && data.success) {
+      return { data };
+    }
+    return { error: data?.error || "Attestation failed" };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "TimeoutError") {
+      return { error: "Timeout" };
+    }
+    return { error: String(err) };
+  }
+}
+
+/**
+ * POST /api/attest — Proxy attestation requests to validators.
  *
- * Tries up to 3 randomly-selected validators sequentially. Each attempt has
- * a 240s timeout to accommodate TLSNotary proof generation for large pages.
+ * Tries up to 3 validators in parallel (race), takes the first success.
+ * Validators are sorted by attest_capable health flag.
  *
  * Body: { url: string, request_id: string }
  * Response: AttestResponse from the validator
  */
 export async function POST(request: NextRequest) {
-  // Tighter rate limit: 5 requests per minute per IP
   if (isRateLimited("attest", getIp(request), 5)) {
     return rateLimitResponse();
   }
@@ -160,74 +213,50 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const sanitizedBody = {
+  const sanitizedBody = JSON.stringify({
     url: body.url,
     request_id: body.request_id,
-  };
+  });
 
   const validators = await getValidatorUrls();
-  const attempts = validators.length;
-  let lastError = "No attestation services are currently available on the network. Please try again in a few minutes.";
-  let busyCount = 0;
   const startedAt = Date.now();
 
-  for (let i = 0; i < attempts; i++) {
-    // Stop if we don't have enough time for a meaningful attempt (at least 30s)
+  // Wave 1: Try first 3 validators in parallel (these should be attest-capable)
+  // Wave 2: If wave 1 all fail, try next 3, etc.
+  const WAVE_SIZE = 3;
+  let lastError = "No attestation services are currently available on the network. Please try again in a few minutes.";
+
+  for (let wave = 0; wave * WAVE_SIZE < validators.length; wave++) {
     const elapsed = Date.now() - startedAt;
     const remaining = TOTAL_DEADLINE_MS - elapsed;
-    if (remaining < 30_000) break;
+    if (remaining < 10_000) break;
 
-    const target = `${validators[i]}/v1/attest`;
-    const isFallback = i === validators.length - 1 && !!process.env.FALLBACK_VALIDATOR_URL;
-    const perAttemptTimeout = Math.min(isFallback ? FALLBACK_TIMEOUT_MS : DISCOVERY_TIMEOUT_MS, remaining);
-    try {
-      const res = await fetch(target, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sanitizedBody),
-        signal: AbortSignal.timeout(perAttemptTimeout),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.success) {
-          // Successful attestation — return immediately
-          return NextResponse.json(data);
-        }
-        // Validator at capacity — skip immediately, try next
-        if (data && data.busy) {
-          busyCount++;
-          continue;
-        }
-        // Validator returned 200 but attestation failed — try next validator
-        if (data && data.error) {
-          lastError = humanizeError(data.error);
-        }
-        continue;
+    const batch = validators.slice(wave * WAVE_SIZE, (wave + 1) * WAVE_SIZE);
+    if (batch.length === 0) break;
+
+    const timeoutMs = Math.min(PER_VALIDATOR_TIMEOUT_MS, remaining);
+
+    // Race all validators in this wave — first success wins
+    const results = await Promise.allSettled(
+      batch.map((url) => tryValidator(url, sanitizedBody, timeoutMs)),
+    );
+
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value.data) {
+        return NextResponse.json(result.value.data);
       }
-      // Non-200 = try next validator.
-      // 404 = endpoint doesn't exist; 422 = different API schema (non-Djinn validator
-      // on the same subnet); 405 = method not allowed. All mean "skip this one".
-      if (res.status === 404 || res.status === 422 || res.status === 405) {
-        lastError = "This validator doesn't support attestation yet. Trying others...";
-      } else {
-        lastError = `Attestation service returned an error (${res.status}). Tried ${i + 1} of ${attempts} services.`;
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "TimeoutError") {
-        lastError = "The attestation took too long. Large pages can take up to 3 minutes — try a smaller page, or try again.";
-      } else {
-        lastError = `Could not reach attestation service (tried ${i + 1} of ${attempts}). The network may be temporarily unavailable.`;
+    }
+
+    // Collect errors for reporting
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value.error) {
+        lastError = result.value.error;
       }
     }
   }
 
-  // All validators busy — give a clear, fast message with Retry-After
-  if (busyCount > 0 && busyCount >= attempts) {
-    return NextResponse.json(
-      { error: "The attestation network is currently at capacity. Please try again in about 30 seconds." },
-      { status: 503, headers: { "Retry-After": "30" } },
-    );
-  }
-
-  return NextResponse.json({ error: lastError }, { status: 502 });
+  return NextResponse.json(
+    { error: humanizeError(lastError) },
+    { status: 502 },
+  );
 }
