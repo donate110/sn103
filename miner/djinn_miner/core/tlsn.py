@@ -21,11 +21,10 @@ import structlog
 
 log = structlog.get_logger()
 
-# Default binary location (can be overridden via env)
-PROVER_BINARY = os.getenv(
-    "TLSN_PROVER_BINARY",
-    shutil.which("djinn-tlsn-prover") or "djinn-tlsn-prover",
-)
+# Resolve binary: env override → PATH → ~/.local/bin → auto-download
+from djinn_miner.core.tlsn_bootstrap import ensure_binary
+
+PROVER_BINARY = ensure_binary("djinn-tlsn-prover")
 
 NOTARY_HOST = os.getenv("TLSN_NOTARY_HOST", "notary.pse.dev")
 NOTARY_PORT = int(os.getenv("TLSN_NOTARY_PORT", "443"))

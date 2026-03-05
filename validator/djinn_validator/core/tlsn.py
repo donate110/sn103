@@ -21,10 +21,10 @@ import structlog
 
 log = structlog.get_logger()
 
-VERIFIER_BINARY = os.getenv(
-    "TLSN_VERIFIER_BINARY",
-    shutil.which("djinn-tlsn-verifier") or "djinn-tlsn-verifier",
-)
+# Resolve binary: env override → PATH → ~/.local/bin → auto-download
+from djinn_validator.core.tlsn_bootstrap import ensure_binary
+
+VERIFIER_BINARY = ensure_binary("djinn-tlsn-verifier")
 
 # Trusted notary public keys (hex-encoded secp256k1). If empty, any key is
 # accepted (dev mode). In production, configure via TLSN_TRUSTED_NOTARY_KEYS.
