@@ -517,20 +517,20 @@ export default function AdminDashboard() {
               <div>
                 <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Validators ({validators.length} total)</h3>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-white/5 rounded-lg p-3">
+                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Validators responding to /health with a non-zero version string — confirms they're running Djinn validator software">
                     <span className="text-slate-400 text-[11px] block mb-1">Running Djinn</span>
                     <span className="text-2xl font-bold">{djinnValidators.length}<span className="text-sm font-normal text-slate-500">/{validators.length}</span></span>
                   </div>
-                  <div className="bg-white/5 rounded-lg p-3">
+                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Validators whose /health endpoint returns status=ok — reachable and self-reporting as healthy">
                     <span className="text-slate-400 text-[11px] block mb-1">Healthy</span>
                     <span className="text-2xl font-bold">{healthyValidators.length}<span className="text-sm font-normal text-slate-500">/{validators.length}</span></span>
                   </div>
-                  <div className="bg-white/5 rounded-lg p-3">
+                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Validators holding Shamir key shares for signal encryption. May exceed 'Running Djinn' if validators acquired shares before version reporting was added">
                     <span className="text-slate-400 text-[11px] block mb-1">Holding Key Shares</span>
                     <span className="text-2xl font-bold">{sharesHoldingValidators.length}<span className="text-sm font-normal text-slate-500">/{validators.length}</span></span>
                     <span className="text-slate-500 text-[10px] block mt-0.5">{totalShares} shares total</span>
                   </div>
-                  <div className="bg-white/5 rounded-lg p-3">
+                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Validators connected to both Base chain (for on-chain settlement) and Bittensor network (for subnet communication)">
                     <span className="text-slate-400 text-[11px] block mb-1">Chain + BT Connected</span>
                     <span className="text-2xl font-bold">{chainConnectedValidators.length}<span className="text-sm font-normal text-slate-500">/{validators.length}</span></span>
                   </div>
@@ -540,20 +540,20 @@ export default function AdminDashboard() {
               <div>
                 <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Miners ({miners.length} total)</h3>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-white/5 rounded-lg p-3">
+                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Miners responding to /health with a non-zero version string — confirms they're running Djinn miner software">
                     <span className="text-slate-400 text-[11px] block mb-1">Running Djinn</span>
                     <span className="text-2xl font-bold">{djinnMiners.length}<span className="text-sm font-normal text-slate-500">/{miners.length}</span></span>
                   </div>
-                  <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+                  <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 cursor-help" title="Miners that pass ALL checks: healthy status, Odds API connected, Bittensor connected, and running Djinn code. These are fully contributing to the network.">
                     <span className="text-green-400 text-[11px] block mb-1">Fully Operational</span>
                     <span className="text-2xl font-bold text-green-400">{fullyOperationalMiners.length}<span className="text-sm font-normal text-green-600">/{miners.length}</span></span>
                     <span className="text-green-600 text-[10px] block mt-0.5">Healthy + Odds + BT + Djinn</span>
                   </div>
-                  <div className="bg-white/5 rounded-lg p-3">
+                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Miners with a live connection to The Odds API — can fetch real-time sports betting lines for challenge verification">
                     <span className="text-slate-400 text-[11px] block mb-1">Odds API Connected</span>
                     <span className="text-2xl font-bold">{oddsConnectedMiners.length}<span className="text-sm font-normal text-slate-500">/{miners.length}</span></span>
                   </div>
-                  <div className="bg-white/5 rounded-lg p-3">
+                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Miners connected to the Bittensor network — can communicate with validators for challenges and weight setting">
                     <span className="text-slate-400 text-[11px] block mb-1">BT Connected</span>
                     <span className="text-2xl font-bold">{btConnectedMiners.length}<span className="text-sm font-normal text-slate-500">/{miners.length}</span></span>
                   </div>
@@ -563,15 +563,15 @@ export default function AdminDashboard() {
             {/* Attestation row */}
             <div className="mt-4 pt-4 border-t border-slate-700">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3">
+                <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3 cursor-help" title="Miners running version 512+ which includes TLSNotary prover support — can generate cryptographic proofs for URL attestation (djinn.gg/attest)">
                   <span className="text-cyan-400 text-[11px] block mb-1">Attest-Capable Miners (v512+)</span>
                   <span className="text-2xl font-bold text-cyan-300">{attestCapableMiners.length}<span className="text-sm font-normal text-cyan-600">/{miners.length}</span></span>
                 </div>
-                <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3">
+                <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3 cursor-help" title="Validators running version 512+ which includes TLSNotary verifier support — can verify and validate attestation proofs from miners">
                   <span className="text-cyan-400 text-[11px] block mb-1">Attest-Capable Validators (v512+)</span>
                   <span className="text-2xl font-bold text-cyan-300">{attestCapableValidators.length}<span className="text-sm font-normal text-cyan-600">/{validators.length}</span></span>
                 </div>
-                <div className="bg-white/5 rounded-lg p-3">
+                <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Nodes registered on the subnet but not responding with Djinn software — may be running generic Bittensor code, offline, or misconfigured">
                   <span className="text-slate-400 text-[11px] block mb-1">Not Running Djinn</span>
                   <span className="text-2xl font-bold text-slate-500">{miners.length - djinnMiners.length} miners / {validators.length - djinnValidators.length} validators</span>
                 </div>
