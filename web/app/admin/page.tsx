@@ -511,47 +511,70 @@ export default function AdminDashboard() {
         <>
           {/* Network Health Summary — tweet-ready stats */}
           <div className="mb-8 bg-gradient-to-r from-slate-900 to-slate-800 rounded-xl p-6 text-white">
-            <h2 className="text-lg font-semibold mb-4">Network Health Summary</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-              {/* Validators */}
+            <h2 className="text-lg font-semibold mb-5">Network Health Summary</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Validators Column */}
               <div>
-                <span className="text-slate-400 text-xs block mb-1">Validators Running Djinn</span>
-                <span className="text-2xl font-bold">{djinnValidators.length}<span className="text-sm font-normal text-slate-400">/{validators.length}</span></span>
+                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Validators ({validators.length} total)</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <span className="text-slate-400 text-[11px] block mb-1">Running Djinn</span>
+                    <span className="text-2xl font-bold">{djinnValidators.length}<span className="text-sm font-normal text-slate-500">/{validators.length}</span></span>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <span className="text-slate-400 text-[11px] block mb-1">Healthy</span>
+                    <span className="text-2xl font-bold">{healthyValidators.length}<span className="text-sm font-normal text-slate-500">/{validators.length}</span></span>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <span className="text-slate-400 text-[11px] block mb-1">Holding Key Shares</span>
+                    <span className="text-2xl font-bold">{sharesHoldingValidators.length}<span className="text-sm font-normal text-slate-500">/{validators.length}</span></span>
+                    <span className="text-slate-500 text-[10px] block mt-0.5">{totalShares} shares total</span>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <span className="text-slate-400 text-[11px] block mb-1">Chain + BT Connected</span>
+                    <span className="text-2xl font-bold">{chainConnectedValidators.length}<span className="text-sm font-normal text-slate-500">/{validators.length}</span></span>
+                  </div>
+                </div>
               </div>
+              {/* Miners Column */}
               <div>
-                <span className="text-slate-400 text-xs block mb-1">Validators w/ Shares</span>
-                <span className="text-2xl font-bold">{sharesHoldingValidators.length}<span className="text-sm font-normal text-slate-400">/{validators.length}</span></span>
-              </div>
-              <div>
-                <span className="text-slate-400 text-xs block mb-1">Validators Chain+BT</span>
-                <span className="text-2xl font-bold">{chainConnectedValidators.length}<span className="text-sm font-normal text-slate-400">/{validators.length}</span></span>
-              </div>
-              {/* Miners */}
-              <div>
-                <span className="text-slate-400 text-xs block mb-1">Miners Running Djinn</span>
-                <span className="text-2xl font-bold">{djinnMiners.length}<span className="text-sm font-normal text-slate-400">/{miners.length}</span></span>
-              </div>
-              <div>
-                <span className="text-slate-400 text-xs block mb-1">Miners Fully Operational</span>
-                <span className="text-2xl font-bold text-green-400">{fullyOperationalMiners.length}<span className="text-sm font-normal text-slate-500">/{miners.length}</span></span>
+                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Miners ({miners.length} total)</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <span className="text-slate-400 text-[11px] block mb-1">Running Djinn</span>
+                    <span className="text-2xl font-bold">{djinnMiners.length}<span className="text-sm font-normal text-slate-500">/{miners.length}</span></span>
+                  </div>
+                  <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+                    <span className="text-green-400 text-[11px] block mb-1">Fully Operational</span>
+                    <span className="text-2xl font-bold text-green-400">{fullyOperationalMiners.length}<span className="text-sm font-normal text-green-600">/{miners.length}</span></span>
+                    <span className="text-green-600 text-[10px] block mt-0.5">Healthy + Odds + BT + Djinn</span>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <span className="text-slate-400 text-[11px] block mb-1">Odds API Connected</span>
+                    <span className="text-2xl font-bold">{oddsConnectedMiners.length}<span className="text-sm font-normal text-slate-500">/{miners.length}</span></span>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <span className="text-slate-400 text-[11px] block mb-1">BT Connected</span>
+                    <span className="text-2xl font-bold">{btConnectedMiners.length}<span className="text-sm font-normal text-slate-500">/{miners.length}</span></span>
+                  </div>
+                </div>
               </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4 pt-4 border-t border-slate-700">
-              <div>
-                <span className="text-slate-400 text-xs block mb-1">Miners w/ Odds API</span>
-                <span className="text-xl font-bold">{oddsConnectedMiners.length}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 text-xs block mb-1">Miners w/ BT Connected</span>
-                <span className="text-xl font-bold">{btConnectedMiners.length}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 text-xs block mb-1">Attest-Capable (v512+)</span>
-                <span className="text-xl font-bold">{attestCapableMiners.length} miners / {attestCapableValidators.length} validators</span>
-              </div>
-              <div>
-                <span className="text-slate-400 text-xs block mb-1">Total Key Shares</span>
-                <span className="text-xl font-bold">{totalShares}</span>
+            {/* Attestation row */}
+            <div className="mt-4 pt-4 border-t border-slate-700">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3">
+                  <span className="text-cyan-400 text-[11px] block mb-1">Attest-Capable Miners (v512+)</span>
+                  <span className="text-2xl font-bold text-cyan-300">{attestCapableMiners.length}<span className="text-sm font-normal text-cyan-600">/{miners.length}</span></span>
+                </div>
+                <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3">
+                  <span className="text-cyan-400 text-[11px] block mb-1">Attest-Capable Validators (v512+)</span>
+                  <span className="text-2xl font-bold text-cyan-300">{attestCapableValidators.length}<span className="text-sm font-normal text-cyan-600">/{validators.length}</span></span>
+                </div>
+                <div className="bg-white/5 rounded-lg p-3">
+                  <span className="text-slate-400 text-[11px] block mb-1">Not Running Djinn</span>
+                  <span className="text-2xl font-bold text-slate-500">{miners.length - djinnMiners.length} miners / {validators.length - djinnValidators.length} validators</span>
+                </div>
               </div>
             </div>
           </div>
