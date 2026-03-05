@@ -949,6 +949,9 @@ def create_app(
                 data = resp.json()
             except Exception:
                 log.error("miner_malformed_json", miner_uid=axon["uid"])
+                if scorer is not None and axon["uid"] >= 0:
+                    m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
+                    m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
                 return None
 
             # Miner busy — skip without penalising
@@ -966,6 +969,10 @@ def create_app(
 
             phex = data.get("proof_hex")
             if not phex:
+                log.warning("attest_miner_no_proof_hex", miner_uid=axon["uid"])
+                if scorer is not None and axon["uid"] >= 0:
+                    m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
+                    m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
                 return None
 
             return (axon, data, phex)
@@ -1033,6 +1040,9 @@ def create_app(
             elapsed = _t.perf_counter() - start
             ATTESTATION_DURATION.observe(elapsed)
             ATTESTATION_VERIFIED.labels(valid="false").inc()
+            if scorer is not None and selected["uid"] >= 0:
+                miner_metrics = scorer.get_or_create(selected["uid"], selected.get("hotkey", ""))
+                miner_metrics.record_attestation(latency=elapsed, proof_valid=False)
             if attestation_log is not None:
                 attestation_log.log_attestation(
                     url=req.url, request_id=req.request_id,
@@ -1057,6 +1067,10 @@ def create_app(
             elapsed = _t.perf_counter() - start
             ATTESTATION_DURATION.observe(elapsed)
             ATTESTATION_VERIFIED.labels(valid="false").inc()
+            # Miner DID generate a proof — credit the attempt even though verification timed out
+            if scorer is not None and selected["uid"] >= 0:
+                miner_metrics = scorer.get_or_create(selected["uid"], selected.get("hotkey", ""))
+                miner_metrics.record_attestation(latency=elapsed, proof_valid=False)
             if attestation_log is not None:
                 attestation_log.log_attestation(
                     url=req.url, request_id=req.request_id,

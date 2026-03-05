@@ -232,6 +232,10 @@ export default function AdminDashboard() {
   // Delegate names: hex hotkey → display name
   const [delegateNames, setDelegateNames] = useState<Record<string, string>>({});
 
+  // Table filter state
+  const [minerFilter, setMinerFilter] = useState<"all" | "djinn" | "healthy" | "odds" | "operational">("all");
+  const [validatorFilter, setValidatorFilter] = useState<"all" | "djinn" | "healthy" | "chain" | "shares">("all");
+
   // Check for existing admin session via server-side cookie verification
   useEffect(() => {
     fetch("/api/admin/auth", { credentials: "same-origin" })
@@ -383,6 +387,41 @@ export default function AdminDashboard() {
   const healthyMiners = miners.filter((m) => m.status === "ok");
   const totalShares = validators.reduce((sum, v) => sum + (v.shares_held || 0), 0);
 
+  // ── Network Health Breakdown ──
+  // Validators: running djinn code = has a version string that's not empty
+  const djinnValidators = validators.filter((v) => !v.error && v.version && v.version !== "-" && v.version !== "0");
+  const attestCapableValidators = validators.filter((v) => !v.error && v.version && parseInt(v.version, 10) >= 512);
+  const chainConnectedValidators = validators.filter((v) => !v.error && v.chain_connected);
+  const btConnectedValidators = validators.filter((v) => !v.error && v.bt_connected);
+  const sharesHoldingValidators = validators.filter((v) => !v.error && v.shares_held > 0);
+
+  // Miners: running djinn code = has a non-empty version, odds API connected, BT connected
+  const djinnMiners = miners.filter((m) => !m.error && m.version && m.version !== "-" && m.version !== "0");
+  const oddsConnectedMiners = miners.filter((m) => !m.error && m.odds_api_connected);
+  const btConnectedMiners = miners.filter((m) => !m.error && m.bt_connected);
+  const attestCapableMiners = miners.filter((m) => !m.error && m.version && parseInt(m.version, 10) >= 512);
+  const fullyOperationalMiners = miners.filter((m) => !m.error && m.status === "ok" && m.odds_api_connected && m.bt_connected && m.version && m.version !== "-" && m.version !== "0");
+
+  const filteredMiners = miners.filter((m) => {
+    switch (minerFilter) {
+      case "djinn": return !m.error && m.version && m.version !== "-" && m.version !== "0";
+      case "healthy": return m.status === "ok";
+      case "odds": return !m.error && m.odds_api_connected;
+      case "operational": return !m.error && m.status === "ok" && m.odds_api_connected && m.bt_connected && m.version && m.version !== "-" && m.version !== "0";
+      default: return true;
+    }
+  });
+
+  const filteredValidators = validators.filter((v) => {
+    switch (validatorFilter) {
+      case "djinn": return !v.error && v.version && v.version !== "-" && v.version !== "0";
+      case "healthy": return v.status === "ok";
+      case "chain": return !v.error && v.chain_connected;
+      case "shares": return !v.error && v.shares_held > 0;
+      default: return true;
+    }
+  });
+
   return (
     <div className="max-w-7xl mx-auto px-2 sm:px-4 py-4 sm:py-8">
       {/* Header */}
@@ -470,6 +509,53 @@ export default function AdminDashboard() {
       {/* ── Overview Tab ── */}
       {activeTab === "overview" && (
         <>
+          {/* Network Health Summary — tweet-ready stats */}
+          <div className="mb-8 bg-gradient-to-r from-slate-900 to-slate-800 rounded-xl p-6 text-white">
+            <h2 className="text-lg font-semibold mb-4">Network Health Summary</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+              {/* Validators */}
+              <div>
+                <span className="text-slate-400 text-xs block mb-1">Validators Running Djinn</span>
+                <span className="text-2xl font-bold">{djinnValidators.length}<span className="text-sm font-normal text-slate-400">/{validators.length}</span></span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-xs block mb-1">Validators w/ Shares</span>
+                <span className="text-2xl font-bold">{sharesHoldingValidators.length}<span className="text-sm font-normal text-slate-400">/{validators.length}</span></span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-xs block mb-1">Validators Chain+BT</span>
+                <span className="text-2xl font-bold">{chainConnectedValidators.length}<span className="text-sm font-normal text-slate-400">/{validators.length}</span></span>
+              </div>
+              {/* Miners */}
+              <div>
+                <span className="text-slate-400 text-xs block mb-1">Miners Running Djinn</span>
+                <span className="text-2xl font-bold">{djinnMiners.length}<span className="text-sm font-normal text-slate-400">/{miners.length}</span></span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-xs block mb-1">Miners Fully Operational</span>
+                <span className="text-2xl font-bold text-green-400">{fullyOperationalMiners.length}<span className="text-sm font-normal text-slate-500">/{miners.length}</span></span>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4 pt-4 border-t border-slate-700">
+              <div>
+                <span className="text-slate-400 text-xs block mb-1">Miners w/ Odds API</span>
+                <span className="text-xl font-bold">{oddsConnectedMiners.length}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-xs block mb-1">Miners w/ BT Connected</span>
+                <span className="text-xl font-bold">{btConnectedMiners.length}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-xs block mb-1">Attest-Capable (v512+)</span>
+                <span className="text-xl font-bold">{attestCapableMiners.length} miners / {attestCapableValidators.length} validators</span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-xs block mb-1">Total Key Shares</span>
+                <span className="text-xl font-bold">{totalShares}</span>
+              </div>
+            </div>
+          </div>
+
           {/* Summary Stats */}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 mb-8">
             <StatCard
@@ -506,7 +592,30 @@ export default function AdminDashboard() {
 
           {/* Validator Grid */}
           <div className="mb-8">
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">Validators</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <h2 className="text-xl font-semibold text-slate-900">Validators <span className="text-sm font-normal text-slate-400">({filteredValidators.length}/{validators.length})</span></h2>
+              <div className="flex flex-wrap gap-1">
+                {([
+                  ["all", "All"],
+                  ["djinn", "Running Djinn"],
+                  ["healthy", "Healthy"],
+                  ["chain", "Chain Connected"],
+                  ["shares", "Holding Shares"],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => setValidatorFilter(key)}
+                    className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                      validatorFilter === key
+                        ? "bg-slate-900 text-white border-slate-900"
+                        : "bg-white text-slate-600 border-slate-300 hover:border-slate-400"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
               <table className="w-full text-sm min-w-[900px]">
                 <thead className="bg-slate-50 text-slate-500 sticky top-0 z-10">
@@ -526,14 +635,14 @@ export default function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {validators.length === 0 && !loading && (
+                  {filteredValidators.length === 0 && !loading && (
                     <tr>
                       <td colSpan={12} className="px-4 py-8 text-center text-slate-400">
-                        No validators discovered
+                        {validators.length === 0 ? "No validators discovered" : "No validators match filter"}
                       </td>
                     </tr>
                   )}
-                  {validators.map((v) => (
+                  {filteredValidators.map((v) => (
                     <tr key={v.uid} className="hover:bg-slate-50">
                       <td className="px-2 sm:px-4 py-2 font-mono text-slate-700">
                         {v.ss58Hotkey ? (
@@ -596,7 +705,30 @@ export default function AdminDashboard() {
 
           {/* Miners Grid */}
           <div className="mb-8">
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">Miners</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <h2 className="text-xl font-semibold text-slate-900">Miners <span className="text-sm font-normal text-slate-400">({filteredMiners.length}/{miners.length})</span></h2>
+              <div className="flex flex-wrap gap-1">
+                {([
+                  ["all", "All"],
+                  ["djinn", "Running Djinn"],
+                  ["healthy", "Healthy"],
+                  ["odds", "Odds API"],
+                  ["operational", "Fully Operational"],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => setMinerFilter(key)}
+                    className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                      minerFilter === key
+                        ? "bg-slate-900 text-white border-slate-900"
+                        : "bg-white text-slate-600 border-slate-300 hover:border-slate-400"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
               <table className="w-full text-sm min-w-[800px]">
                 <thead className="bg-slate-50 text-slate-500 sticky top-0 z-10">
@@ -615,14 +747,14 @@ export default function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {miners.length === 0 && !loading && (
+                  {filteredMiners.length === 0 && !loading && (
                     <tr>
                       <td colSpan={11} className="px-4 py-8 text-center text-slate-400">
-                        No miners discovered
+                        {miners.length === 0 ? "No miners discovered" : "No miners match filter"}
                       </td>
                     </tr>
                   )}
-                  {miners.map((m) => (
+                  {filteredMiners.map((m) => (
                     <tr key={m.uid} className="hover:bg-slate-50">
                       <td className="px-2 sm:px-4 py-2 font-mono text-slate-700">
                         {m.ss58Hotkey ? (
