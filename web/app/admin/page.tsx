@@ -234,6 +234,9 @@ export default function AdminDashboard() {
   // Delegate names: hex hotkey → display name
   const [delegateNames, setDelegateNames] = useState<Record<string, string>>({});
 
+  // Latest repo version from GitHub
+  const [repoVersion, setRepoVersion] = useState<{ version: number; sha: string } | null>(null);
+
   // Table filter state
   const [minerFilter, setMinerFilter] = useState<"all" | "djinn" | "healthy" | "odds" | "operational">("all");
   const [validatorFilter, setValidatorFilter] = useState<"all" | "djinn" | "healthy" | "chain" | "shares">("all");
@@ -356,6 +359,8 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!authed) return;
     refresh();
+    // Fetch latest repo version from GitHub (separate, non-blocking)
+    fetch("/api/admin/latest-version").then(r => r.ok ? r.json() : null).then(d => { if (d?.version) setRepoVersion(d); }).catch(() => {});
     const interval = setInterval(refresh, 30_000);
     return () => clearInterval(interval);
   }, [authed, refresh]);
@@ -441,10 +446,12 @@ export default function AdminDashboard() {
               ...miners.filter(m => m.version && m.version !== "-" && m.version !== "0").map(m => Number(m.version)),
             ].filter(n => !isNaN(n));
             const maxLive = allVersions.length > 0 ? Math.max(...allVersions) : null;
-            const repoVersion = process.env.NEXT_PUBLIC_GIT_VERSION || "?";
+            const latest = repoVersion ? `${repoVersion.version} (${repoVersion.sha})` : process.env.NEXT_PUBLIC_GIT_VERSION || "?";
+            const latestNum = repoVersion?.version;
+            const behind = latestNum && maxLive ? latestNum - maxLive : null;
             return (
-              <span className="text-xs text-slate-400 hidden sm:inline font-mono" title={`Repo: v${repoVersion}\nHighest live: v${maxLive ?? "?"}`}>
-                repo v{repoVersion}{maxLive ? ` · live v${maxLive}` : ""}
+              <span className="text-xs text-slate-400 hidden sm:inline font-mono" title={`Latest on GitHub: v${latest}\nHighest deployed: v${maxLive ?? "?"}\n${behind ? `${behind} commit${behind !== 1 ? "s" : ""} behind` : ""}`}>
+                latest v{latest}{maxLive ? <>{" · "}live v{maxLive}{behind && behind > 0 ? <span className="text-amber-500"> ({behind} behind)</span> : <span className="text-green-500"> (up to date)</span>}</> : ""}
               </span>
             );
           })()}
