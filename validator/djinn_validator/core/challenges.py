@@ -102,13 +102,17 @@ async def discover_peer_notaries(
 def assign_peer_notary(
     prover_uid: int,
     notaries: list[PeerNotary],
+    prover_ip: str | None = None,
 ) -> PeerNotary | None:
     """Randomly assign a peer notary for a prover miner.
 
-    The notary must be a different miner than the prover.
+    Excludes the prover itself and any notary on the same IP address
+    (same operator running multiple miners on one machine could collude).
     Returns None if no eligible notary is available.
     """
     eligible = [n for n in notaries if n.uid != prover_uid]
+    if prover_ip:
+        eligible = [n for n in eligible if n.ip != prover_ip]
     if not eligible:
         return None
     return random.choice(eligible)
@@ -879,7 +883,7 @@ async def challenge_miners_attestation(
 
             # Assign a peer notary if available (backwards-compat: omit fields
             # for old miners that don't understand notary_host/notary_port)
-            assigned_notary = assign_peer_notary(uid, peer_notaries)
+            assigned_notary = assign_peer_notary(uid, peer_notaries, prover_ip=axon.get("ip"))
 
             async with sem:
                 start = time.perf_counter()

@@ -112,6 +112,27 @@ class TestPeerNotaryAssignment:
     def test_assign_returns_none_when_empty(self) -> None:
         assert assign_peer_notary(1, []) is None
 
+    def test_assign_excludes_same_ip(self) -> None:
+        """Notaries on the same IP as the prover are excluded (same operator)."""
+        notaries = [
+            PeerNotary(uid=1, ip="10.0.0.1", port=8422, notary_port=7047, pubkey_hex="a" * 66),
+            PeerNotary(uid=2, ip="10.0.0.1", port=8423, notary_port=7047, pubkey_hex="b" * 66),
+            PeerNotary(uid=3, ip="10.0.0.2", port=8422, notary_port=7047, pubkey_hex="c" * 66),
+        ]
+        # uid=1 on 10.0.0.1 should never get uid=2 (same IP)
+        for _ in range(50):
+            assigned = assign_peer_notary(1, notaries, prover_ip="10.0.0.1")
+            assert assigned is not None
+            assert assigned.uid == 3  # only eligible notary
+
+    def test_assign_returns_none_when_all_same_ip(self) -> None:
+        """Returns None if all notaries share the prover's IP."""
+        notaries = [
+            PeerNotary(uid=1, ip="10.0.0.1", port=8422, notary_port=7047, pubkey_hex="a" * 66),
+            PeerNotary(uid=2, ip="10.0.0.1", port=8423, notary_port=7047, pubkey_hex="b" * 66),
+        ]
+        assert assign_peer_notary(1, notaries, prover_ip="10.0.0.1") is None
+
     def test_assign_random_distribution(self) -> None:
         """Assignments are distributed across eligible notaries."""
         notaries = [
