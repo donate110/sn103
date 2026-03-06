@@ -45,9 +45,9 @@ if [ "$TAG" = "latest" ]; then
         if [ -f "${TOOLS_DIR}/build.sh" ]; then
             echo "Building from source..."
             cd "$TOOLS_DIR" && bash build.sh
-            cp target/release/djinn-tlsn-prover target/release/djinn-tlsn-verifier "$INSTALL_DIR/"
+            cp target/release/djinn-tlsn-prover target/release/djinn-tlsn-verifier target/release/djinn-tlsn-notary "$INSTALL_DIR/"
             echo "Installed (built from source):"
-            ls -la "$INSTALL_DIR/djinn-tlsn-prover" "$INSTALL_DIR/djinn-tlsn-verifier"
+            ls -la "$INSTALL_DIR/djinn-tlsn-prover" "$INSTALL_DIR/djinn-tlsn-verifier" "$INSTALL_DIR/djinn-tlsn-notary"
             exit 0
         fi
         echo "No tlsn-tools source found. Please build manually."
@@ -73,9 +73,9 @@ if ! curl -sL --fail -o "${TMPDIR}/${ASSET_NAME}" "$URL"; then
     if [ -f "${TOOLS_DIR}/build.sh" ]; then
         cd "$TOOLS_DIR" && bash build.sh
         mkdir -p "$INSTALL_DIR"
-        cp target/release/djinn-tlsn-prover target/release/djinn-tlsn-verifier "$INSTALL_DIR/"
+        cp target/release/djinn-tlsn-prover target/release/djinn-tlsn-verifier target/release/djinn-tlsn-notary "$INSTALL_DIR/"
         echo "Installed (built from source):"
-        ls -la "$INSTALL_DIR/djinn-tlsn-prover" "$INSTALL_DIR/djinn-tlsn-verifier"
+        ls -la "$INSTALL_DIR/djinn-tlsn-prover" "$INSTALL_DIR/djinn-tlsn-verifier" "$INSTALL_DIR/djinn-tlsn-notary"
         exit 0
     fi
     echo "No tlsn-tools source found and no pre-built binary available."
@@ -85,12 +85,13 @@ fi
 # Extract & install
 mkdir -p "$INSTALL_DIR"
 tar xzf "${TMPDIR}/${ASSET_NAME}" -C "${TMPDIR}"
-cp "${TMPDIR}/djinn-tlsn-prover" "${TMPDIR}/djinn-tlsn-verifier" "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR/djinn-tlsn-prover" "$INSTALL_DIR/djinn-tlsn-verifier"
+cp "${TMPDIR}/djinn-tlsn-prover" "${TMPDIR}/djinn-tlsn-verifier" "${TMPDIR}/djinn-tlsn-notary" "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR/djinn-tlsn-prover" "$INSTALL_DIR/djinn-tlsn-verifier" "$INSTALL_DIR/djinn-tlsn-notary"
 
 echo "Installed:"
-ls -la "$INSTALL_DIR/djinn-tlsn-prover" "$INSTALL_DIR/djinn-tlsn-verifier"
+ls -la "$INSTALL_DIR/djinn-tlsn-prover" "$INSTALL_DIR/djinn-tlsn-verifier" "$INSTALL_DIR/djinn-tlsn-notary"
 echo ""
 echo "Verify:"
 "$INSTALL_DIR/djinn-tlsn-prover" --help 2>&1 | head -1
 "$INSTALL_DIR/djinn-tlsn-verifier" --help 2>&1 | head -1
+"$INSTALL_DIR/djinn-tlsn-notary" --help 2>&1 | head -1
