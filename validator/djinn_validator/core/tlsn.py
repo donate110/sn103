@@ -88,11 +88,15 @@ async def verify_proof(
 
     base_cmd = [VERIFIER_BINARY, "--presentation", presentation_path]
 
-    # Build the set of keys to try: configured trusted keys + optional peer key
-    all_keys = set(TRUSTED_NOTARY_KEYS)
+    # Build the set of keys to try: peer key first (most likely), then
+    # configured trusted keys, then None (no key constraint) as fallback.
+    # The None fallback handles the transition where miners haven't updated
+    # to use peer notaries and still produce PSE-signed proofs.
+    keys_to_try: list[str | None] = []
     if expected_notary_key and _HEX_KEY_RE.match(expected_notary_key):
-        all_keys.add(expected_notary_key)
-    keys_to_try = list(all_keys) if all_keys else [None]
+        keys_to_try.append(expected_notary_key)
+    keys_to_try.extend(TRUSTED_NOTARY_KEYS)
+    keys_to_try.append(None)  # fallback: accept any notary key
     last_error = ""
     proc = None
     stdout = b""
