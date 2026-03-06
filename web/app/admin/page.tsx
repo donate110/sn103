@@ -435,9 +435,22 @@ export default function AdminDashboard() {
           </p>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
+          {(() => {
+            const allVersions = [
+              ...validators.filter(v => v.version && v.version !== "-" && v.version !== "0").map(v => Number(v.version)),
+              ...miners.filter(m => m.version && m.version !== "-" && m.version !== "0").map(m => Number(m.version)),
+            ].filter(n => !isNaN(n));
+            const maxLive = allVersions.length > 0 ? Math.max(...allVersions) : null;
+            const repoVersion = process.env.NEXT_PUBLIC_GIT_VERSION || "?";
+            return (
+              <span className="text-xs text-slate-400 hidden sm:inline font-mono" title={`Repo: v${repoVersion}\nHighest live: v${maxLive ?? "?"}`}>
+                repo v{repoVersion}{maxLive ? ` · live v${maxLive}` : ""}
+              </span>
+            );
+          })()}
           {lastRefresh && (
             <span className="text-xs text-slate-400 hidden sm:inline">
-              Last: {lastRefresh.toLocaleTimeString()}
+              {lastRefresh.toLocaleTimeString()}
             </span>
           )}
           <div>

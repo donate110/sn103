@@ -22,8 +22,20 @@ if (process.env.NODE_ENV === "production") {
   }
 }
 
+// Embed git commit count + short hash at build time for admin version display
+const { execSync } = require("child_process");
+let gitVersion = "dev";
+try {
+  const count = execSync("git rev-list --count HEAD", { encoding: "utf8" }).trim();
+  const hash = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+  gitVersion = `${count} (${hash})`;
+} catch {}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  env: {
+    NEXT_PUBLIC_GIT_VERSION: gitVersion,
+  },
   async headers() {
     return [
       {
