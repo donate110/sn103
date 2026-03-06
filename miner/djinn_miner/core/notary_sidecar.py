@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import signal
 import shutil
 from dataclasses import dataclass
@@ -136,7 +137,10 @@ class NotarySidecar:
                     line = await self._process.stderr.readline()
                     if not line:
                         break
-                    text = line.decode(errors="replace").strip()
+                    raw = line.decode(errors="replace").strip()
+                    # Strip ANSI escape codes (the notary uses tracing-subscriber
+                    # which emits colored output with \x1b[...m sequences)
+                    text = re.sub(r"\x1b\[[0-9;]*m", "", raw)
                     log.debug("notary_sidecar_log", line=text)
                     # The notary logs: pubkey=<hex> "Notary public key"
                     if "pubkey=" in text.lower() or "notary public key" in text.lower():
