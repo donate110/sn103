@@ -24,7 +24,7 @@ def configure_logging() -> None:
     log_format = os.getenv("LOG_FORMAT", "console").lower()
     log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_str, logging.INFO)
-    log_file = os.getenv("LOG_FILE", "")
+    log_file = os.getenv("LOG_FILE", "djinn-miner.log")
 
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
