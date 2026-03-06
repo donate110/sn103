@@ -1279,10 +1279,11 @@ function WeightSetDetail({ event }: { event: NetworkEvent }) {
                 <tbody className="divide-y divide-slate-100/50">
                   {filtered.map((m, i) => {
                     const hasActivity = Number(m.queries_total) > 0 || Number(m.attestations_total) > 0;
+                    const w = fmtWeight(m.weight);
                     return (
                       <tr key={i} className={hasActivity ? "bg-amber-100/30" : ""}>
                         <td className="px-2 py-1 font-mono text-slate-700">{formatDetailValue(m.uid)}</td>
-                        <td className="px-2 py-1 font-mono text-right text-slate-700">{fmtWeight(m.weight)}</td>
+                        <td className="px-2 py-1 font-mono text-right text-slate-700 cursor-default" title={w.tooltip ?? undefined}>{w.display}</td>
                         <td className="px-2 py-1 font-mono text-right text-slate-700">{fmtPct(m.accuracy)}</td>
                         <td className="px-2 py-1 font-mono text-right text-slate-700">{fmtPct(m.speed)}</td>
                         <td className="px-2 py-1 font-mono text-right text-slate-700">{fmtPct(m.coverage)}</td>
@@ -1319,17 +1320,20 @@ function fmtPct(v: unknown): string {
   return `${(n * 100).toFixed(1)}%`;
 }
 
-/** Format a weight value. Shows "1/N" when the reciprocal is a clean integer. */
-function fmtWeight(v: unknown): string {
+/** Format a weight value — full decimal, never scientific notation. */
+function fmtWeight(v: unknown): { display: string; tooltip: string | null } {
   const n = Number(v);
-  if (!n || isNaN(n)) return "-";
+  if (!n || isNaN(n)) return { display: "-", tooltip: null };
+  // Full decimal: enough digits to distinguish weights (up to 10 significant)
+  const display = n.toFixed(Math.max(2, -Math.floor(Math.log10(Math.abs(n))) + 3));
+  // Reciprocal fraction tooltip when denominator is close to an integer
   const recip = 1 / n;
   const rounded = Math.round(recip);
-  // If reciprocal is close to an integer (within 1%), show as fraction
+  let tooltip: string | null = null;
   if (rounded >= 2 && Math.abs(recip - rounded) / rounded < 0.01) {
-    return `1/${rounded}`;
+    tooltip = `≈ 1/${rounded}`;
   }
-  return formatDetailValue(v);
+  return { display, tooltip };
 }
 
 function EventDetailPanel({ event }: { event: NetworkEvent }) {
@@ -2578,7 +2582,7 @@ function formatDetailValue(v: unknown): string {
   if (typeof v === "boolean") return v ? "Yes" : "No";
   if (typeof v === "number") {
     if (v === 0) return "0";
-    if (Math.abs(v) < 0.01 && v !== 0) return v.toExponential(2);
+    if (Math.abs(v) < 0.0001 && v !== 0) return v.toFixed(-Math.floor(Math.log10(Math.abs(v))) + 3);
     if (Math.abs(v) < 1) return v.toPrecision(3);
     return v.toLocaleString();
   }
