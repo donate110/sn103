@@ -29,11 +29,11 @@ PROVER_BINARY = ensure_binary("djinn-tlsn-prover")
 NOTARY_HOST = os.getenv("TLSN_NOTARY_HOST", "notary.pse.dev")
 NOTARY_PORT = int(os.getenv("TLSN_NOTARY_PORT", "443"))
 
-# When True (default), refuse to fall back to the centralized PSE notary.
-# Miners should only generate proofs via peer notaries assigned by validators.
-# Set TLSN_ALLOW_PSE_FALLBACK=true during transition if peer notaries aren't
-# available yet on the network.
-REQUIRE_PEER_NOTARY = os.getenv("TLSN_ALLOW_PSE_FALLBACK", "false").lower() not in ("true", "1", "yes")
+# When True, refuse to fall back to the centralized PSE notary.
+# During transition: default is False (allow PSE) so miners don't break
+# if their validator hasn't updated to assign peer notaries yet.
+# Once all validators are confirmed assigning peer notaries, flip to True.
+REQUIRE_PEER_NOTARY = os.getenv("TLSN_REQUIRE_PEER_NOTARY", "false").lower() in ("true", "1", "yes")
 
 # Headers whose values should be redacted from the proof
 REDACT_HEADERS = os.getenv("TLSN_REDACT_HEADERS", "authorization,apikey,x-api-key")
@@ -86,7 +86,11 @@ async def generate_proof(
     host = notary_host or NOTARY_HOST
     port = notary_port or NOTARY_PORT
 
-    # Reject centralized PSE notary unless explicitly allowed
+    # Warn when falling back to centralized PSE notary.
+    # During transition, validators may not yet assign peer notaries,
+    # so we allow PSE with a deprecation warning rather than hard-blocking.
+    # Once all validators are updated, set TLSN_ALLOW_PSE_FALLBACK=false
+    # to hard-block PSE.
     if not notary_host and host == "notary.pse.dev":
         try:
             from djinn_miner.api.metrics import CENTRALIZED_NOTARY_FALLBACKS
@@ -108,7 +112,7 @@ async def generate_proof(
             "using_centralized_notary_fallback",
             host=host,
             msg="No peer notary assigned — falling back to centralized notary. "
-            "Set TLSN_ALLOW_PSE_FALLBACK=false to block this (recommended).",
+            "This will be blocked in a future update.",
         )
 
     # Resolve redirects: the prover can't follow them, so we do a HEAD

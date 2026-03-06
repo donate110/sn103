@@ -78,14 +78,14 @@ class TestPSEFallbackBlocking:
         assert result.success is True
 
     def test_env_parsing_logic(self) -> None:
-        """TLSN_ALLOW_PSE_FALLBACK env var parsing produces correct REQUIRE_PEER_NOTARY."""
+        """TLSN_REQUIRE_PEER_NOTARY env var parsing produces correct REQUIRE_PEER_NOTARY."""
         for val, expected_require in [
-            ("false", True), ("False", True), ("no", True), ("0", True),
-            ("true", False), ("True", False), ("yes", False), ("1", False),
+            ("true", True), ("True", True), ("yes", True), ("1", True),
+            ("false", False), ("False", False), ("no", False), ("0", False),
         ]:
-            result = val.lower() not in ("true", "1", "yes")
+            result = val.lower() in ("true", "1", "yes")
             assert result == expected_require, (
-                f"TLSN_ALLOW_PSE_FALLBACK={val} should mean REQUIRE_PEER_NOTARY={expected_require}"
+                f"TLSN_REQUIRE_PEER_NOTARY={val} should mean REQUIRE_PEER_NOTARY={expected_require}"
             )
 
     @pytest.mark.asyncio
