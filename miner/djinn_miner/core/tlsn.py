@@ -140,9 +140,24 @@ async def generate_proof(
 
     try:
         if notary_ws and notary_host:
-            return await _run_prover_via_ws(
+            result = await _run_prover_via_ws(
                 url, notary_host, port, output_path, timeout,
             )
+            # If peer notary failed, fall back to PSE rather than returning error
+            if not result.success and not REQUIRE_PEER_NOTARY:
+                log.warning(
+                    "peer_notary_failed_pse_fallback",
+                    peer_host=notary_host,
+                    peer_port=port,
+                    error=result.error[:100],
+                )
+                try:
+                    from djinn_miner.api.metrics import CENTRALIZED_NOTARY_FALLBACKS
+                    CENTRALIZED_NOTARY_FALLBACKS.inc()
+                except Exception:
+                    pass
+                return await _run_prover(url, NOTARY_HOST, NOTARY_PORT, output_path, timeout)
+            return result
         return await _run_prover(url, host, port, output_path, timeout)
     except Exception:
         # Ensure temp dir is cleaned up on any unexpected exception
@@ -322,7 +337,7 @@ async def _run_prover_via_ws(
             async with websockets.client.connect(
                 ws_url,
                 max_size=10 * 1024 * 1024,  # 10 MB — MPC messages can be large
-                open_timeout=10.0,
+                open_timeout=20.0,
                 close_timeout=5.0,
             ) as ws:
                 async def tcp_to_ws() -> None:
