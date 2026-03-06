@@ -155,6 +155,7 @@ interface AttestationEntry {
   verified: boolean;
   server_name: string | null;
   miner_uid: number | null;
+  notary_uid: number | null;
   elapsed_s: number | null;
   error: string | null;
   created_at: number;
@@ -1085,6 +1086,9 @@ interface MinerScoreResult {
   health_checks_total?: number;
   health_checks_responded?: number;
   consecutive_epochs?: number;
+  notary_duties_assigned?: number;
+  notary_duties_completed?: number;
+  notary_reliability?: number;
 }
 
 function MinerLookup() {
@@ -1169,6 +1173,7 @@ function MinerLookup() {
                       <th className="px-2 py-1.5 text-right font-medium" title="Queries correct / total">Queries</th>
                       <th className="px-2 py-1.5 text-right font-medium" title="Attestations valid / total">Attests</th>
                       <th className="px-2 py-1.5 text-right font-medium" title="Health checks responded / total">Health</th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="Notary duties completed / assigned">Notary</th>
                       <th className="px-2 py-1.5 text-right font-medium" title="Consecutive epochs">Epochs</th>
                     </tr>
                   </thead>
@@ -1183,6 +1188,7 @@ function MinerLookup() {
                         <td className="px-2 py-1.5 font-mono text-right text-slate-400">{r.queries_correct}/{r.queries_total}</td>
                         <td className="px-2 py-1.5 font-mono text-right text-slate-400">{r.attestations_valid}/{r.attestations_total}</td>
                         <td className="px-2 py-1.5 font-mono text-right text-slate-400">{r.health_checks_responded}/{r.health_checks_total}</td>
+                        <td className="px-2 py-1.5 font-mono text-right text-slate-400">{r.notary_duties_completed ?? 0}/{r.notary_duties_assigned ?? 0}{r.notary_reliability !== undefined && r.notary_duties_assigned ? <span className="text-cyan-600 ml-1">({fmtPct(r.notary_reliability)})</span> : ""}</td>
                         <td className="px-2 py-1.5 font-mono text-right text-slate-400">{r.consecutive_epochs}</td>
                       </tr>
                     ))}
@@ -1411,6 +1417,12 @@ function EventDetailPanel({ event }: { event: NetworkEvent }) {
               <span className="text-cyan-900 font-mono truncate block">{d.url.replace(/^https?:\/\//, "").slice(0, 40)}</span>
             </div>
           )}
+          {d.peer_notarized !== undefined && (
+            <div>
+              <span className="text-cyan-600 font-medium block">Peer Notarized</span>
+              <span className="text-cyan-900 font-mono">{formatDetailValue(d.peer_notarized)}</span>
+            </div>
+          )}
           <div>
             <span className="text-cyan-600 font-medium block">Time</span>
             <span className="text-cyan-900">{formatTimeAgo(event.timestamp)}</span>
@@ -1418,7 +1430,8 @@ function EventDetailPanel({ event }: { event: NetworkEvent }) {
         </div>
         {miners.length > 0 ? (
           <MinerResultTable miners={miners} columns={[
-            { key: "uid", label: "UID" },
+            { key: "uid", label: "Prover" },
+            { key: "notary_uid", label: "Notary" },
             { key: "valid", label: "Valid" },
             { key: "latency", label: "Latency (s)", align: "right" },
             { key: "server", label: "Server" },
@@ -2083,7 +2096,8 @@ function AttestationsTab({
                   <th className="px-3 py-2 font-medium">URL</th>
                   <th className="px-3 py-2 font-medium">Status</th>
                   <th className="px-3 py-2 font-medium">Verified</th>
-                  <th className="px-3 py-2 font-medium">Miner</th>
+                  <th className="px-3 py-2 font-medium">Prover</th>
+                  <th className="px-3 py-2 font-medium">Notary</th>
                   <th className="px-3 py-2 font-medium">Server</th>
                   <th className="px-3 py-2 font-medium">Latency</th>
                 </tr>
@@ -2121,6 +2135,9 @@ function AttestationsTab({
                       </td>
                       <td className="px-3 py-2 text-center text-slate-600">
                         {a.miner_uid !== null ? `UID ${a.miner_uid}` : "\u2014"}
+                      </td>
+                      <td className="px-3 py-2 text-center text-slate-600">
+                        {a.notary_uid !== null ? <span className="text-cyan-600">UID {a.notary_uid}</span> : <span className="text-slate-300">PSE</span>}
                       </td>
                       <td className="px-3 py-2 text-slate-600">
                         {a.server_name || "\u2014"}
