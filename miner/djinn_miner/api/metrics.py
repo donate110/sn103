@@ -79,6 +79,11 @@ ATTESTATION_DURATION = Histogram(
     buckets=(1.0, 5.0, 10.0, 20.0, 30.0, 45.0, 60.0),
 )
 
+CENTRALIZED_NOTARY_FALLBACKS = Counter(
+    "djinn_miner_centralized_notary_fallbacks_total",
+    "Times the miner fell back to the centralized notary.pse.dev instead of a peer notary",
+)
+
 NOTARY_ENABLED = Gauge(
     "djinn_miner_notary_enabled",
     "Whether the peer notary sidecar is running (1=yes, 0=no)",

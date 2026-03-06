@@ -103,19 +103,37 @@ def assign_peer_notary(
     prover_uid: int,
     notaries: list[PeerNotary],
     prover_ip: str | None = None,
+    assignment_counts: dict[int, int] | None = None,
+    max_per_notary: int = 4,
+    exclude_uids: set[int] | None = None,
 ) -> PeerNotary | None:
     """Randomly assign a peer notary for a prover miner.
 
     Excludes the prover itself and any notary on the same IP address
     (same operator running multiple miners on one machine could collude).
+
+    Args:
+        assignment_counts: Track how many times each notary UID has been
+            assigned in the current round. Mutated in-place on assignment.
+            When None, no load-balancing cap is applied.
+        max_per_notary: Maximum assignments per notary per round.
+        exclude_uids: Notary UIDs to exclude (e.g. previously failed notaries).
+
     Returns None if no eligible notary is available.
     """
     eligible = [n for n in notaries if n.uid != prover_uid]
     if prover_ip:
         eligible = [n for n in eligible if n.ip != prover_ip]
+    if exclude_uids:
+        eligible = [n for n in eligible if n.uid not in exclude_uids]
+    if assignment_counts is not None:
+        eligible = [n for n in eligible if assignment_counts.get(n.uid, 0) < max_per_notary]
     if not eligible:
         return None
-    return random.choice(eligible)
+    chosen = random.choice(eligible)
+    if assignment_counts is not None:
+        assignment_counts[chosen.uid] = assignment_counts.get(chosen.uid, 0) + 1
+    return chosen
 
 
 # ---------------------------------------------------------------------------
@@ -869,6 +887,12 @@ async def challenge_miners_attestation(
             return ar
 
         # Phase 2: full challenge only capable miners
+        # Load-balance notary assignments: cap concurrent provers per notary.
+        # With sem=4, a notary handles at most 4 MPC sessions at once; we cap
+        # total assignments per notary so each one isn't overwhelmed across
+        # the full round.  max_per_notary scales with the notary pool size.
+        _notary_counts: dict[int, int] = {}
+        _max_per_notary = max(4, len(capable) // max(len(peer_notaries), 1))
         sem = asyncio.Semaphore(4)
         per_miner: list[dict] = []
 
@@ -883,7 +907,10 @@ async def challenge_miners_attestation(
 
             # Assign a peer notary if available (backwards-compat: omit fields
             # for old miners that don't understand notary_host/notary_port)
-            assigned_notary = assign_peer_notary(uid, peer_notaries, prover_ip=axon.get("ip"))
+            assigned_notary = assign_peer_notary(
+                uid, peer_notaries, prover_ip=axon.get("ip"),
+                assignment_counts=_notary_counts, max_per_notary=_max_per_notary,
+            )
 
             async with sem:
                 start = time.perf_counter()

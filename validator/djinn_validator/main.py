@@ -374,12 +374,22 @@ async def epoch_loop(
                             success=True,
                         )
                 else:
+                    weight_error = neuron.last_weight_error or "Unknown error"
+                    if activity is not None:
+                        activity.record(
+                            ActivityCategory.WEIGHT_SET,
+                            f"Failed to set weights for {n_miners} miners: {weight_error}",
+                            n_miners=n_miners, is_active=is_active,
+                            success=False,
+                            error=weight_error,
+                        )
                     if telemetry:
                         telemetry.record(
                             "weight_set_failed",
-                            f"Failed to set weights for {n_miners} miners",
+                            f"Failed to set weights for {n_miners} miners: {weight_error}",
                             n_miners=n_miners, is_active=is_active,
                             success=False,
+                            error=weight_error,
                         )
                 log.info("weights_updated", n_miners=n_miners, active=is_active, success=success)
                 # Reset per-epoch metrics after weight setting (increments

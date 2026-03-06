@@ -848,6 +848,10 @@ def create_app(
         import json as _json
         import time as _t
         import httpx
+        from djinn_validator.core.challenges import (
+            assign_peer_notary,
+            discover_peer_notaries,
+        )
 
         start = _t.perf_counter()
         ATTESTATION_DISPATCHED.inc()
@@ -879,6 +883,17 @@ def create_app(
                         }
                 except (IndexError, KeyError, AttributeError) as exc:
                     log.warning("attest_axon_lookup_failed", uid=uid, error=str(exc))
+
+        # Discover peer notaries from the metagraph
+        peer_notaries = []
+        if axon_by_uid:
+            try:
+                peer_notaries = await discover_peer_notaries(
+                    _attest_client, list(axon_by_uid.values())
+                )
+                log.info("attest_peer_notaries_discovered", count=len(peer_notaries))
+            except Exception as e:
+                log.warning("attest_peer_notary_discovery_failed", error=str(e))
 
         # Smart miner selection: proven miners first, then unproven
         candidates: list[tuple[dict, str]] = []  # (axon_info, tier)
@@ -923,22 +938,42 @@ def create_app(
         )
 
         # Fan out to up to 3 miners in parallel — first success wins
-        _body = _json.dumps({"url": req.url, "request_id": req.request_id}).encode()
         _auth_hdrs: dict[str, str] = {}
-        if neuron and neuron.wallet:
-            from djinn_validator.api.middleware import create_signed_headers
-            _auth_hdrs = create_signed_headers("/v1/attest", _body, neuron.wallet)
 
         last_error = "No miners attempted"
         miner_data: dict | None = None
         selected: dict | None = None
         proof_hex: str | None = None
+        selected_notary_uid: int | None = None
+        selected_notary_pubkey: str | None = None
+        _failed_notary_uids: set[int] = set()
+        _notary_assignment_counts: dict[int, int] = {}
 
         async def _try_miner(axon: dict, tier: str) -> tuple[dict, dict, str, float] | None:
             """Try one miner. Returns (axon, data, proof_hex, elapsed_s) on success, None on failure."""
+            nonlocal selected_notary_uid, selected_notary_pubkey
             attempt_start = _t.perf_counter()
             miner_url = axon.get("_url") or f"http://{axon['ip']}:{axon['port']}/v1/attest"
             timeout = 210.0 if tier == "proven" else 60.0 if tier == "redemption" else 120.0
+
+            # Assign a peer notary, excluding previously failed notaries
+            assigned_notary = assign_peer_notary(
+                axon["uid"], peer_notaries, prover_ip=axon.get("ip"),
+                assignment_counts=_notary_assignment_counts,
+                max_per_notary=2,
+                exclude_uids=_failed_notary_uids,
+            )
+
+            payload: dict = {"url": req.url, "request_id": req.request_id}
+            if assigned_notary:
+                payload["notary_host"] = assigned_notary.ip
+                payload["notary_port"] = assigned_notary.port
+                payload["notary_ws"] = True
+
+            _body = _json.dumps(payload).encode()
+            if neuron and neuron.wallet:
+                from djinn_validator.api.middleware import create_signed_headers
+                _auth_hdrs.update(create_signed_headers("/v1/attest", _body, neuron.wallet))
 
             log.info(
                 "attest_dispatching",
@@ -947,6 +982,7 @@ def create_app(
                 miner_uid=axon["uid"],
                 tier=tier,
                 timeout_s=timeout,
+                peer_notary=assigned_notary.uid if assigned_notary else None,
             )
 
             try:
@@ -962,6 +998,8 @@ def create_app(
                 if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=elapsed, proof_valid=False)
+                if assigned_notary:
+                    _failed_notary_uids.add(assigned_notary.uid)
                 return None
 
             if resp.status_code != 200:
@@ -969,6 +1007,8 @@ def create_app(
                 if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
+                if assigned_notary:
+                    _failed_notary_uids.add(assigned_notary.uid)
                 return None
 
             try:
@@ -980,7 +1020,7 @@ def create_app(
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
                 return None
 
-            # Miner busy — skip without penalising
+            # Miner busy — skip without penalising (not a notary failure)
             if data.get("busy"):
                 log.info("attest_miner_busy", miner_uid=axon["uid"])
                 return None
@@ -990,6 +1030,9 @@ def create_app(
                 if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
+                # If the error mentions notary/WebSocket, mark that notary as failed
+                if assigned_notary and ("notary" in err.lower() or "websocket" in err.lower() or "bridge" in err.lower()):
+                    _failed_notary_uids.add(assigned_notary.uid)
                 log.warning("attest_miner_failed", miner_uid=axon["uid"], error=err)
                 return None
 
@@ -1000,6 +1043,11 @@ def create_app(
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
                 return None
+
+            # Store the assigned notary info for verification and logging
+            if assigned_notary:
+                selected_notary_uid = assigned_notary.uid
+                selected_notary_pubkey = assigned_notary.pubkey_hex
 
             return (axon, data, phex, _t.perf_counter() - attempt_start)
 
@@ -1085,7 +1133,8 @@ def create_app(
                 attestation_log.log_attestation(
                     url=req.url, request_id=req.request_id,
                     success=False, verified=False,
-                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
+                    miner_uid=selected["uid"], notary_uid=selected_notary_uid,
+                    elapsed_s=round(elapsed, 2),
                     error="Miner returned invalid proof hex",
                 )
             return AttestResponse(
@@ -1098,7 +1147,11 @@ def create_app(
 
         try:
             verify_result = await asyncio.wait_for(
-                tlsn_verifier.verify_proof(proof_bytes, expected_server=expected_server),
+                tlsn_verifier.verify_proof(
+                    proof_bytes,
+                    expected_server=expected_server,
+                    expected_notary_key=selected_notary_pubkey,
+                ),
                 timeout=30.0,
             )
         except TimeoutError:
@@ -1114,7 +1167,8 @@ def create_app(
                     url=req.url, request_id=req.request_id,
                     success=True, verified=False,
                     server_name=miner_data.get("server_name"),
-                    miner_uid=selected["uid"], elapsed_s=round(elapsed, 2),
+                    miner_uid=selected["uid"], notary_uid=selected_notary_uid,
+                    elapsed_s=round(elapsed, 2),
                     error="Proof verification timed out",
                 )
             return AttestResponse(
@@ -1125,6 +1179,8 @@ def create_app(
                 proof_hex=proof_hex,
                 server_name=miner_data.get("server_name"),
                 timestamp=miner_data.get("timestamp", 0),
+                miner_uid=selected["uid"] if selected else None,
+                notary_uid=selected_notary_uid,
                 error="Proof verification timed out",
             )
 
@@ -1162,6 +1218,7 @@ def create_app(
                 verified=verify_result.verified,
                 server_name=verify_result.server_name,
                 miner_uid=selected["uid"],
+                notary_uid=selected_notary_uid,
                 elapsed_s=round(elapsed, 2),
                 error="Site served bot challenge" if is_blocked else (verify_result.error if not verify_result.verified else None),
             )
@@ -1176,6 +1233,7 @@ def create_app(
             server_name=verify_result.server_name or miner_data.get("server_name"),
             timestamp=miner_data.get("timestamp", 0),
             miner_uid=selected["uid"] if selected else None,
+            notary_uid=selected_notary_uid,
             blocked=is_blocked,
             error=verify_result.error if not verify_result.verified else None,
         )

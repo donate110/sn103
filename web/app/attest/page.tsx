@@ -196,6 +196,17 @@ export default function AttestPage() {
         </ol>
       </div>
 
+      {/* Trust differentiator */}
+      <div className="mb-8 rounded-lg border border-indigo-200 bg-indigo-50 p-6">
+        <h2 className="text-lg font-semibold text-indigo-900 mb-2">The first trustless attestation service</h2>
+        <p className="text-sm text-indigo-800">
+          Every other TLSNotary service requires you to trust whoever runs the notary server.
+          Djinn is different: validators on Bittensor Subnet 103 randomly assign two independent miners
+          on separate IP addresses — one to fetch the page, one to notarize — so no single party
+          can tamper with your proof. Decentralized, cryptographic, and trust-free by design.
+        </p>
+      </div>
+
       {/* Form */}
       <div className="rounded-lg border border-slate-200 bg-white p-6">
         <form onSubmit={handleSubmit}>
@@ -314,6 +325,16 @@ export default function AttestPage() {
         <p>
           Use cases include legal evidence, journalism verification, governance transparency,
           and academic citations with permanent, cryptographic provenance.
+        </p>
+        <h3 className="font-semibold text-slate-700 pt-4">Why Djinn attestations are different</h3>
+        <p>
+          Existing TLSNotary services are centralized — you have to trust the operator&apos;s notary
+          server not to collude or fabricate proofs. Djinn eliminates that trust assumption entirely.
+          Bittensor Subnet 103 validators randomly select two miners on different IP addresses for
+          each attestation: one acts as the prover, the other as the notary. Neither knows in advance
+          they&apos;ll be paired, and neither can influence the assignment. The result is a
+          cryptographic proof with no single point of trust — something that&apos;s only possible
+          with a decentralized network.
         </p>
       </div>
     </div>

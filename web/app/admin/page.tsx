@@ -1812,6 +1812,7 @@ interface TestAttestResult {
   success: boolean;
   verified?: boolean;
   miner_uid?: number;
+  notary_uid?: number | null;
   server_name?: string;
   elapsed_s?: number;
   error?: string;
@@ -1850,13 +1851,21 @@ function TestResultViewer({ result }: { result: TestAttestResult }) {
             </span>
           )}
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
           {result.miner_uid !== undefined && (
             <div>
-              <span className="text-slate-500 block">Miner</span>
+              <span className="text-slate-500 block">Prover</span>
               <span className="text-slate-800 font-mono">UID {result.miner_uid}</span>
             </div>
           )}
+          <div>
+            <span className="text-slate-500 block">Notary</span>
+            {result.notary_uid != null ? (
+              <span className="text-cyan-600 font-mono">UID {result.notary_uid}</span>
+            ) : (
+              <span className="text-slate-400 font-mono">PSE</span>
+            )}
+          </div>
           {result.server_name && (
             <div>
               <span className="text-slate-500 block">Server</span>
@@ -1997,6 +2006,11 @@ function AttestationsTab({
 
   const successCount = attestations.filter((a) => a.success).length;
   const verifiedCount = attestations.filter((a) => a.verified).length;
+  const centralizedFallbacks = attestations.filter((a) => a.notary_uid === null && a.success);
+  const lastCentralized = centralizedFallbacks.length > 0
+    ? Math.max(...centralizedFallbacks.map((a) => a.created_at))
+    : null;
+  const peerNotarized = attestations.filter((a) => a.notary_uid !== null).length;
   const reachableValidators = validators.filter((v) => !v.error);
 
   return (
@@ -2025,11 +2039,40 @@ function AttestationsTab({
         </div>
       </div>
 
+      {/* Centralized Notary Fallback Tracker */}
+      <div className={`rounded-xl border p-4 ${centralizedFallbacks.length === 0 ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className={`text-xs font-medium ${centralizedFallbacks.length === 0 ? "text-emerald-600" : "text-amber-600"}`}>
+              Centralized Notary Fallback (notary.pse.dev)
+            </div>
+            <div className={`text-2xl font-bold mt-1 ${centralizedFallbacks.length === 0 ? "text-emerald-900" : "text-amber-900"}`}>
+              {centralizedFallbacks.length} <span className="text-sm font-normal">/ {attestations.length} attestations</span>
+            </div>
+            <div className="text-xs mt-1 text-slate-500">
+              Peer notarized: {peerNotarized}
+              {lastCentralized ? (
+                <> &middot; Last centralized: {new Date(lastCentralized * 1000).toLocaleDateString()}{" "}
+                  {(() => {
+                    const daysAgo = Math.floor((Date.now() / 1000 - lastCentralized) / 86400);
+                    return daysAgo >= 7
+                      ? <span className="text-emerald-600 font-medium">({daysAgo}d ago — safe to remove from codebase)</span>
+                      : <span className="text-amber-600">({daysAgo}d ago)</span>;
+                  })()}
+                </>
+              ) : (
+                <> &middot; <span className="text-emerald-600 font-medium">Never used — safe to remove from codebase</span></>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Test Attestation Panel */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
           <h3 className="text-sm font-medium text-slate-700">Test Attestation</h3>
-          <p className="text-[11px] text-slate-400 mt-0.5">Send a test attestation request to a validator. The validator will pick a miner to generate a TLSNotary proof.</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">Send a test attestation request to a validator. The validator will pick a prover miner and assign a peer notary to generate a TLSNotary proof.</p>
         </div>
         <div className="p-4 space-y-3">
           <div className="flex flex-col sm:flex-row gap-3">
@@ -2063,7 +2106,7 @@ function AttestationsTab({
 
           {testRunning && (
             <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-lg text-xs text-cyan-700">
-              Attestation in progress... This may take up to 2 minutes while the miner generates a TLSNotary proof.
+              Attestation in progress... This may take up to 2 minutes while the prover generates a TLSNotary proof via a peer notary.
             </div>
           )}
 

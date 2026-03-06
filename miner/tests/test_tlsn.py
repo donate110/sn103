@@ -63,7 +63,10 @@ class TestGenerateProof:
             proc.communicate = AsyncMock(return_value=(stdout, b""))
             return proc
 
-        with patch("djinn_miner.core.tlsn.asyncio.create_subprocess_exec", side_effect=mock_subprocess):
+        with (
+            patch("djinn_miner.core.tlsn.asyncio.create_subprocess_exec", side_effect=mock_subprocess),
+            patch("djinn_miner.core.tlsn.REQUIRE_PEER_NOTARY", False),
+        ):
             result = await generate_proof(
                 "https://api.the-odds-api.com/v4/sports/nba/odds?apiKey=test",
                 timeout=10.0,
@@ -76,9 +79,12 @@ class TestGenerateProof:
     @pytest.mark.asyncio
     async def test_binary_not_found(self) -> None:
         """Missing binary returns graceful error."""
-        with patch(
-            "djinn_miner.core.tlsn.asyncio.create_subprocess_exec",
-            side_effect=FileNotFoundError("not found"),
+        with (
+            patch(
+                "djinn_miner.core.tlsn.asyncio.create_subprocess_exec",
+                side_effect=FileNotFoundError("not found"),
+            ),
+            patch("djinn_miner.core.tlsn.REQUIRE_PEER_NOTARY", False),
         ):
             result = await generate_proof("https://example.com")
 
@@ -108,9 +114,12 @@ class TestGenerateProof:
             # Subsequent calls (proc.wait()) — succeed
             return await coro
 
-        with patch("djinn_miner.core.tlsn.asyncio.create_subprocess_exec", side_effect=mock_subprocess):
-            with patch("djinn_miner.core.tlsn.asyncio.wait_for", side_effect=mock_wait_for):
-                result = await generate_proof("https://example.com", timeout=0.1)
+        with (
+            patch("djinn_miner.core.tlsn.asyncio.create_subprocess_exec", side_effect=mock_subprocess),
+            patch("djinn_miner.core.tlsn.asyncio.wait_for", side_effect=mock_wait_for),
+            patch("djinn_miner.core.tlsn.REQUIRE_PEER_NOTARY", False),
+        ):
+            result = await generate_proof("https://example.com", timeout=0.1)
 
         assert result.success is False
         assert "timed out" in result.error
@@ -124,7 +133,10 @@ class TestGenerateProof:
             proc.communicate = AsyncMock(return_value=(b"", b"TLS handshake failed"))
             return proc
 
-        with patch("djinn_miner.core.tlsn.asyncio.create_subprocess_exec", side_effect=mock_subprocess):
+        with (
+            patch("djinn_miner.core.tlsn.asyncio.create_subprocess_exec", side_effect=mock_subprocess),
+            patch("djinn_miner.core.tlsn.REQUIRE_PEER_NOTARY", False),
+        ):
             result = await generate_proof("https://example.com")
 
         assert result.success is False

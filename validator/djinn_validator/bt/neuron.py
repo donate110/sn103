@@ -227,17 +227,24 @@ class DjinnValidator:
                 wait_for_finalization=False,
             )
             success = bool(result.success if hasattr(result, 'success') else result)
+            error_msg = getattr(result, 'error', None) or getattr(result, 'message', None)
+            self._last_weight_error = str(error_msg) if error_msg and not success else None
             log.info(
                 "weights_set",
                 uids=uids,
                 success=success,
-                error=getattr(result, 'error', None),
-                message=getattr(result, 'message', None),
+                error=error_msg,
             )
             return success
         except Exception as e:
+            self._last_weight_error = str(e)
             log.error("set_weights_failed", error=str(e))
             return False
+
+    @property
+    def last_weight_error(self) -> str | None:
+        """Last error from set_weights, if any."""
+        return getattr(self, "_last_weight_error", None)
 
     def get_miner_uids(self) -> list[int]:
         """Get UIDs of all active miners (non-validators) on the subnet."""
