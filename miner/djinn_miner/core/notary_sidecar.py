@@ -108,7 +108,7 @@ class NotarySidecar:
             log.error("notary_sidecar_binary_missing", binary=binary)
             return False
 
-        # Read the first few lines of stderr to capture the pubkey log line.
+        # Read the first few lines of stdout to capture the pubkey log line.
         # The notary server logs "Notary public key" with the hex key on startup.
         pubkey = await self._read_pubkey(timeout=10.0)
         if not pubkey:
@@ -127,14 +127,14 @@ class NotarySidecar:
         return True
 
     async def _read_pubkey(self, timeout: float = 10.0) -> str:
-        """Read stderr lines until we find the notary public key, or timeout."""
-        if not self._process or not self._process.stderr:
+        """Read stdout lines until we find the notary public key, or timeout."""
+        if not self._process or not self._process.stdout:
             return ""
 
         try:
             async with asyncio.timeout(timeout):
                 while True:
-                    line = await self._process.stderr.readline()
+                    line = await self._process.stdout.readline()
                     if not line:
                         break
                     raw = line.decode(errors="replace").strip()

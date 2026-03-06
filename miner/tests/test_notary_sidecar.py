@@ -34,19 +34,19 @@ class TestNotarySidecar:
 
     @pytest.mark.asyncio
     async def test_start_success(self) -> None:
-        """Successful start extracts pubkey from stderr and reports running."""
+        """Successful start extracts pubkey from stdout and reports running."""
         fake_pubkey = "a" * 66
 
         async def mock_readline():
             return f'  pubkey={fake_pubkey} "Notary public key"\n'.encode()
 
-        mock_stderr = MagicMock()
-        mock_stderr.readline = mock_readline
+        mock_stdout = MagicMock()
+        mock_stdout.readline = mock_readline
 
         mock_proc = MagicMock()
         mock_proc.pid = 12345
         mock_proc.returncode = None
-        mock_proc.stderr = mock_stderr
+        mock_proc.stdout = mock_stdout
 
         with (
             patch("djinn_miner.core.notary_sidecar.shutil.which", return_value="/usr/bin/djinn-tlsn-notary"),
