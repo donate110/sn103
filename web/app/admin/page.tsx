@@ -2701,13 +2701,23 @@ async function fetchAttestationData(): Promise<AttestationEntry[]> {
     const { validators } = (await discoverRes.json()) as { validators: ValidatorNode[] };
     if (validators.length === 0) return [];
 
-    const v = validators[0];
-    const res = await fetch(`/api/validators/${v.uid}/v1/admin/attestations?limit=50`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.attestations || [];
+    // Fetch from all validators in parallel and merge
+    const results = await Promise.allSettled(
+      validators.map((v) =>
+        fetch(`/api/validators/${v.uid}/v1/admin/attestations?limit=50`, {
+          signal: AbortSignal.timeout(5000),
+        }).then((r) => (r.ok ? r.json() : { attestations: [] }))
+      )
+    );
+    const all: AttestationEntry[] = [];
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        all.push(...(r.value.attestations || []));
+      }
+    }
+    // Sort by timestamp descending, keep top 50
+    all.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return all.slice(0, 50);
   } catch {
     return [];
   }
