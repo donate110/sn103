@@ -876,11 +876,27 @@ async def challenge_miners_attestation(
         peer_notaries = await notary_task
 
         ar.capable = len(capable)
+
+        # Mark miners as notary-capable if their IP hosts a notary sidecar.
+        # Multiple miners on the same server share the sidecar, so all
+        # miners on a notary IP are considered capable.
+        notary_ips = {n.ip for n in peer_notaries}
+        notary_capable_count = 0
+        for axon in reachable:
+            uid = axon.get("uid")
+            hotkey = axon.get("hotkey", "")
+            if uid is not None and hotkey:
+                m = scorer.get_or_create(uid, hotkey)
+                if axon.get("ip") in notary_ips:
+                    m.notary_capable = True
+                    notary_capable_count += 1
+
         log.info(
             "attest_probe_complete",
             total=len(reachable),
             capable=len(capable),
             peer_notaries=len(peer_notaries),
+            notary_capable_miners=notary_capable_count,
         )
 
         if not capable:

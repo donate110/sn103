@@ -58,6 +58,7 @@ class MinerMetrics:
     # ── Notary service metrics (peer-to-peer notarization) ──
     notary_duties_assigned: int = 0  # times assigned as notary for another miner
     notary_duties_completed: int = 0  # times the proof using this notary verified
+    notary_capable: bool = False  # running a notary sidecar (discovered this epoch)
 
     # ── Shared metrics ──
     health_checks_total: int = 0
@@ -283,6 +284,7 @@ class MinerScorer:
                 "notary_duties_assigned": m.notary_duties_assigned,
                 "notary_duties_completed": m.notary_duties_completed,
                 "notary_reliability": round(m.notary_reliability(), 4),
+                "notary_capable": m.notary_capable,
             }
 
         return self._normalize(raw), breakdowns
@@ -315,6 +317,10 @@ class MinerScorer:
                 )
         return scores
 
+    # Miners without a notary sidecar get this multiplier on attestation score.
+    # They benefit from the network's notary infrastructure without contributing.
+    NOTARY_FREERIDER_PENALTY = 0.5
+
     def _compute_attestation_scores(self, miners: list[MinerMetrics]) -> dict[int, float]:
         """Compute per-miner attestation scores (unnormalized 0-1 range).
 
@@ -322,9 +328,9 @@ class MinerScorer:
         - Proof validity (60%): did TLSNotary proof verify?
         - Speed (40%): how fast was the attestation?
 
-        TLSNotary is mandatory for attestation (not optional like sports
-        coverage). A miner with no attestation challenges gets 0 — no free
-        speed credit for miners that haven't done the work.
+        Miners not running a notary sidecar receive a 50% penalty on their
+        attestation score. This incentivizes every operator to contribute
+        notary capacity proportional to their miner count.
         """
         speed_scores = self._normalize_speed(miners, use_attestation=True)
 
@@ -333,10 +339,13 @@ class MinerScorer:
             if m.attestations_total == 0:
                 scores[m.uid] = 0.0
             else:
-                scores[m.uid] = (
+                base = (
                     self.W_ATTEST_VALIDITY * m.attestation_validity_score()
                     + self.W_ATTEST_SPEED * speed_scores.get(m.uid, 0.0)
                 )
+                if not m.notary_capable:
+                    base *= self.NOTARY_FREERIDER_PENALTY
+                scores[m.uid] = base
         return scores
 
     def _compute_empty_weights(self) -> dict[int, float]:
@@ -389,6 +398,7 @@ class MinerScorer:
                 "notary_duties_assigned": m.notary_duties_assigned,
                 "notary_duties_completed": m.notary_duties_completed,
                 "notary_reliability": round(m.notary_reliability(), 4),
+                "notary_capable": m.notary_capable,
             }
 
         return self._normalize(raw), breakdowns
@@ -541,6 +551,7 @@ class MinerScorer:
             # Reset notary metrics
             m.notary_duties_assigned = 0
             m.notary_duties_completed = 0
+            m.notary_capable = False
             # Reset health checks
             m.health_checks_total = 0
             m.health_checks_responded = 0
