@@ -50,11 +50,17 @@ class AttestationLog:
                 verified      INTEGER NOT NULL DEFAULT 0,
                 server_name   TEXT,
                 miner_uid     INTEGER,
+                notary_uid    INTEGER,
                 elapsed_s     REAL,
                 error         TEXT,
                 created_at    INTEGER NOT NULL
             )
         """)
+        # Migration: add notary_uid column if upgrading from older schema
+        try:
+            self._conn.execute("ALTER TABLE attestation_log ADD COLUMN notary_uid INTEGER")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
         self._conn.commit()
 
     def log_attestation(
@@ -66,6 +72,7 @@ class AttestationLog:
         verified: bool,
         server_name: str | None = None,
         miner_uid: int | None = None,
+        notary_uid: int | None = None,
         elapsed_s: float | None = None,
         error: str | None = None,
     ) -> None:
@@ -74,12 +81,12 @@ class AttestationLog:
             self._conn.execute(
                 "INSERT INTO attestation_log "
                 "(url, request_id, success, verified, "
-                "server_name, miner_uid, elapsed_s, error, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "server_name, miner_uid, notary_uid, elapsed_s, error, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     url, request_id,
                     int(success), int(verified),
-                    server_name, miner_uid, elapsed_s, error,
+                    server_name, miner_uid, notary_uid, elapsed_s, error,
                     int(time.time()),
                 ),
             )
@@ -105,7 +112,7 @@ class AttestationLog:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, url, request_id, success, verified, "
-                "server_name, miner_uid, elapsed_s, error, created_at "
+                "server_name, miner_uid, notary_uid, elapsed_s, error, created_at "
                 "FROM attestation_log ORDER BY id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
@@ -118,9 +125,10 @@ class AttestationLog:
                 "verified": bool(r[4]),
                 "server_name": r[5],
                 "miner_uid": r[6],
-                "elapsed_s": r[7],
-                "error": r[8],
-                "created_at": r[9],
+                "notary_uid": r[7],
+                "elapsed_s": r[8],
+                "error": r[9],
+                "created_at": r[10],
             }
             for r in rows
         ]

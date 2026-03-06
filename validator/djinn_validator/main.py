@@ -200,15 +200,21 @@ async def epoch_loop(
                 try:
                     ar = await challenge_miners_attestation(scorer, miner_axons, wallet=neuron.wallet)
                     if activity and ar.challenged:
+                        # Count how many miners used peer notaries vs default
+                        peer_notarized = sum(1 for m in ar.miner_results if m.get("peer_notary"))
+                        summary = f"Attestation: {ar.verified}/{ar.challenged} verified ({ar.url.split('/')[2]})"
+                        if peer_notarized:
+                            summary += f" [{peer_notarized} peer-notarized]"
                         activity.record(
                             ActivityCategory.ATTESTATION_CHALLENGE,
-                            f"Attestation: {ar.verified}/{ar.challenged} verified ({ar.url.split('/')[2]})",
+                            summary,
                             challenged=ar.challenged,
                             verified=ar.verified,
                             url=ar.url,
                             reachable=ar.reachable,
                             capable=ar.capable,
-                            miners=ar.miner_results[:50],
+                            peer_notarized=peer_notarized,
+                            miners=ar.miner_results,
                         )
                     if telemetry and ar.challenged:
                         telemetry.record(
@@ -219,7 +225,7 @@ async def epoch_loop(
                             url=ar.url,
                             reachable=ar.reachable,
                             capable=ar.capable,
-                            miners=ar.miner_results[:50],
+                            miners=ar.miner_results,
                         )
                 except Exception as e:
                     log.warning("attest_challenge_error", err=str(e))

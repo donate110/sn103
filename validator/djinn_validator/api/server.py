@@ -1422,6 +1422,9 @@ def create_app(
             "health_checks_total": m.health_checks_total,
             "health_checks_responded": m.health_checks_responded,
             "consecutive_epochs": m.consecutive_epochs,
+            "notary_duties_assigned": m.notary_duties_assigned,
+            "notary_duties_completed": m.notary_duties_completed,
+            "notary_reliability": round(m.notary_reliability(), 4),
         }
 
     # ------------------------------------------------------------------
