@@ -247,6 +247,10 @@ def create_app(
             port=info.port,
         )
 
+    # Notary MPC sessions are stateful and heavy — limit concurrency.
+    # The sidecar can handle a few concurrent sessions but degrades fast.
+    _notary_sem = asyncio.Semaphore(int(os.getenv("NOTARY_MAX_CONCURRENT", "2")))
+
     @app.websocket("/v1/notary/ws")
     async def notary_ws_proxy(ws: WebSocket) -> None:
         """WebSocket-to-TCP proxy for the peer notary MPC handshake.
@@ -255,57 +259,66 @@ def create_app(
         bidirectionally to the local notary sidecar on localhost:7047.
         This lets peers reach the notary through the existing API port
         with zero firewall changes.
+
+        Concurrency is limited by NOTARY_MAX_CONCURRENT (default 2) to
+        prevent overwhelming the notary sidecar.
         """
         if notary_sidecar is None or not notary_sidecar.is_running():
             await ws.close(code=1013, reason="notary not available")
             return
 
+        if _notary_sem.locked():
+            await ws.close(code=1013, reason="notary at capacity")
+            NOTARY_SESSIONS.labels(status="busy").inc()
+            return
+
         await ws.accept()
         NOTARY_SESSIONS.labels(status="connected").inc()
 
-        try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection("127.0.0.1", notary_sidecar.info.port),
-                timeout=5.0,
-            )
-        except (ConnectionRefusedError, TimeoutError, OSError) as e:
-            log.warning("notary_ws_connect_failed", error=str(e))
-            NOTARY_SESSIONS.labels(status="error").inc()
-            await ws.close(code=1013, reason="notary connection failed")
-            return
-
-        async def ws_to_tcp() -> None:
+        async with _notary_sem:
             try:
-                while True:
-                    data = await ws.receive_bytes()
-                    writer.write(data)
-                    await writer.drain()
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection("127.0.0.1", notary_sidecar.info.port),
+                    timeout=5.0,
+                )
+            except (ConnectionRefusedError, TimeoutError, OSError) as e:
+                log.warning("notary_ws_connect_failed", error=str(e))
+                NOTARY_SESSIONS.labels(status="error").inc()
+                await ws.close(code=1013, reason="notary connection failed")
+                return
+
+            async def ws_to_tcp() -> None:
+                try:
+                    while True:
+                        data = await ws.receive_bytes()
+                        writer.write(data)
+                        await writer.drain()
+                except Exception:
+                    pass
+                finally:
+                    writer.close()
+
+            async def tcp_to_ws() -> None:
+                try:
+                    while True:
+                        data = await reader.read(65536)
+                        if not data:
+                            break
+                        await ws.send_bytes(data)
+                except Exception:
+                    pass
+
+            try:
+                await asyncio.gather(ws_to_tcp(), tcp_to_ws())
+                NOTARY_SESSIONS.labels(status="completed").inc()
             except Exception:
-                pass
+                NOTARY_SESSIONS.labels(status="error").inc()
             finally:
                 writer.close()
-
-        async def tcp_to_ws() -> None:
-            try:
-                while True:
-                    data = await reader.read(65536)
-                    if not data:
-                        break
-                    await ws.send_bytes(data)
-            except Exception:
-                pass
-
-        try:
-            await asyncio.gather(ws_to_tcp(), tcp_to_ws())
-            NOTARY_SESSIONS.labels(status="completed").inc()
-        except Exception:
-            NOTARY_SESSIONS.labels(status="error").inc()
-        finally:
-            writer.close()
-            try:
-                await ws.close()
-            except Exception:
-                pass
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
 
     @app.get("/v1/attest/capacity")
     async def attest_miner_capacity() -> dict:
