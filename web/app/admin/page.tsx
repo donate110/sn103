@@ -2728,8 +2728,8 @@ async function fetchAttestationData(): Promise<AttestationEntry[]> {
         all.push(...(r.value.attestations || []));
       }
     }
-    // Sort by timestamp descending, keep top 50
-    all.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    // Sort by created_at descending, keep top 50
+    all.sort((a, b) => b.created_at - a.created_at);
     return all.slice(0, 50);
   } catch {
     return [];
