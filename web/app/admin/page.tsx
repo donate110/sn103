@@ -12,6 +12,7 @@ import {
   type SubgraphRecentAudit,
 } from "@/lib/subgraph";
 import { formatUsdc } from "@/lib/types";
+import MetricsCharts from "./metrics-charts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -933,6 +934,9 @@ export default function AdminDashboard() {
               )}
             </div>
           </div>
+
+          {/* Network Metrics Charts */}
+          <MetricsCharts validators={validators.filter((v) => v.attest_capable)} />
 
           {/* Quick Links */}
           {GRAFANA_URL && (

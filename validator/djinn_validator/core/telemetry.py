@@ -126,6 +126,59 @@ class TelemetryStore:
             for row in rows
         ]
 
+    def timeseries(
+        self,
+        categories: list[str],
+        since: float | None = None,
+        bucket_seconds: int = 3600,
+    ) -> dict[str, list[dict]]:
+        """Return event counts bucketed by time period, grouped by category.
+
+        Args:
+            categories: List of event categories to include.
+            since: Unix timestamp to start from. Defaults to 7 days ago.
+            bucket_seconds: Bucket width in seconds. Default 1 hour.
+
+        Returns:
+            Dict mapping category -> list of {t, count, details} buckets.
+        """
+        if since is None:
+            since = time.time() - 7 * 24 * 3600
+        conn = self._get_conn()
+        placeholders = ",".join("?" for _ in categories)
+        rows = conn.execute(
+            f"""
+            SELECT
+                CAST(timestamp / ? AS INTEGER) * ? AS bucket,
+                category,
+                COUNT(*) AS cnt,
+                GROUP_CONCAT(details, '|||') AS all_details
+            FROM events
+            WHERE timestamp >= ? AND category IN ({placeholders})
+            GROUP BY bucket, category
+            ORDER BY bucket
+            """,
+            [bucket_seconds, bucket_seconds, since, *categories],
+        ).fetchall()
+
+        result: dict[str, list[dict]] = {c: [] for c in categories}
+        for r in rows:
+            bucket_t, cat, cnt, raw_details = r[0], r[1], r[2], r[3]
+            # Parse concatenated JSON details to extract numeric aggregates
+            parsed = []
+            if raw_details:
+                for chunk in raw_details.split("|||"):
+                    try:
+                        parsed.append(json.loads(chunk))
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+            result.setdefault(cat, []).append({
+                "t": int(bucket_t),
+                "count": cnt,
+                "details": parsed,
+            })
+        return result
+
     def count(self, category: str | None = None) -> int:
         conn = self._get_conn()
         if category:

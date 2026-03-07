@@ -1245,6 +1245,68 @@ def create_app(
             return {"attestations": []}
         return {"attestations": attestation_log.recent_attestations(max(1, min(limit, 200)))}
 
+    @app.get("/v1/admin/metrics/timeseries", dependencies=[_admin_auth])
+    async def admin_timeseries(hours: int = 168, bucket: int = 3600) -> dict:
+        """Time-series metrics for the admin dashboard.
+
+        Args:
+            hours: How many hours of history (default 168 = 7 days).
+            bucket: Bucket width in seconds (default 3600 = 1 hour).
+        """
+        import time as _ts
+        since = _ts.time() - max(1, min(hours, 720)) * 3600
+        bucket_s = max(300, min(bucket, 86400))  # 5min to 1day
+
+        # Attestation time-series
+        attest_buckets: list[dict] = []
+        if attestation_log is not None:
+            attest_buckets = attestation_log.timeseries(
+                since=int(since), bucket_seconds=bucket_s,
+            )
+
+        # Challenge / weight telemetry time-series
+        challenge_buckets: list[dict] = []
+        weight_buckets: list[dict] = []
+        if telemetry is not None:
+            raw = telemetry.timeseries(
+                categories=[
+                    "challenge_round", "attestation_challenge",
+                    "weight_set", "weight_set_failed",
+                ],
+                since=since,
+                bucket_seconds=bucket_s,
+            )
+            # Aggregate challenge rounds
+            for b in raw.get("challenge_round", []):
+                challenged = sum(d.get("challenged", 0) for d in b["details"])
+                responded = sum(d.get("responses", d.get("responded", 0)) for d in b["details"])
+                correct = sum(d.get("correct", 0) for d in b["details"])
+                challenge_buckets.append({
+                    "t": b["t"],
+                    "rounds": b["count"],
+                    "challenged": challenged,
+                    "responded": responded,
+                    "correct": correct,
+                })
+            # Aggregate weight setting
+            ws_by_t: dict[int, dict] = {}
+            for b in raw.get("weight_set", []):
+                ws_by_t.setdefault(b["t"], {"t": b["t"], "attempts": 0, "success": 0, "failed": 0})
+                ws_by_t[b["t"]]["attempts"] += b["count"]
+                ws_by_t[b["t"]]["success"] += b["count"]
+            for b in raw.get("weight_set_failed", []):
+                ws_by_t.setdefault(b["t"], {"t": b["t"], "attempts": 0, "success": 0, "failed": 0})
+                ws_by_t[b["t"]]["attempts"] += b["count"]
+                ws_by_t[b["t"]]["failed"] += b["count"]
+            weight_buckets = sorted(ws_by_t.values(), key=lambda x: x["t"])
+
+        return {
+            "attestations": attest_buckets,
+            "challenges": challenge_buckets,
+            "weights": weight_buckets,
+            "bucket_seconds": bucket_s,
+        }
+
     @app.post("/v1/check")
     async def check_lines(request: Request) -> dict:
         """Proxy a line-check request to a miner with signed auth.

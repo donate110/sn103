@@ -133,6 +133,50 @@ class AttestationLog:
             for r in rows
         ]
 
+    def timeseries(self, since: int | None = None, bucket_seconds: int = 3600) -> list[dict]:
+        """Return attestation stats bucketed by time period.
+
+        Args:
+            since: Unix timestamp to start from. Defaults to 7 days ago.
+            bucket_seconds: Bucket width in seconds. Default 1 hour.
+
+        Returns:
+            List of dicts with t, total, success, verified, avg_latency,
+            peer_notary, errors — one per bucket, oldest first.
+        """
+        if since is None:
+            since = int(time.time()) - 7 * 24 * 3600
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT
+                    (created_at / ?) * ? AS bucket,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS success_count,
+                    SUM(CASE WHEN verified = 1 THEN 1 ELSE 0 END) AS verified_count,
+                    AVG(CASE WHEN elapsed_s > 0 THEN elapsed_s END) AS avg_latency,
+                    SUM(CASE WHEN notary_uid IS NOT NULL THEN 1 ELSE 0 END) AS peer_notary,
+                    SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS errors
+                FROM attestation_log
+                WHERE created_at >= ?
+                GROUP BY bucket
+                ORDER BY bucket
+                """,
+                (bucket_seconds, bucket_seconds, since),
+            ).fetchall()
+        return [
+            {
+                "t": r[0],
+                "total": r[1],
+                "success": r[2],
+                "verified": r[3],
+                "avg_latency": round(r[4], 2) if r[4] else None,
+                "peer_notary": r[5],
+                "errors": r[6],
+            }
+            for r in rows
+        ]
+
     def close(self) -> None:
         """Close the database connection."""
         try:
