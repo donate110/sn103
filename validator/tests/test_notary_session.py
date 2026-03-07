@@ -1,14 +1,11 @@
-"""Tests for POST /v1/notary/session endpoint and JWT auth."""
+"""Tests for POST /v1/notary/session endpoint with burn-gate auth."""
 
 from __future__ import annotations
 
-import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import jwt
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 
 from djinn_validator.api.server import create_app
@@ -18,30 +15,30 @@ from djinn_validator.core.purchase import PurchaseOrchestrator
 from djinn_validator.core.shares import ShareStore
 
 
-# Generate a test Ed25519 keypair
-_private_key = Ed25519PrivateKey.generate()
-_public_key = _private_key.public_key()
-_pubkey_hex = _private_key.public_key().public_bytes_raw().hex()
+BURN_AUTH_HEADERS = {
+    "X-Hotkey": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+    "X-Burn-Tx": "0xabc123def456",
+    "X-Signature": "0x" + "aa" * 64,
+}
 
 
-def _make_token(exp: int | None = None, **extra_claims: object) -> str:
-    """Create a signed JWT with the test private key."""
-    payload = {"sub": "test_user", "exp": exp or int(time.time()) + 60, **extra_claims}
-    return jwt.encode(payload, _private_key, algorithm="EdDSA")
+def _mock_auth_success(hotkey: str, tx_hash: str, sig: str, substrate: object) -> tuple[bool, str]:
+    return True, ""
 
 
-def _make_expired_token() -> str:
-    return _make_token(exp=int(time.time()) - 10)
+def _mock_auth_fail(hotkey: str, tx_hash: str, sig: str, substrate: object) -> tuple[bool, str]:
+    return False, "Invalid signature"
 
 
 @pytest.fixture
 def mock_neuron() -> MagicMock:
     neuron = MagicMock()
     neuron.metagraph = MagicMock()
-    # Coldkeys indexed by UID (0=validator, 1-3=miners)
     neuron.metagraph.coldkeys = ["cold_validator", "cold_operator_A", "cold_operator_B", "cold_operator_A"]
     neuron.uid = 0
     neuron.wallet = None
+    neuron.subtensor = MagicMock()
+    neuron.subtensor.substrate = MagicMock()
     neuron.get_miner_uids.return_value = [1, 2, 3]
     neuron.get_axon_info.side_effect = lambda uid: {
         1: {"ip": "1.2.3.4", "port": 8422, "hotkey": "hotkey_1"},
@@ -68,73 +65,58 @@ SAMPLE_NOTARIES = [
 ]
 
 
-class TestNotarySessionAuth:
-    """JWT authentication tests."""
+class TestBurnGateAuth:
+    """Burn-gate authentication tests."""
 
-    def test_missing_auth_header(self, client: TestClient) -> None:
+    def test_missing_headers(self, client: TestClient) -> None:
         resp = client.post("/v1/notary/session")
         assert resp.status_code == 401
-        assert "Bearer" in resp.json()["detail"]
+        assert "Missing" in resp.json()["detail"]
 
-    def test_invalid_token(self, client: TestClient) -> None:
-        with patch.dict(os.environ, {"NOTARY_AUTH_PUBKEY": _pubkey_hex}):
-            # Force reimport to pick up env var
-            import importlib
-            from djinn_validator.api import jwt_auth
-            importlib.reload(jwt_auth)
-            try:
-                resp = client.post(
-                    "/v1/notary/session",
-                    headers={"Authorization": "Bearer garbage.token.here"},
-                )
-                assert resp.status_code == 401
-            finally:
-                importlib.reload(jwt_auth)
+    def test_missing_hotkey(self, client: TestClient) -> None:
+        headers = {k: v for k, v in BURN_AUTH_HEADERS.items() if k != "X-Hotkey"}
+        resp = client.post("/v1/notary/session", headers=headers)
+        assert resp.status_code == 401
 
-    def test_expired_token(self, client: TestClient) -> None:
-        with patch.dict(os.environ, {"NOTARY_AUTH_PUBKEY": _pubkey_hex}):
-            import importlib
-            from djinn_validator.api import jwt_auth
-            importlib.reload(jwt_auth)
-            try:
-                token = _make_expired_token()
-                resp = client.post(
-                    "/v1/notary/session",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                assert resp.status_code == 401
-                assert "expired" in resp.json()["detail"].lower()
-            finally:
-                importlib.reload(jwt_auth)
+    def test_missing_tx_hash(self, client: TestClient) -> None:
+        headers = {k: v for k, v in BURN_AUTH_HEADERS.items() if k != "X-Burn-Tx"}
+        resp = client.post("/v1/notary/session", headers=headers)
+        assert resp.status_code == 401
 
-    def test_no_pubkey_configured(self, client: TestClient) -> None:
-        """When NOTARY_AUTH_PUBKEY is not set, all requests are rejected."""
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("NOTARY_AUTH_PUBKEY", None)
-            import importlib
-            from djinn_validator.api import jwt_auth
-            importlib.reload(jwt_auth)
-            try:
-                token = _make_token()
-                resp = client.post(
-                    "/v1/notary/session",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                assert resp.status_code == 401
-                assert "not configured" in resp.json()["detail"].lower()
-            finally:
-                importlib.reload(jwt_auth)
+    def test_missing_signature(self, client: TestClient) -> None:
+        headers = {k: v for k, v in BURN_AUTH_HEADERS.items() if k != "X-Signature"}
+        resp = client.post("/v1/notary/session", headers=headers)
+        assert resp.status_code == 401
+
+    def test_invalid_signature(self, client: TestClient) -> None:
+        with patch("djinn_validator.api.burn_gate.authenticate_request", side_effect=_mock_auth_fail):
+            resp = client.post("/v1/notary/session", headers=BURN_AUTH_HEADERS)
+        assert resp.status_code == 401
+        assert "Invalid signature" in resp.json()["detail"]
+
+    @patch(
+        "djinn_validator.core.challenges.discover_peer_notaries",
+        new_callable=AsyncMock,
+        return_value=SAMPLE_NOTARIES,
+    )
+    def test_valid_burn_auth(self, mock_discover: AsyncMock, client: TestClient) -> None:
+        with patch("djinn_validator.api.burn_gate.authenticate_request", side_effect=_mock_auth_success):
+            resp = client.post("/v1/notary/session", headers=BURN_AUTH_HEADERS)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "session_id" in data
+        assert data["miner_port"] == 8422
 
 
 class TestNotarySessionAssignment:
-    """Miner assignment tests (with valid auth)."""
+    """Miner assignment tests (with mocked auth)."""
 
-    def _authed_post(self, client: TestClient) -> object:
-        """POST with a valid JWT, mocking jwt_auth.verify_token."""
-        with patch("djinn_validator.api.jwt_auth.verify_token", return_value={"sub": "test"}):
+    def _authed_post(self, client: TestClient, **kwargs: object) -> object:
+        with patch("djinn_validator.api.burn_gate.authenticate_request", side_effect=_mock_auth_success):
             return client.post(
                 "/v1/notary/session",
-                headers={"Authorization": "Bearer valid.test.token"},
+                headers=BURN_AUTH_HEADERS,
+                **kwargs,
             )
 
     @patch(
@@ -164,29 +146,23 @@ class TestNotarySessionAssignment:
         assert "notary" in resp.json()["detail"].lower()
 
     def test_no_neuron(self) -> None:
-        """When validator isn't connected to BT, return 503."""
         share_store = ShareStore()
         purchase_orch = PurchaseOrchestrator(share_store)
         outcome_attestor = OutcomeAttestor()
         app = create_app(share_store, purchase_orch, outcome_attestor, neuron=None)
         no_neuron_client = TestClient(app)
 
-        with patch("djinn_validator.api.jwt_auth.verify_token", return_value={"sub": "test"}):
+        with patch("djinn_validator.api.burn_gate.authenticate_request", side_effect=_mock_auth_success):
             resp = no_neuron_client.post(
                 "/v1/notary/session",
-                headers={"Authorization": "Bearer valid.test.token"},
+                headers=BURN_AUTH_HEADERS,
             )
         assert resp.status_code == 503
         assert "network" in resp.json()["detail"].lower()
 
     def test_no_miners(self, client: TestClient, mock_neuron: MagicMock) -> None:
-        """When metagraph has no miners, return 503."""
         mock_neuron.get_miner_uids.return_value = []
-        with patch("djinn_validator.api.jwt_auth.verify_token", return_value={"sub": "test"}):
-            resp = client.post(
-                "/v1/notary/session",
-                headers={"Authorization": "Bearer valid.test.token"},
-            )
+        resp = self._authed_post(client)
         assert resp.status_code == 503
 
     @patch(
@@ -197,7 +173,6 @@ class TestNotarySessionAssignment:
     def test_response_has_miner_hotkey(self, mock_discover: AsyncMock, client: TestClient) -> None:
         resp = self._authed_post(client)
         data = resp.json()
-        # The hotkey should correspond to the chosen miner's UID
         chosen_ip = data["miner_ip"]
         if chosen_ip == "1.2.3.4":
             assert data["miner_hotkey"] == "hotkey_1"
@@ -206,60 +181,15 @@ class TestNotarySessionAssignment:
 
 
 class TestNotarySessionExclusions:
-    """Miner exclusion by hotkey and coldkey."""
+    """Miner exclusion and dedup tests."""
 
-    @patch(
-        "djinn_validator.core.challenges.discover_peer_notaries",
-        new_callable=AsyncMock,
-        return_value=[SAMPLE_NOTARIES[1]],  # only miner 2 left after exclusion
-    )
-    def test_exclude_by_hotkey(self, mock_discover: AsyncMock, client: TestClient) -> None:
-        """Miners with excluded hotkeys are filtered before discovery."""
-        claims = {"sub": "test", "exclude_hotkeys": ["hotkey_1"]}
-        with patch("djinn_validator.api.jwt_auth.verify_token", return_value=claims):
-            resp = client.post(
+    def _authed_post(self, client: TestClient, **kwargs: object) -> object:
+        with patch("djinn_validator.api.burn_gate.authenticate_request", side_effect=_mock_auth_success):
+            return client.post(
                 "/v1/notary/session",
-                headers={"Authorization": "Bearer valid.test.token"},
+                headers=BURN_AUTH_HEADERS,
+                **kwargs,
             )
-        assert resp.status_code == 200
-        # discover_peer_notaries should only have received axons without hotkey_1
-        called_axons = mock_discover.call_args[0][1]
-        hotkeys_sent = {a["hotkey"] for a in called_axons}
-        assert "hotkey_1" not in hotkeys_sent
-
-    @patch(
-        "djinn_validator.core.challenges.discover_peer_notaries",
-        new_callable=AsyncMock,
-        return_value=[SAMPLE_NOTARIES[1]],  # only miner 2 survives
-    )
-    def test_exclude_by_coldkey(self, mock_discover: AsyncMock, client: TestClient) -> None:
-        """Miners sharing a coldkey with excluded coldkeys are filtered out.
-
-        In our fixture: miners 1 and 3 share cold_operator_A, miner 2 has cold_operator_B.
-        Excluding cold_operator_A should remove miners 1 and 3.
-        """
-        claims = {"sub": "test", "exclude_coldkeys": ["cold_operator_A"]}
-        with patch("djinn_validator.api.jwt_auth.verify_token", return_value=claims):
-            resp = client.post(
-                "/v1/notary/session",
-                headers={"Authorization": "Bearer valid.test.token"},
-            )
-        assert resp.status_code == 200
-        called_axons = mock_discover.call_args[0][1]
-        # Only miner 2 (cold_operator_B) should remain
-        uids_sent = {a["uid"] for a in called_axons}
-        assert uids_sent == {2}
-
-    def test_exclude_all_miners_returns_503(self, client: TestClient) -> None:
-        """If exclusions remove all miners, return 503."""
-        claims = {"sub": "test", "exclude_hotkeys": ["hotkey_1", "hotkey_2", "hotkey_3"]}
-        with patch("djinn_validator.api.jwt_auth.verify_token", return_value=claims):
-            resp = client.post(
-                "/v1/notary/session",
-                headers={"Authorization": "Bearer valid.test.token"},
-            )
-        assert resp.status_code == 503
-        assert "exclusion" in resp.json()["detail"].lower()
 
     @patch(
         "djinn_validator.core.challenges.discover_peer_notaries",
@@ -267,13 +197,7 @@ class TestNotarySessionExclusions:
         return_value=SAMPLE_NOTARIES,
     )
     def test_no_exclusions_uses_all_miners(self, mock_discover: AsyncMock, client: TestClient) -> None:
-        """Without exclusion claims, all miners are considered."""
-        claims = {"sub": "test"}
-        with patch("djinn_validator.api.jwt_auth.verify_token", return_value=claims):
-            resp = client.post(
-                "/v1/notary/session",
-                headers={"Authorization": "Bearer valid.test.token"},
-            )
+        resp = self._authed_post(client)
         assert resp.status_code == 200
         called_axons = mock_discover.call_args[0][1]
         assert len(called_axons) == 3
@@ -281,17 +205,10 @@ class TestNotarySessionExclusions:
     @patch(
         "djinn_validator.core.challenges.discover_peer_notaries",
         new_callable=AsyncMock,
-        return_value=[SAMPLE_NOTARIES[1]],  # only miner 2 after dedup
+        return_value=[SAMPLE_NOTARIES[1]],
     )
     def test_exclude_miners_request_body_dedup(self, mock_discover: AsyncMock, client: TestClient) -> None:
-        """exclude_miners in request body filters previously assigned miners."""
-        claims = {"sub": "test"}
-        with patch("djinn_validator.api.jwt_auth.verify_token", return_value=claims):
-            resp = client.post(
-                "/v1/notary/session",
-                headers={"Authorization": "Bearer valid.test.token"},
-                json={"exclude_miners": ["hotkey_1", "hotkey_3"]},
-            )
+        resp = self._authed_post(client, json={"exclude_miners": ["hotkey_1", "hotkey_3"]})
         assert resp.status_code == 200
         called_axons = mock_discover.call_args[0][1]
         hotkeys_sent = {a["hotkey"] for a in called_axons}
@@ -302,20 +219,91 @@ class TestNotarySessionExclusions:
     @patch(
         "djinn_validator.core.challenges.discover_peer_notaries",
         new_callable=AsyncMock,
-        return_value=[SAMPLE_NOTARIES[1]],  # only miner 2 (5.6.7.8) survives
+        return_value=[SAMPLE_NOTARIES[1]],
     )
     def test_exclude_ips_dedup(self, mock_discover: AsyncMock, client: TestClient) -> None:
-        """exclude_ips filters all miners sharing a previously assigned IP."""
-        claims = {"sub": "test"}
-        with patch("djinn_validator.api.jwt_auth.verify_token", return_value=claims):
-            resp = client.post(
-                "/v1/notary/session",
-                headers={"Authorization": "Bearer valid.test.token"},
-                json={"exclude_ips": ["1.2.3.4", "9.10.11.12"]},
-            )
+        resp = self._authed_post(client, json={"exclude_ips": ["1.2.3.4", "9.10.11.12"]})
         assert resp.status_code == 200
         called_axons = mock_discover.call_args[0][1]
         ips_sent = {a["ip"] for a in called_axons}
         assert "1.2.3.4" not in ips_sent
         assert "9.10.11.12" not in ips_sent
         assert "5.6.7.8" in ips_sent
+
+    def test_exclude_all_miners_returns_503(self, client: TestClient) -> None:
+        resp = self._authed_post(client, json={"exclude_miners": ["hotkey_1", "hotkey_2", "hotkey_3"]})
+        assert resp.status_code == 503
+        assert "exclusion" in resp.json()["detail"].lower()
+
+
+class TestBurnGateUnit:
+    """Unit tests for burn_gate module functions."""
+
+    def test_verify_signature_bad_hotkey(self) -> None:
+        from djinn_validator.api.burn_gate import verify_signature
+        assert verify_signature("not_an_ss58", "abcd", "ee" * 64) is False
+
+    def test_cache_eviction(self) -> None:
+        from djinn_validator.api.burn_gate import _cache, _cache_set, CACHE_TTL_SECONDS
+        _cache.clear()
+        old_ts = time.time() - CACHE_TTL_SECONDS - 10
+        for i in range(1010):
+            # Directly insert with old timestamps to simulate stale entries
+            _cache[f"tx_{i}"] = {"valid": True, "error": "", "hotkey": "x", "block_ts": 0, "checked_at": old_ts}
+        # Adding one more via _cache_set should trigger eviction of stale entries
+        _cache_set("tx_new", {"valid": True, "error": "", "hotkey": "x", "block_ts": 0})
+        assert len(_cache) <= 2  # only the new one survives (stale ones evicted)
+
+    def test_authenticate_missing_fields(self) -> None:
+        from djinn_validator.api.burn_gate import authenticate_request
+        valid, err = authenticate_request("", "", "", None)
+        assert not valid
+        assert "Missing" in err
+
+    def test_verify_burn_tx_caches_result(self) -> None:
+        from djinn_validator.api.burn_gate import _cache, _cache_set, verify_burn_tx
+        _cache.clear()
+        # Pre-populate cache with a valid entry
+        import time as _t
+        _cache_set("0xtest123", {
+            "valid": True,
+            "error": "",
+            "hotkey": "5GoodHotkey",
+            "amount": 2.0,
+            "block_ts": _t.time() - 100,  # 100 seconds ago
+        })
+        # Should hit cache, no substrate call needed
+        valid, err = verify_burn_tx("0xtest123", "5GoodHotkey", None)
+        assert valid
+        assert err == ""
+
+    def test_verify_burn_tx_cached_wrong_sender(self) -> None:
+        from djinn_validator.api.burn_gate import _cache, _cache_set, verify_burn_tx
+        _cache.clear()
+        import time as _t
+        _cache_set("0xtest456", {
+            "valid": True,
+            "error": "",
+            "hotkey": "5GoodHotkey",
+            "amount": 2.0,
+            "block_ts": _t.time() - 100,
+        })
+        # Different hotkey should fail
+        valid, err = verify_burn_tx("0xtest456", "5DifferentHotkey", None)
+        assert not valid
+        assert "hotkey" in err.lower()
+
+    def test_verify_burn_tx_cached_expired(self) -> None:
+        from djinn_validator.api.burn_gate import _cache, _cache_set, verify_burn_tx, BURN_WINDOW_SECONDS
+        _cache.clear()
+        import time as _t
+        _cache_set("0xold789", {
+            "valid": True,
+            "error": "",
+            "hotkey": "5GoodHotkey",
+            "amount": 2.0,
+            "block_ts": _t.time() - BURN_WINDOW_SECONDS - 100,  # expired
+        })
+        valid, err = verify_burn_tx("0xold789", "5GoodHotkey", None)
+        assert not valid
+        assert "old" in err.lower()

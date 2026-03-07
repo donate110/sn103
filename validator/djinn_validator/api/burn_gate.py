@@ -1,0 +1,207 @@
+"""Burn-gate authentication for external notary session requests.
+
+Callers prove they burned >= MIN_BURN_ALPHA of SN103 alpha within the last
+BURN_WINDOW_SECONDS by providing:
+  - X-Hotkey: their SS58 hotkey address
+  - X-Signature: sr25519 signature of the burn tx hash (hex)
+  - X-Burn-Tx: the extrinsic hash of the burn_alpha call
+
+The validator verifies the signature, looks up the extrinsic on-chain,
+and confirms the burn amount, recency, subnet, and signer match.
+
+Results are cached so repeated requests with the same tx hash are instant.
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+import bittensor as bt
+import structlog
+
+log = structlog.get_logger()
+
+# Hardcoded constants (no .env override)
+MIN_BURN_ALPHA: float = 1.0  # Minimum alpha burned per tx
+BURN_WINDOW_SECONDS: int = 2_592_000  # 30 days
+BURN_NETUID: int = 103
+ALPHA_RAO_PER_TOKEN: int = 1_000_000_000  # 1 alpha = 1e9 rao
+
+# Cache: tx_hash -> {valid, error, hotkey, amount, block_ts, checked_at}
+_cache: dict[str, dict[str, Any]] = {}
+CACHE_TTL_SECONDS: int = 300  # 5 minutes
+
+
+def _cache_get(tx_hash: str) -> dict[str, Any] | None:
+    entry = _cache.get(tx_hash)
+    if entry and (time.time() - entry["checked_at"]) < CACHE_TTL_SECONDS:
+        return entry
+    return None
+
+
+def _cache_set(tx_hash: str, entry: dict[str, Any]) -> None:
+    entry["checked_at"] = time.time()
+    _cache[tx_hash] = entry
+    # Evict old entries if cache grows too large
+    if len(_cache) > 1000:
+        cutoff = time.time() - CACHE_TTL_SECONDS
+        stale = [k for k, v in _cache.items() if v["checked_at"] < cutoff]
+        for k in stale:
+            del _cache[k]
+
+
+def verify_signature(hotkey_ss58: str, tx_hash_hex: str, signature_hex: str) -> bool:
+    """Verify an sr25519 signature of the tx hash against the hotkey."""
+    try:
+        keypair = bt.Keypair(ss58_address=hotkey_ss58)
+        tx_bytes = bytes.fromhex(tx_hash_hex.removeprefix("0x"))
+        sig_bytes = bytes.fromhex(signature_hex.removeprefix("0x"))
+        return keypair.verify(tx_bytes, sig_bytes)
+    except Exception as e:
+        log.warning("burn_gate_sig_verify_failed", hotkey=hotkey_ss58, error=str(e))
+        return False
+
+
+def verify_burn_tx(
+    tx_hash: str,
+    expected_hotkey: str,
+    substrate: Any,
+) -> tuple[bool, str]:
+    """Look up a burn_alpha extrinsic on-chain and validate it.
+
+    Returns (valid, error_message).
+    """
+    # Check cache first
+    cached = _cache_get(tx_hash)
+    if cached is not None:
+        if not cached["valid"]:
+            return False, cached["error"]
+        # Re-check recency (burn may have aged out since caching)
+        age = time.time() - cached["block_ts"]
+        if age > BURN_WINDOW_SECONDS:
+            return False, f"Burn too old ({int(age)}s > {BURN_WINDOW_SECONDS}s)"
+        if cached["hotkey"] != expected_hotkey:
+            return False, "Burn hotkey does not match request hotkey"
+        return True, ""
+
+    tx_hash_clean = tx_hash.lower().removeprefix("0x")
+
+    try:
+        current_block = substrate.get_block_number(None)
+        # 24h at ~12s/block = ~7200 blocks; scan up to 7500 for safety
+        search_depth = 7500
+
+        for block_num in range(current_block, max(current_block - search_depth, 0), -1):
+            block_hash = substrate.get_block_hash(block_num)
+            extrinsics = substrate.get_extrinsics(block_hash=block_hash)
+            if not extrinsics:
+                continue
+
+            for ex in extrinsics:
+                ex_hash = ex.extrinsic_hash
+                if ex_hash is None:
+                    continue
+                if isinstance(ex_hash, bytes):
+                    if ex_hash.hex() != tx_hash_clean:
+                        continue
+                elif isinstance(ex_hash, str):
+                    if ex_hash.lower().removeprefix("0x") != tx_hash_clean:
+                        continue
+                else:
+                    continue
+
+                # Found the extrinsic
+                call = ex.value.get("call", {})
+                call_module = call.get("call_module", "")
+                call_function = call.get("call_function", "")
+
+                if call_module != "SubtensorModule" or call_function != "burn_alpha":
+                    entry = {"valid": False, "error": f"Not a burn_alpha call ({call_module}.{call_function})", "hotkey": "", "block_ts": 0}
+                    _cache_set(tx_hash, entry)
+                    return False, entry["error"]
+
+                call_args = {a["name"]: a["value"] for a in call.get("call_args", [])}
+
+                # The hotkey param identifies whose stake was burned.
+                # (The extrinsic signer is the coldkey, but we match on hotkey.)
+                burn_hotkey = call_args.get("hotkey", "")
+
+                # Check netuid
+                netuid = call_args.get("netuid", -1)
+                if netuid != BURN_NETUID:
+                    entry = {"valid": False, "error": f"Wrong subnet (netuid={netuid}, expected {BURN_NETUID})", "hotkey": burn_hotkey, "block_ts": 0}
+                    _cache_set(tx_hash, entry)
+                    return False, entry["error"]
+
+                # Check amount (in rao)
+                amount_rao = call_args.get("amount", 0)
+                amount_alpha = amount_rao / ALPHA_RAO_PER_TOKEN
+                if amount_alpha < MIN_BURN_ALPHA:
+                    entry = {"valid": False, "error": f"Burn amount {amount_alpha:.4f} alpha < {MIN_BURN_ALPHA} required", "hotkey": burn_hotkey, "block_ts": 0}
+                    _cache_set(tx_hash, entry)
+                    return False, entry["error"]
+
+                # Get block timestamp
+                block_ts = 0
+                block_data = substrate.get_block(block_hash)
+                for bex in block_data.get("extrinsics", []):
+                    bcall = bex.value.get("call", {})
+                    if bcall.get("call_module") == "Timestamp":
+                        ts_args = {a["name"]: a["value"] for a in bcall.get("call_args", [])}
+                        block_ts = ts_args.get("now", 0) / 1000  # ms -> seconds
+                        break
+
+                # Check recency
+                age = time.time() - block_ts
+                if age > BURN_WINDOW_SECONDS:
+                    entry = {"valid": False, "error": f"Burn too old ({int(age)}s > {BURN_WINDOW_SECONDS}s)", "hotkey": burn_hotkey, "block_ts": block_ts}
+                    _cache_set(tx_hash, entry)
+                    return False, entry["error"]
+
+                # Check hotkey matches
+                if burn_hotkey != expected_hotkey:
+                    entry = {"valid": False, "error": "Burn hotkey does not match request hotkey", "hotkey": burn_hotkey, "block_ts": block_ts}
+                    _cache_set(tx_hash, entry)
+                    return False, entry["error"]
+
+                # All checks passed
+                log.info(
+                    "burn_verified",
+                    tx_hash=tx_hash[:16] + "...",
+                    hotkey=burn_hotkey,
+                    amount_alpha=amount_alpha,
+                    block_num=block_num,
+                )
+                entry = {"valid": True, "error": "", "hotkey": burn_hotkey, "amount": amount_alpha, "block_ts": block_ts}
+                _cache_set(tx_hash, entry)
+                return True, ""
+
+        entry = {"valid": False, "error": f"Tx {tx_hash[:16]}... not found in last {search_depth} blocks", "hotkey": "", "block_ts": 0}
+        _cache_set(tx_hash, entry)
+        return False, entry["error"]
+
+    except Exception as e:
+        log.warning("burn_gate_verify_error", tx_hash=tx_hash[:16], error=str(e))
+        return False, f"Chain lookup failed: {e}"
+
+
+def authenticate_request(
+    hotkey_ss58: str,
+    tx_hash_hex: str,
+    signature_hex: str,
+    substrate: Any,
+) -> tuple[bool, str]:
+    """Full burn-gate authentication: signature + on-chain verification.
+
+    Returns (valid, error_message).
+    """
+    if not hotkey_ss58 or not tx_hash_hex or not signature_hex:
+        return False, "Missing required headers: X-Hotkey, X-Burn-Tx, X-Signature"
+
+    # Step 1: Verify the signature (fast, local)
+    if not verify_signature(hotkey_ss58, tx_hash_hex, signature_hex):
+        return False, "Invalid signature"
+
+    # Step 2: Verify the burn on-chain (cached after first lookup)
+    return verify_burn_tx(tx_hash_hex, hotkey_ss58, substrate)

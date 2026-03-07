@@ -2177,39 +2177,50 @@ def create_app(
     async def notary_session(request: Request) -> NotarySessionResponse:
         """Assign a random notary miner for an external prover.
 
-        The caller (e.g. debust/firmrecord) sends a JWT signed with Ed25519.
-        We verify the signature, pick a random miner with a live notary
-        sidecar, and return its coordinates. Stateless, no billing.
+        Auth: burn-gate. Caller provides three headers:
+          - X-Hotkey: SS58 address of the hotkey that burned alpha
+          - X-Burn-Tx: hex tx hash of the burn_alpha extrinsic
+          - X-Signature: sr25519 signature of the tx hash bytes
 
-        Exclusion sources (all optional, combined with OR):
-        - JWT ``exclude_hotkeys`` / ``exclude_coldkeys``: operator-level
-          exclusions baked into the signed token.
-        - Request body ``exclude_miners``: per-call dedup. When requesting
-          multiple sessions in a batch, pass previously assigned hotkeys
-          here to guarantee distinct miners.
+        The validator verifies the signature, looks up the burn on-chain
+        (cached), and confirms >= 1 alpha burned on SN103 within 24h.
+
+        Dedup (optional request body):
+          - exclude_miners: hotkeys to skip (previously assigned)
+          - exclude_ips: IPs to skip (same operator dedup)
         """
         import time as _time
         import uuid as _uuid
 
-        from djinn_validator.api import jwt_auth
+        from djinn_validator.api import burn_gate
         from djinn_validator.core.challenges import assign_peer_notary, discover_peer_notaries
 
-        # Extract and verify JWT from Authorization header
-        auth_header = request.headers.get("authorization", "")
-        if not auth_header.startswith("Bearer "):
-            NOTARY_SESSIONS_ASSIGNED.labels(status="auth_failed").inc()
-            raise HTTPException(status_code=401, detail="Missing Bearer token")
+        # Extract burn-gate headers
+        hotkey_ss58 = request.headers.get("x-hotkey", "")
+        tx_hash = request.headers.get("x-burn-tx", "")
+        signature = request.headers.get("x-signature", "")
 
-        token = auth_header[7:]
-        try:
-            claims = jwt_auth.verify_token(token)
-        except ValueError as e:
+        if not hotkey_ss58 or not tx_hash or not signature:
             NOTARY_SESSIONS_ASSIGNED.labels(status="auth_failed").inc()
-            raise HTTPException(status_code=401, detail=str(e))
+            raise HTTPException(
+                status_code=401,
+                detail="Missing required headers: X-Hotkey, X-Burn-Tx, X-Signature",
+            )
 
-        # Extract exclusion lists from verified JWT claims
-        exclude_hotkeys: set[str] = set(claims.get("exclude_hotkeys") or [])
-        exclude_coldkeys: set[str] = set(claims.get("exclude_coldkeys") or [])
+        # Get substrate connection for on-chain verification
+        substrate = None
+        if neuron and neuron.subtensor:
+            substrate = neuron.subtensor.substrate
+
+        valid, error = burn_gate.authenticate_request(
+            hotkey_ss58, tx_hash, signature, substrate,
+        )
+        if not valid:
+            NOTARY_SESSIONS_ASSIGNED.labels(status="auth_failed").inc()
+            raise HTTPException(status_code=401, detail=error)
+
+        exclude_hotkeys: set[str] = set()
+        exclude_coldkeys: set[str] = set()
 
         # Per-call dedup: exclude previously assigned miners/IPs from this batch
         try:
@@ -2286,8 +2297,8 @@ def create_app(
             session_id=session_id,
             miner_uid=chosen.uid,
             miner_ip=chosen.ip,
+            caller_hotkey=hotkey_ss58[:16] + "...",
             excluded_hotkeys=len(exclude_hotkeys),
-            excluded_coldkeys=len(exclude_coldkeys),
         )
 
         return NotarySessionResponse(
