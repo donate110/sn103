@@ -2181,12 +2181,12 @@ def create_app(
         We verify the signature, pick a random miner with a live notary
         sidecar, and return its coordinates. Stateless, no billing.
 
-        Exclusion: The JWT may contain ``exclude_hotkeys`` and/or
-        ``exclude_coldkeys`` lists. Any miner whose hotkey appears in
-        ``exclude_hotkeys``, or whose coldkey appears in
-        ``exclude_coldkeys``, is filtered out before random selection.
-        This lets callers guarantee the notary is never a miner they
-        operate (legal requirement for firmrecord).
+        Exclusion sources (all optional, combined with OR):
+        - JWT ``exclude_hotkeys`` / ``exclude_coldkeys``: operator-level
+          exclusions baked into the signed token.
+        - Request body ``exclude_miners``: per-call dedup. When requesting
+          multiple sessions in a batch, pass previously assigned hotkeys
+          here to guarantee distinct miners.
         """
         import time as _time
         import uuid as _uuid
@@ -2210,6 +2210,16 @@ def create_app(
         # Extract exclusion lists from verified JWT claims
         exclude_hotkeys: set[str] = set(claims.get("exclude_hotkeys") or [])
         exclude_coldkeys: set[str] = set(claims.get("exclude_coldkeys") or [])
+
+        # Per-call dedup: exclude previously assigned miners from this batch
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if isinstance(body, dict):
+            for hk in body.get("exclude_miners") or []:
+                if isinstance(hk, str):
+                    exclude_hotkeys.add(hk)
 
         # Build miner axon list from metagraph
         if not neuron:

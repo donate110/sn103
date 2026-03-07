@@ -277,3 +277,24 @@ class TestNotarySessionExclusions:
         assert resp.status_code == 200
         called_axons = mock_discover.call_args[0][1]
         assert len(called_axons) == 3
+
+    @patch(
+        "djinn_validator.core.challenges.discover_peer_notaries",
+        new_callable=AsyncMock,
+        return_value=[SAMPLE_NOTARIES[1]],  # only miner 2 after dedup
+    )
+    def test_exclude_miners_request_body_dedup(self, mock_discover: AsyncMock, client: TestClient) -> None:
+        """exclude_miners in request body filters previously assigned miners."""
+        claims = {"sub": "test"}
+        with patch("djinn_validator.api.jwt_auth.verify_token", return_value=claims):
+            resp = client.post(
+                "/v1/notary/session",
+                headers={"Authorization": "Bearer valid.test.token"},
+                json={"exclude_miners": ["hotkey_1", "hotkey_3"]},
+            )
+        assert resp.status_code == 200
+        called_axons = mock_discover.call_args[0][1]
+        hotkeys_sent = {a["hotkey"] for a in called_axons}
+        assert "hotkey_1" not in hotkeys_sent
+        assert "hotkey_3" not in hotkeys_sent
+        assert "hotkey_2" in hotkeys_sent
