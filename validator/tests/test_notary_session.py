@@ -298,3 +298,24 @@ class TestNotarySessionExclusions:
         assert "hotkey_1" not in hotkeys_sent
         assert "hotkey_3" not in hotkeys_sent
         assert "hotkey_2" in hotkeys_sent
+
+    @patch(
+        "djinn_validator.core.challenges.discover_peer_notaries",
+        new_callable=AsyncMock,
+        return_value=[SAMPLE_NOTARIES[1]],  # only miner 2 (5.6.7.8) survives
+    )
+    def test_exclude_ips_dedup(self, mock_discover: AsyncMock, client: TestClient) -> None:
+        """exclude_ips filters all miners sharing a previously assigned IP."""
+        claims = {"sub": "test"}
+        with patch("djinn_validator.api.jwt_auth.verify_token", return_value=claims):
+            resp = client.post(
+                "/v1/notary/session",
+                headers={"Authorization": "Bearer valid.test.token"},
+                json={"exclude_ips": ["1.2.3.4", "9.10.11.12"]},
+            )
+        assert resp.status_code == 200
+        called_axons = mock_discover.call_args[0][1]
+        ips_sent = {a["ip"] for a in called_axons}
+        assert "1.2.3.4" not in ips_sent
+        assert "9.10.11.12" not in ips_sent
+        assert "5.6.7.8" in ips_sent

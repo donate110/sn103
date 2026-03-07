@@ -2211,15 +2211,19 @@ def create_app(
         exclude_hotkeys: set[str] = set(claims.get("exclude_hotkeys") or [])
         exclude_coldkeys: set[str] = set(claims.get("exclude_coldkeys") or [])
 
-        # Per-call dedup: exclude previously assigned miners from this batch
+        # Per-call dedup: exclude previously assigned miners/IPs from this batch
         try:
             body = await request.json()
         except Exception:
             body = {}
+        exclude_ips: set[str] = set()
         if isinstance(body, dict):
             for hk in body.get("exclude_miners") or []:
                 if isinstance(hk, str):
                     exclude_hotkeys.add(hk)
+            for ip in body.get("exclude_ips") or []:
+                if isinstance(ip, str):
+                    exclude_ips.add(ip)
 
         # Build miner axon list from metagraph
         if not neuron:
@@ -2239,6 +2243,9 @@ def create_app(
                 port = axon.get("port", 0)
                 hotkey = axon.get("hotkey", "")
                 if not ip or not port or ip in ("0.0.0.0", "127.0.0.1"):
+                    continue
+                # Exclude by IP (dedup across calls in a batch)
+                if ip in exclude_ips:
                     continue
                 # Exclude by hotkey
                 if hotkey in exclude_hotkeys:
