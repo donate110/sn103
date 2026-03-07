@@ -2178,12 +2178,12 @@ def create_app(
         """Assign a random notary miner for an external prover.
 
         Auth: burn-gate. Caller provides three headers:
-          - X-Hotkey: SS58 address of the hotkey that burned alpha
+          - X-Coldkey: SS58 coldkey address (the burn_alpha extrinsic signer)
           - X-Burn-Tx: hex tx hash of the burn_alpha extrinsic
-          - X-Signature: sr25519 signature of the tx hash bytes
+          - X-Signature: sr25519 signature of the tx hash bytes by the coldkey
 
         The validator verifies the signature, looks up the burn on-chain
-        (cached), and confirms >= 1 alpha burned on SN103 within 24h.
+        (cached), and confirms >= 1 alpha burned on SN103 within 30 days.
 
         Dedup (optional request body):
           - exclude_miners: hotkeys to skip (previously assigned)
@@ -2196,15 +2196,15 @@ def create_app(
         from djinn_validator.core.challenges import assign_peer_notary, discover_peer_notaries
 
         # Extract burn-gate headers
-        hotkey_ss58 = request.headers.get("x-hotkey", "")
+        coldkey_ss58 = request.headers.get("x-coldkey", "")
         tx_hash = request.headers.get("x-burn-tx", "")
         signature = request.headers.get("x-signature", "")
 
-        if not hotkey_ss58 or not tx_hash or not signature:
+        if not coldkey_ss58 or not tx_hash or not signature:
             NOTARY_SESSIONS_ASSIGNED.labels(status="auth_failed").inc()
             raise HTTPException(
                 status_code=401,
-                detail="Missing required headers: X-Hotkey, X-Burn-Tx, X-Signature",
+                detail="Missing required headers: X-Coldkey, X-Burn-Tx, X-Signature",
             )
 
         # Get substrate connection for on-chain verification
@@ -2213,7 +2213,7 @@ def create_app(
             substrate = neuron.subtensor.substrate
 
         valid, error = burn_gate.authenticate_request(
-            hotkey_ss58, tx_hash, signature, substrate,
+            coldkey_ss58, tx_hash, signature, substrate,
         )
         if not valid:
             NOTARY_SESSIONS_ASSIGNED.labels(status="auth_failed").inc()
@@ -2297,7 +2297,7 @@ def create_app(
             session_id=session_id,
             miner_uid=chosen.uid,
             miner_ip=chosen.ip,
-            caller_hotkey=hotkey_ss58[:16] + "...",
+            caller_coldkey=coldkey_ss58[:16] + "...",
             excluded_hotkeys=len(exclude_hotkeys),
         )
 

@@ -16,17 +16,17 @@ from djinn_validator.core.shares import ShareStore
 
 
 BURN_AUTH_HEADERS = {
-    "X-Hotkey": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+    "X-Coldkey": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
     "X-Burn-Tx": "0xabc123def456",
     "X-Signature": "0x" + "aa" * 64,
 }
 
 
-def _mock_auth_success(hotkey: str, tx_hash: str, sig: str, substrate: object) -> tuple[bool, str]:
+def _mock_auth_success(coldkey: str, tx_hash: str, sig: str, substrate: object) -> tuple[bool, str]:
     return True, ""
 
 
-def _mock_auth_fail(hotkey: str, tx_hash: str, sig: str, substrate: object) -> tuple[bool, str]:
+def _mock_auth_fail(coldkey: str, tx_hash: str, sig: str, substrate: object) -> tuple[bool, str]:
     return False, "Invalid signature"
 
 
@@ -73,8 +73,8 @@ class TestBurnGateAuth:
         assert resp.status_code == 401
         assert "Missing" in resp.json()["detail"]
 
-    def test_missing_hotkey(self, client: TestClient) -> None:
-        headers = {k: v for k, v in BURN_AUTH_HEADERS.items() if k != "X-Hotkey"}
+    def test_missing_coldkey(self, client: TestClient) -> None:
+        headers = {k: v for k, v in BURN_AUTH_HEADERS.items() if k != "X-Coldkey"}
         resp = client.post("/v1/notary/session", headers=headers)
         assert resp.status_code == 401
 
@@ -239,7 +239,7 @@ class TestNotarySessionExclusions:
 class TestBurnGateUnit:
     """Unit tests for burn_gate module functions."""
 
-    def test_verify_signature_bad_hotkey(self) -> None:
+    def test_verify_signature_bad_coldkey(self) -> None:
         from djinn_validator.api.burn_gate import verify_signature
         assert verify_signature("not_an_ss58", "abcd", "ee" * 64) is False
 
@@ -248,11 +248,9 @@ class TestBurnGateUnit:
         _cache.clear()
         old_ts = time.time() - CACHE_TTL_SECONDS - 10
         for i in range(1010):
-            # Directly insert with old timestamps to simulate stale entries
-            _cache[f"tx_{i}"] = {"valid": True, "error": "", "hotkey": "x", "block_ts": 0, "checked_at": old_ts}
-        # Adding one more via _cache_set should trigger eviction of stale entries
-        _cache_set("tx_new", {"valid": True, "error": "", "hotkey": "x", "block_ts": 0})
-        assert len(_cache) <= 2  # only the new one survives (stale ones evicted)
+            _cache[f"tx_{i}"] = {"valid": True, "error": "", "coldkey": "x", "block_ts": 0, "checked_at": old_ts}
+        _cache_set("tx_new", {"valid": True, "error": "", "coldkey": "x", "block_ts": 0})
+        assert len(_cache) <= 2
 
     def test_authenticate_missing_fields(self) -> None:
         from djinn_validator.api.burn_gate import authenticate_request
@@ -263,35 +261,32 @@ class TestBurnGateUnit:
     def test_verify_burn_tx_caches_result(self) -> None:
         from djinn_validator.api.burn_gate import _cache, _cache_set, verify_burn_tx
         _cache.clear()
-        # Pre-populate cache with a valid entry
         import time as _t
         _cache_set("0xtest123", {
             "valid": True,
             "error": "",
-            "hotkey": "5GoodHotkey",
+            "coldkey": "5GoodColdkey",
             "amount": 2.0,
-            "block_ts": _t.time() - 100,  # 100 seconds ago
+            "block_ts": _t.time() - 100,
         })
-        # Should hit cache, no substrate call needed
-        valid, err = verify_burn_tx("0xtest123", "5GoodHotkey", None)
+        valid, err = verify_burn_tx("0xtest123", "5GoodColdkey", None)
         assert valid
         assert err == ""
 
-    def test_verify_burn_tx_cached_wrong_sender(self) -> None:
+    def test_verify_burn_tx_cached_wrong_coldkey(self) -> None:
         from djinn_validator.api.burn_gate import _cache, _cache_set, verify_burn_tx
         _cache.clear()
         import time as _t
         _cache_set("0xtest456", {
             "valid": True,
             "error": "",
-            "hotkey": "5GoodHotkey",
+            "coldkey": "5GoodColdkey",
             "amount": 2.0,
             "block_ts": _t.time() - 100,
         })
-        # Different hotkey should fail
-        valid, err = verify_burn_tx("0xtest456", "5DifferentHotkey", None)
+        valid, err = verify_burn_tx("0xtest456", "5DifferentColdkey", None)
         assert not valid
-        assert "hotkey" in err.lower()
+        assert "coldkey" in err.lower()
 
     def test_verify_burn_tx_cached_expired(self) -> None:
         from djinn_validator.api.burn_gate import _cache, _cache_set, verify_burn_tx, BURN_WINDOW_SECONDS
@@ -300,10 +295,10 @@ class TestBurnGateUnit:
         _cache_set("0xold789", {
             "valid": True,
             "error": "",
-            "hotkey": "5GoodHotkey",
+            "coldkey": "5GoodColdkey",
             "amount": 2.0,
-            "block_ts": _t.time() - BURN_WINDOW_SECONDS - 100,  # expired
+            "block_ts": _t.time() - BURN_WINDOW_SECONDS - 100,
         })
-        valid, err = verify_burn_tx("0xold789", "5GoodHotkey", None)
+        valid, err = verify_burn_tx("0xold789", "5GoodColdkey", None)
         assert not valid
         assert "old" in err.lower()
