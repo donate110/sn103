@@ -7,6 +7,7 @@ Endpoints from Appendix A of the whitepaper:
 - POST /v1/signal/{id}/outcome       — Submit outcome attestation
 - POST /v1/signals/resolve           — Resolve all pending signal outcomes
 - POST /v1/attest                    — Web attestation: TLSNotary proof of any URL (§15)
+- POST /v1/notary/session            — Assign a notary miner for external provers (browser extensions)
 - POST /v1/analytics/attempt         — Fire-and-forget analytics
 - GET  /health                       — Health check
 
@@ -39,6 +40,7 @@ from djinn_validator.api.metrics import (
     ATTESTATION_VERIFIED,
     BT_CONNECTED,
     MPC_ACTIVE_SESSIONS,
+    NOTARY_SESSIONS_ASSIGNED,
     OUTCOMES_ATTESTED,
     PURCHASES_PROCESSED,
     SHARES_STORED,
@@ -57,6 +59,7 @@ from djinn_validator.api.models import (
     AnalyticsRequest,
     AttestRequest,
     AttestResponse,
+    NotarySessionResponse,
     AuditSetStatusResponse,
     HealthResponse,
     IdentityResponse,
@@ -2164,6 +2167,119 @@ def create_app(
         return OTSharesResponse(
             session_id=req.session_id,
             triple_shares=[{k: hex(v) for k, v in ts.items()} for ts in shares],
+        )
+
+    # ------------------------------------------------------------------
+    # External Notary Session Assignment (for browser extension provers)
+    # ------------------------------------------------------------------
+
+    @app.post("/v1/notary/session", response_model=NotarySessionResponse)
+    async def notary_session(request: Request) -> NotarySessionResponse:
+        """Assign a random notary miner for an external prover.
+
+        The caller (e.g. debust/firmrecord) sends a JWT signed with Ed25519.
+        We verify the signature, pick a random miner with a live notary
+        sidecar, and return its coordinates. Stateless, no billing.
+
+        Exclusion: The JWT may contain ``exclude_hotkeys`` and/or
+        ``exclude_coldkeys`` lists. Any miner whose hotkey appears in
+        ``exclude_hotkeys``, or whose coldkey appears in
+        ``exclude_coldkeys``, is filtered out before random selection.
+        This lets callers guarantee the notary is never a miner they
+        operate (legal requirement for firmrecord).
+        """
+        import time as _time
+        import uuid as _uuid
+
+        from djinn_validator.api import jwt_auth
+        from djinn_validator.core.challenges import assign_peer_notary, discover_peer_notaries
+
+        # Extract and verify JWT from Authorization header
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header.startswith("Bearer "):
+            NOTARY_SESSIONS_ASSIGNED.labels(status="auth_failed").inc()
+            raise HTTPException(status_code=401, detail="Missing Bearer token")
+
+        token = auth_header[7:]
+        try:
+            claims = jwt_auth.verify_token(token)
+        except ValueError as e:
+            NOTARY_SESSIONS_ASSIGNED.labels(status="auth_failed").inc()
+            raise HTTPException(status_code=401, detail=str(e))
+
+        # Extract exclusion lists from verified JWT claims
+        exclude_hotkeys: set[str] = set(claims.get("exclude_hotkeys") or [])
+        exclude_coldkeys: set[str] = set(claims.get("exclude_coldkeys") or [])
+
+        # Build miner axon list from metagraph
+        if not neuron:
+            NOTARY_SESSIONS_ASSIGNED.labels(status="no_miners").inc()
+            raise HTTPException(status_code=503, detail="Validator not connected to network")
+
+        miner_uids = neuron.get_miner_uids()
+        if not miner_uids:
+            NOTARY_SESSIONS_ASSIGNED.labels(status="no_miners").inc()
+            raise HTTPException(status_code=503, detail="No miners available")
+
+        axons = []
+        for uid in miner_uids:
+            try:
+                axon = neuron.get_axon_info(uid)
+                ip = axon.get("ip", "")
+                port = axon.get("port", 0)
+                hotkey = axon.get("hotkey", "")
+                if not ip or not port or ip in ("0.0.0.0", "127.0.0.1"):
+                    continue
+                # Exclude by hotkey
+                if hotkey in exclude_hotkeys:
+                    continue
+                # Exclude by coldkey (look up from metagraph)
+                if exclude_coldkeys and neuron.metagraph is not None:
+                    coldkey = neuron.metagraph.coldkeys[uid]
+                    if coldkey in exclude_coldkeys:
+                        continue
+                axons.append({"uid": uid, "ip": ip, "port": port, "hotkey": hotkey})
+            except (IndexError, KeyError, AttributeError):
+                continue
+
+        if not axons:
+            NOTARY_SESSIONS_ASSIGNED.labels(status="no_miners").inc()
+            raise HTTPException(status_code=503, detail="No reachable miners (after exclusions)")
+
+        # Discover which miners have live notary sidecars
+        async with httpx.AsyncClient() as client:
+            peer_notaries = await discover_peer_notaries(client, axons)
+
+        if not peer_notaries:
+            NOTARY_SESSIONS_ASSIGNED.labels(status="no_miners").inc()
+            raise HTTPException(status_code=503, detail="No miners with active notary sidecars")
+
+        # Pick a random notary (prover_uid=-1 since the prover is external)
+        chosen = assign_peer_notary(prover_uid=-1, notaries=peer_notaries)
+        if chosen is None:
+            NOTARY_SESSIONS_ASSIGNED.labels(status="no_miners").inc()
+            raise HTTPException(status_code=503, detail="No eligible notary miners")
+
+        session_id = _uuid.uuid4().hex[:16]
+        expires_at = int(_time.time()) + 120  # 2 minute window to connect
+
+        NOTARY_SESSIONS_ASSIGNED.labels(status="ok").inc()
+        log.info(
+            "notary_session_assigned",
+            session_id=session_id,
+            miner_uid=chosen.uid,
+            miner_ip=chosen.ip,
+            excluded_hotkeys=len(exclude_hotkeys),
+            excluded_coldkeys=len(exclude_coldkeys),
+        )
+
+        return NotarySessionResponse(
+            session_id=session_id,
+            miner_ip=chosen.ip,
+            miner_port=chosen.port,
+            miner_hotkey=next((a["hotkey"] for a in axons if a["uid"] == chosen.uid), ""),
+            notary_public_key=chosen.pubkey_hex,
+            expires_at=expires_at,
         )
 
     @app.get("/metrics")

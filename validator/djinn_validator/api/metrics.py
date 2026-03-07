@@ -103,6 +103,12 @@ ATTESTATION_DURATION = Histogram(
     buckets=(1.0, 5.0, 10.0, 20.0, 30.0, 60.0, 120.0),
 )
 
+NOTARY_SESSIONS_ASSIGNED = Counter(
+    "djinn_validator_notary_sessions_assigned_total",
+    "External notary sessions assigned to miners",
+    ["status"],  # ok, no_miners, auth_failed
+)
+
 RATE_LIMIT_REJECTIONS = Counter(
     "djinn_validator_rate_limit_rejections_total",
     "Total requests rejected by rate limiter",

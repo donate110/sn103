@@ -518,6 +518,18 @@ class AttestRequest(BaseModel):
 
 
 
+class NotarySessionResponse(BaseModel):
+    """POST /v1/notary/session — Assigned notary miner for external provers."""
+
+    session_id: str
+    miner_ip: str
+    miner_port: int
+    miner_ws_path: str = "/v1/notary/ws"
+    miner_hotkey: str
+    notary_public_key: str
+    expires_at: int
+
+
 class AttestResponse(BaseModel):
     """Response from web attestation proof generation and verification."""
 
