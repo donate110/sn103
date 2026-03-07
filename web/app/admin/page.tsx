@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchProtocolStats,
   fetchRecentSignals,
@@ -268,7 +268,12 @@ export default function AdminDashboard() {
     }
   };
 
+  // Track whether this is the first load (full fetch) or incremental
+  const isFirstLoad = useRef(true);
+  const lastFetchTs = useRef(0);
+
   const refresh = useCallback(async () => {
+    const incremental = !isFirstLoad.current;
     setLoading(true);
     setRefreshStep("metagraph");
 
@@ -291,6 +296,10 @@ export default function AdminDashboard() {
       );
     }
 
+    // Incremental: pass the last fetch timestamp so we only get new data
+    const sinceTs = incremental ? lastFetchTs.current : undefined;
+    const now = Math.floor(Date.now() / 1000);
+
     // Fetch all data in parallel so badge counts are always available
     const [
       validatorRes,
@@ -310,12 +319,12 @@ export default function AdminDashboard() {
       track(1, fetchMinerHealth()),           // 1
       track(2, fetchProtocolStats()),         // 2
       track(3, fetchErrorReports()),          // 3
-      track(4, fetchNetworkActivity((status) => setValidatorFetchStatus(status))),       // 4
+      track(4, fetchNetworkActivity((status) => setValidatorFetchStatus(status), sinceTs)),       // 4
       track(5, fetchRecentSignals(50)),       // 5
       track(6, fetchRecentPurchases(50)),     // 6
       track(7, fetchRecentAudits(50)),        // 7
-      track(8, fetchAttestationData()),       // 8
-      track(9, fetchTelemetry()),             // 9
+      track(8, fetchAttestationData(incremental ? 1 : undefined)),       // 8
+      track(9, fetchTelemetry(sinceTs)),             // 9
       track(10, fetchFeedback(feedbackFilter)),// 10
       track(11, fetchDelegateNames()),         // 11
     ]);
@@ -332,17 +341,50 @@ export default function AdminDashboard() {
     }
     if (networkRes.status === "fulfilled") {
       const actResult = networkRes.value as NetworkActivityResult;
-      setNetworkEvents(actResult.events);
+      if (incremental) {
+        // Merge new events with existing, dedupe by id+validatorUid
+        setNetworkEvents((prev) => {
+          const existing = new Set(prev.map((e) => `${e.timestamp}-${e.category}-${e.validatorUid}`));
+          const fresh = actResult.events.filter((e) => !existing.has(`${e.timestamp}-${e.category}-${e.validatorUid}`));
+          const merged = [...fresh, ...prev];
+          merged.sort((a, b) => b.timestamp - a.timestamp);
+          return merged.slice(0, 2000);
+        });
+      } else {
+        setNetworkEvents(actResult.events);
+      }
       setNetworkDiag({ discovered: actResult.validatorsDiscovered, responded: actResult.validatorsResponded, error: actResult.error });
     }
     if (signalsRes.status === "fulfilled") setRecentSignals(signalsRes.value as SubgraphRecentSignal[]);
     if (purchasesRes.status === "fulfilled") setRecentPurchases(purchasesRes.value as SubgraphRecentPurchase[]);
     if (auditsRes.status === "fulfilled") setRecentAudits(auditsRes.value as SubgraphRecentAudit[]);
     if (attestRes.status === "fulfilled") {
-      setAttestations(attestRes.value as AttestationEntry[]);
+      const newAttest = attestRes.value as AttestationEntry[];
+      if (incremental) {
+        setAttestations((prev) => {
+          const existingIds = new Set(prev.map((a) => a.id));
+          const fresh = newAttest.filter((a) => !existingIds.has(a.id));
+          const merged = [...fresh, ...prev];
+          merged.sort((a, b) => b.created_at - a.created_at);
+          return merged.slice(0, 500);
+        });
+      } else {
+        setAttestations(newAttest);
+      }
     }
     if (telemetryRes.status === "fulfilled") {
-      setTelemetryEvents(telemetryRes.value as TelemetryEvent[]);
+      const newEvents = telemetryRes.value as TelemetryEvent[];
+      if (incremental) {
+        setTelemetryEvents((prev) => {
+          const existing = new Set(prev.map((e) => `${e.id}-${e.sourceUid}`));
+          const fresh = newEvents.filter((e) => !existing.has(`${e.id}-${e.sourceUid}`));
+          const merged = [...fresh, ...prev];
+          merged.sort((a, b) => b.timestamp - a.timestamp);
+          return merged.slice(0, 2000);
+        });
+      } else {
+        setTelemetryEvents(newEvents);
+      }
     }
     if (feedbackRes.status === "fulfilled") {
       setFeedback(feedbackRes.value as FeedbackEntry[]);
@@ -351,6 +393,8 @@ export default function AdminDashboard() {
       setDelegateNames(delegatesRes.value as Record<string, string>);
     }
 
+    lastFetchTs.current = now;
+    isFirstLoad.current = false;
     setLastRefresh(new Date());
     setRefreshStep("");
     setRefreshSteps({});
@@ -2653,6 +2697,7 @@ interface NetworkActivityResult {
 
 async function fetchNetworkActivity(
   onStatus?: (status: Record<number, "pending" | "success" | "error">) => void,
+  sinceTs?: number,
 ): Promise<NetworkActivityResult> {
   try {
     const discoverRes = await fetch("/api/validators/discover");
@@ -2668,11 +2713,15 @@ async function fetchNetworkActivity(
     for (const v of validators) status[v.uid] = "pending";
     onStatus?.({ ...status });
 
+    // First load: last 24h. Subsequent: only new events since last fetch.
+    const since = sinceTs || Math.floor(Date.now() / 1000) - 24 * 3600;
+    const limit = sinceTs ? 200 : 1000;
+
     const results = await Promise.allSettled(
       validators.map(async (v) => {
         try {
-          const res = await fetch(`/api/validators/${v.uid}/v1/telemetry?limit=500`, {
-            signal: AbortSignal.timeout(5000),
+          const res = await fetch(`/api/validators/${v.uid}/v1/telemetry?limit=${limit}&since=${since}`, {
+            signal: AbortSignal.timeout(8000),
           });
           if (!res.ok) {
             status[v.uid] = "error";
@@ -2699,7 +2748,7 @@ async function fetchNetworkActivity(
       .filter((r) => r.status === "fulfilled")
       .flatMap((r) => (r as PromiseFulfilledResult<NetworkEvent[]>).value);
     all.sort((a, b) => b.timestamp - a.timestamp);
-    return { events: all.slice(0, 200), validatorsDiscovered: validators.length, validatorsResponded: responded };
+    return { events: all, validatorsDiscovered: validators.length, validatorsResponded: responded };
   } catch (err) {
     return { events: [], validatorsDiscovered: 0, validatorsResponded: 0, error: String(err) };
   }
@@ -2718,18 +2767,20 @@ async function fetchErrorReports(): Promise<{ errors: ErrorReport[]; total: numb
   }
 }
 
-async function fetchAttestationData(): Promise<AttestationEntry[]> {
+async function fetchAttestationData(sinceId?: number): Promise<AttestationEntry[]> {
   try {
     const discoverRes = await fetch("/api/validators/discover");
     if (!discoverRes.ok) return [];
     const { validators } = (await discoverRes.json()) as { validators: ValidatorNode[] };
     if (validators.length === 0) return [];
 
-    // Fetch from all validators in parallel and merge
+    // First load: last 200. Subsequent: only grab last 20 (new since last refresh).
+    const limit = sinceId ? 20 : 200;
+
     const results = await Promise.allSettled(
       validators.map((v) =>
-        fetch(`/api/validators/${v.uid}/v1/admin/attestations?limit=50`, {
-          signal: AbortSignal.timeout(5000),
+        fetch(`/api/validators/${v.uid}/v1/admin/attestations?limit=${limit}`, {
+          signal: AbortSignal.timeout(8000),
         }).then((r) => (r.ok ? r.json() : { attestations: [] }))
       )
     );
@@ -2739,9 +2790,8 @@ async function fetchAttestationData(): Promise<AttestationEntry[]> {
         all.push(...(r.value.attestations || []));
       }
     }
-    // Sort by created_at descending, keep top 50
     all.sort((a, b) => b.created_at - a.created_at);
-    return all.slice(0, 50);
+    return all;
   } catch {
     return [];
   }
@@ -2797,43 +2847,31 @@ async function fetchMinerHealth(): Promise<MinerHealth[]> {
   }
 }
 
-async function fetchTelemetry(): Promise<TelemetryEvent[]> {
+async function fetchTelemetry(sinceTs?: number): Promise<TelemetryEvent[]> {
   try {
-    // Discover both validators and miners, then fetch /v1/telemetry from each
-    const [valRes, minRes] = await Promise.allSettled([
-      fetch("/api/validators/discover"),
-      fetch("/api/miners/discover"),
-    ]);
+    // Discover validators, then fetch /v1/telemetry from each
+    const valRes = await fetch("/api/validators/discover");
+    const validators: ValidatorNode[] = valRes.ok
+      ? ((await valRes.json()) as { validators: ValidatorNode[] }).validators
+      : [];
 
-    const validators: ValidatorNode[] =
-      valRes.status === "fulfilled" && valRes.value.ok
-        ? ((await valRes.value.json()) as { validators: ValidatorNode[] }).validators
-        : [];
-    const miners: MinerNode[] =
-      minRes.status === "fulfilled" && minRes.value.ok
-        ? ((await minRes.value.json()) as { miners: MinerNode[] }).miners
-        : [];
-
-    // Only fetch telemetry from validators — miners rarely have useful telemetry
-    // and probing 250+ adds ~60s to refresh
-    const fetches = [
-      ...validators.map((v) => ({
-        uid: v.uid,
-        type: "validator" as const,
-        url: `/api/validators/${v.uid}/v1/telemetry?limit=200`,
-      })),
-    ];
+    // First load: last 24h, up to 1000 per validator. Subsequent: only new.
+    const since = sinceTs || Math.floor(Date.now() / 1000) - 24 * 3600;
+    const limit = sinceTs ? 200 : 1000;
 
     const results = await Promise.allSettled(
-      fetches.map(async (f) => {
-        const res = await fetch(f.url, { signal: AbortSignal.timeout(5000) });
+      validators.map(async (v) => {
+        const res = await fetch(
+          `/api/validators/${v.uid}/v1/telemetry?limit=${limit}&since=${since}`,
+          { signal: AbortSignal.timeout(8000) },
+        );
         if (!res.ok) return [];
         const data = await res.json();
         return ((data.events || []) as Array<{ id: number; timestamp: number; category: string; summary: string; details: Record<string, unknown> }>).map(
           (e) => ({
             ...e,
-            sourceType: f.type,
-            sourceUid: f.uid,
+            sourceType: "validator" as const,
+            sourceUid: v.uid,
           }),
         );
       }),
@@ -2843,7 +2881,7 @@ async function fetchTelemetry(): Promise<TelemetryEvent[]> {
       .filter((r) => r.status === "fulfilled")
       .flatMap((r) => (r as PromiseFulfilledResult<TelemetryEvent[]>).value);
     all.sort((a, b) => b.timestamp - a.timestamp);
-    return all.slice(0, 500);
+    return all;
   } catch {
     return [];
   }
