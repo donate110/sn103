@@ -2216,8 +2216,26 @@ def create_app(
             coldkey_ss58, tx_hash, signature, substrate,
         )
         if not valid:
-            NOTARY_SESSIONS_ASSIGNED.labels(status="auth_failed").inc()
-            raise HTTPException(status_code=401, detail=error)
+            # On-chain lookup failed (likely pruned). Try peer validators.
+            if neuron and neuron.metagraph is not None:
+                from djinn_validator.core.mpc_orchestrator import _is_public_ip
+                peer_urls = []
+                mg = neuron.metagraph
+                for uid in range(mg.n.item()):
+                    if not mg.validator_permit[uid].item():
+                        continue
+                    if uid == neuron.uid:
+                        continue
+                    axon = mg.axons[uid]
+                    if axon.ip and axon.ip != "0.0.0.0" and _is_public_ip(axon.ip):
+                        peer_urls.append(f"http://{axon.ip}:{axon.port}")
+                if peer_urls:
+                    valid, _ = await burn_gate.verify_burn_via_peers(
+                        tx_hash, coldkey_ss58, peer_urls,
+                    )
+            if not valid:
+                NOTARY_SESSIONS_ASSIGNED.labels(status="auth_failed").inc()
+                raise HTTPException(status_code=401, detail=error)
 
         exclude_hotkeys: set[str] = set()
         exclude_coldkeys: set[str] = set()
@@ -2309,6 +2327,37 @@ def create_app(
             notary_public_key=chosen.pubkey_hex,
             expires_at=expires_at,
         )
+
+    @app.get("/v1/burn/verify")
+    async def burn_verify(tx_hash: str = "", coldkey: str = "") -> dict:
+        """Check if a burn tx is in this validator's verified cache.
+
+        Used by peer validators when their local chain lookup fails (pruned
+        block state). Returns the cached verification result if available.
+        """
+        from djinn_validator.api.burn_gate import _cache_get
+
+        if not tx_hash or not coldkey:
+            raise HTTPException(status_code=400, detail="tx_hash and coldkey required")
+
+        cached = _cache_get(tx_hash)
+        if cached is None or not cached.get("valid"):
+            return {"valid": False}
+
+        if cached.get("coldkey") != coldkey:
+            return {"valid": False}
+
+        import time as _time
+        age = _time.time() - cached.get("block_ts", 0)
+        from djinn_validator.api.burn_gate import BURN_WINDOW_SECONDS
+        if age > BURN_WINDOW_SECONDS:
+            return {"valid": False}
+
+        return {
+            "valid": True,
+            "amount": cached.get("amount", 0),
+            "block_ts": cached.get("block_ts", 0),
+        }
 
     @app.get("/metrics")
     async def metrics() -> bytes:

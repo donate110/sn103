@@ -302,3 +302,50 @@ class TestBurnGateUnit:
         valid, err = verify_burn_tx("0xold789", "5GoodColdkey", None)
         assert not valid
         assert "old" in err.lower()
+
+
+class TestBurnVerifyEndpoint:
+    """Tests for GET /v1/burn/verify peer cache endpoint."""
+
+    def test_valid_cached_burn(self, client: TestClient) -> None:
+        from djinn_validator.api.burn_gate import _cache, _cache_set
+        _cache.clear()
+        import time as _t
+        _cache_set("0xpeertx", {
+            "valid": True,
+            "error": "",
+            "coldkey": "5PeerColdkey",
+            "amount": 2.0,
+            "block_ts": _t.time() - 100,
+        })
+        resp = client.get("/v1/burn/verify", params={"tx_hash": "0xpeertx", "coldkey": "5PeerColdkey"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["valid"] is True
+        assert data["amount"] == 2.0
+
+    def test_unknown_tx(self, client: TestClient) -> None:
+        from djinn_validator.api.burn_gate import _cache
+        _cache.clear()
+        resp = client.get("/v1/burn/verify", params={"tx_hash": "0xunknown", "coldkey": "5Someone"})
+        assert resp.status_code == 200
+        assert resp.json()["valid"] is False
+
+    def test_wrong_coldkey(self, client: TestClient) -> None:
+        from djinn_validator.api.burn_gate import _cache, _cache_set
+        _cache.clear()
+        import time as _t
+        _cache_set("0xpeertx2", {
+            "valid": True,
+            "error": "",
+            "coldkey": "5RealColdkey",
+            "amount": 1.5,
+            "block_ts": _t.time() - 100,
+        })
+        resp = client.get("/v1/burn/verify", params={"tx_hash": "0xpeertx2", "coldkey": "5WrongColdkey"})
+        assert resp.status_code == 200
+        assert resp.json()["valid"] is False
+
+    def test_missing_params(self, client: TestClient) -> None:
+        resp = client.get("/v1/burn/verify")
+        assert resp.status_code == 400

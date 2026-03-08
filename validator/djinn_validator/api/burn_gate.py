@@ -254,11 +254,59 @@ def verify_burn_tx(
         return False, f"Chain lookup failed: {e}"
 
 
+async def verify_burn_via_peers(
+    tx_hash: str,
+    expected_coldkey: str,
+    peer_urls: list[str],
+) -> tuple[bool, str]:
+    """Ask peer validators if they have a verified burn in their cache.
+
+    Falls back to this when on-chain lookup fails (block state pruned).
+    """
+    if not peer_urls:
+        return False, "No peer validators to query"
+
+    import httpx
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        for url in peer_urls:
+            try:
+                resp = await client.get(
+                    f"{url}/v1/burn/verify",
+                    params={"tx_hash": tx_hash, "coldkey": expected_coldkey},
+                )
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                if data.get("valid"):
+                    log.info(
+                        "burn_verified_via_peer",
+                        tx_hash=tx_hash[:16] + "...",
+                        peer=url,
+                    )
+                    entry = {
+                        "valid": True,
+                        "error": "",
+                        "coldkey": expected_coldkey,
+                        "amount": data.get("amount", 0),
+                        "block_ts": data.get("block_ts", 0),
+                    }
+                    _cache_set(tx_hash, entry)
+                    _persist_cache()
+                    return True, ""
+            except Exception as e:
+                log.debug("burn_peer_query_failed", peer=url, error=str(e))
+                continue
+
+    return False, "No peer validators could verify this burn"
+
+
 def authenticate_request(
     coldkey_ss58: str,
     tx_hash_hex: str,
     signature_hex: str,
     substrate: Any,
+    peer_validator_urls: list[str] | None = None,
 ) -> tuple[bool, str]:
     """Full burn-gate authentication: signature + on-chain verification.
 
@@ -272,4 +320,11 @@ def authenticate_request(
         return False, "Invalid signature"
 
     # Step 2: Verify the burn on-chain (cached after first lookup)
-    return verify_burn_tx(tx_hash_hex, coldkey_ss58, substrate)
+    valid, error = verify_burn_tx(tx_hash_hex, coldkey_ss58, substrate)
+    if valid:
+        return True, ""
+
+    # Step 3: On-chain lookup failed (likely pruned). Store the error and
+    # peer_urls for the caller to try async peer verification.
+    # We return the error context so the caller can decide.
+    return False, error
