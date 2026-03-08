@@ -215,6 +215,8 @@ async def async_main() -> None:
     ]
     if bt_ok:
         running_tasks.append(asyncio.create_task(bt_sync_loop(neuron, health_tracker, telemetry)))
+    if notary_sidecar.enabled:
+        running_tasks.append(asyncio.create_task(notary_sidecar.watchdog_loop()))
 
     shutdown_event = asyncio.Event()
 

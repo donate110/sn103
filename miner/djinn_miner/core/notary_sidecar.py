@@ -60,9 +60,9 @@ class NotarySidecar:
     @property
     def info(self) -> NotaryInfo:
         return NotaryInfo(
-            enabled=self._started,
-            pubkey_hex=self._pubkey_hex,
-            port=self._port,
+            enabled=self.is_running(),
+            pubkey_hex=self._pubkey_hex if self.is_running() else "",
+            port=self._port if self.is_running() else 0,
             pid=self._process.pid if self._process else None,
         )
 
@@ -199,3 +199,23 @@ class NotarySidecar:
             return True
         log.info("notary_sidecar_restarting")
         return await self.start()
+
+    async def watchdog_loop(self, interval: float = 30.0) -> None:
+        """Periodically check sidecar health and restart if crashed.
+
+        Runs forever until cancelled. Call as an asyncio task.
+        """
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                if not self._enabled:
+                    continue
+                if not self.is_running():
+                    log.warning("notary_watchdog_detected_crash")
+                    restarted = await self.restart_if_needed()
+                    if not restarted:
+                        log.error("notary_watchdog_restart_failed")
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                log.error("notary_watchdog_error", error=str(e))
