@@ -16,13 +16,21 @@ Results are cached so repeated requests with the same tx hash are instant.
 
 from __future__ import annotations
 
+import json
+import os
 import time
+from pathlib import Path
 from typing import Any
 
 import bittensor as bt
 import structlog
 
 log = structlog.get_logger()
+
+BURN_CACHE_PATH = Path(os.getenv(
+    "BURN_CACHE_PATH",
+    os.path.expanduser("~/.local/share/djinn/burn_cache.json"),
+))
 
 # Hardcoded constants (no .env override)
 MIN_BURN_ALPHA: float = 1.0  # Minimum alpha burned per tx
@@ -41,6 +49,40 @@ def _cache_ttl(entry: dict[str, Any]) -> int:
     return CACHE_TTL_VALID_SECONDS if entry.get("valid") else CACHE_TTL_SECONDS
 
 
+def _load_cache() -> None:
+    """Load persisted valid burn entries from disk on startup."""
+    if not BURN_CACHE_PATH.exists():
+        return
+    try:
+        data = json.loads(BURN_CACHE_PATH.read_text())
+        now = time.time()
+        loaded = 0
+        for tx_hash, entry in data.items():
+            if not entry.get("valid"):
+                continue
+            age = now - entry.get("block_ts", 0)
+            if age > BURN_WINDOW_SECONDS:
+                continue
+            _cache[tx_hash] = entry
+            loaded += 1
+        if loaded:
+            log.info("burn_cache_loaded", count=loaded)
+    except Exception as e:
+        log.warning("burn_cache_load_failed", error=str(e))
+
+
+def _persist_cache() -> None:
+    """Write valid burn entries to disk so they survive restarts."""
+    valid_entries = {k: v for k, v in _cache.items() if v.get("valid")}
+    if not valid_entries:
+        return
+    try:
+        BURN_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        BURN_CACHE_PATH.write_text(json.dumps(valid_entries))
+    except Exception as e:
+        log.warning("burn_cache_persist_failed", error=str(e))
+
+
 def _cache_get(tx_hash: str) -> dict[str, Any] | None:
     entry = _cache.get(tx_hash)
     if entry and (time.time() - entry["checked_at"]) < _cache_ttl(entry):
@@ -57,6 +99,13 @@ def _cache_set(tx_hash: str, entry: dict[str, Any]) -> None:
         stale = [k for k, v in _cache.items() if (now - v["checked_at"]) >= _cache_ttl(v)]
         for k in stale:
             del _cache[k]
+    # Persist valid entries to disk
+    if entry.get("valid"):
+        _persist_cache()
+
+
+# Load persisted burns on module import
+_load_cache()
 
 
 def verify_signature(coldkey_ss58: str, tx_hash_hex: str, signature_hex: str) -> bool:
