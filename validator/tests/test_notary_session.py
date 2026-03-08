@@ -244,9 +244,9 @@ class TestBurnGateUnit:
         assert verify_signature("not_an_ss58", "abcd", "ee" * 64) is False
 
     def test_cache_eviction(self) -> None:
-        from djinn_validator.api.burn_gate import _cache, _cache_set, CACHE_TTL_SECONDS
+        from djinn_validator.api.burn_gate import _cache, _cache_set, CACHE_TTL_VALID_SECONDS
         _cache.clear()
-        old_ts = time.time() - CACHE_TTL_SECONDS - 10
+        old_ts = time.time() - CACHE_TTL_VALID_SECONDS - 10
         for i in range(1010):
             _cache[f"tx_{i}"] = {"valid": True, "error": "", "coldkey": "x", "block_ts": 0, "checked_at": old_ts}
         _cache_set("tx_new", {"valid": True, "error": "", "coldkey": "x", "block_ts": 0})

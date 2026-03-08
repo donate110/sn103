@@ -32,12 +32,18 @@ ALPHA_RAO_PER_TOKEN: int = 1_000_000_000  # 1 alpha = 1e9 rao
 
 # Cache: tx_hash -> {valid, error, coldkey, amount, block_ts, checked_at}
 _cache: dict[str, dict[str, Any]] = {}
-CACHE_TTL_SECONDS: int = 300  # 5 minutes
+CACHE_TTL_SECONDS: int = 300  # 5 minutes for invalid/not-found entries
+CACHE_TTL_VALID_SECONDS: int = BURN_WINDOW_SECONDS  # 30 days for verified burns
+
+
+def _cache_ttl(entry: dict[str, Any]) -> int:
+    """Valid burns are cached for the full burn window; failures expire fast."""
+    return CACHE_TTL_VALID_SECONDS if entry.get("valid") else CACHE_TTL_SECONDS
 
 
 def _cache_get(tx_hash: str) -> dict[str, Any] | None:
     entry = _cache.get(tx_hash)
-    if entry and (time.time() - entry["checked_at"]) < CACHE_TTL_SECONDS:
+    if entry and (time.time() - entry["checked_at"]) < _cache_ttl(entry):
         return entry
     return None
 
@@ -47,8 +53,8 @@ def _cache_set(tx_hash: str, entry: dict[str, Any]) -> None:
     _cache[tx_hash] = entry
     # Evict old entries if cache grows too large
     if len(_cache) > 1000:
-        cutoff = time.time() - CACHE_TTL_SECONDS
-        stale = [k for k, v in _cache.items() if v["checked_at"] < cutoff]
+        now = time.time()
+        stale = [k for k, v in _cache.items() if (now - v["checked_at"]) >= _cache_ttl(v)]
         for k in stale:
             del _cache[k]
 
