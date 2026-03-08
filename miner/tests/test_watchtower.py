@@ -57,7 +57,7 @@ class TestRemoteSha:
 
 class TestWatchLoop:
     @pytest.mark.asyncio
-    async def test_disabled_by_default(self) -> None:
+    async def test_disabled_when_explicitly_off(self) -> None:
         with patch.dict("os.environ", {"AUTO_UPDATE": "false"}):
             await asyncio.wait_for(watch_loop(), timeout=2.0)
 

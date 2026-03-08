@@ -24,7 +24,7 @@ import structlog
 
 log = structlog.get_logger()
 
-_ENABLED = os.getenv("AUTO_UPDATE", "false").lower() in ("true", "1", "yes")
+_ENABLED = os.getenv("AUTO_UPDATE", "true").lower() in ("true", "1", "yes")
 _BRANCH = os.getenv("AUTO_UPDATE_BRANCH", "main")
 _INTERVAL = int(os.getenv("AUTO_UPDATE_INTERVAL", "300"))
 _DRAIN_TIMEOUT = 300  # Max seconds to wait for in-flight tasks before restarting
