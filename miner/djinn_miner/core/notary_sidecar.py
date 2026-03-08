@@ -116,11 +116,15 @@ class NotarySidecar:
             "--key", self._key_path,
         ]
 
+        env = os.environ.copy()
+        env.setdefault("RUST_LOG", "debug")
+
         try:
             self._process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
         except FileNotFoundError:
             log.error("notary_sidecar_binary_missing", binary=binary)
@@ -136,6 +140,9 @@ class NotarySidecar:
 
         self._pubkey_hex = pubkey
         self._started = True
+        # Drain stderr in the background to prevent the notary binary
+        # from blocking on a full pipe buffer
+        asyncio.create_task(self._drain_stderr())
         log.info(
             "notary_sidecar_started",
             port=self._port,
@@ -175,6 +182,21 @@ class NotarySidecar:
         except TimeoutError:
             log.warning("notary_sidecar_pubkey_timeout")
         return ""
+
+    async def _drain_stderr(self) -> None:
+        """Read stderr lines and log them to prevent pipe buffer from filling."""
+        if not self._process or not self._process.stderr:
+            return
+        try:
+            while True:
+                line = await self._process.stderr.readline()
+                if not line:
+                    break
+                text = line.decode(errors="replace").strip()
+                if text:
+                    log.debug("notary_stderr", line=text)
+        except Exception:
+            pass
 
     async def stop(self) -> None:
         """Gracefully stop the notary sidecar."""
