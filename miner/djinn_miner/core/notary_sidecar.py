@@ -71,7 +71,25 @@ class NotarySidecar:
         return self._enabled
 
     def is_running(self) -> bool:
-        return self._process is not None and self._process.returncode is None
+        if self._process is None or self._process.returncode is not None:
+            return False
+        # Check if the process is actually a zombie (defunct)
+        try:
+            pid = self._process.pid
+            status_path = f"/proc/{pid}/status"
+            with open(status_path) as f:
+                for line in f:
+                    if line.startswith("State:"):
+                        state = line.split(":")[1].strip()
+                        if state.startswith("Z"):
+                            log.warning("notary_sidecar_zombie", pid=pid)
+                            return False
+                        break
+        except (FileNotFoundError, OSError):
+            # /proc not available (e.g. non-Linux or mock process).
+            # Fall back to returncode check, which already passed above.
+            pass
+        return True
 
     async def start(self) -> bool:
         """Start the notary sidecar. Returns True if started successfully."""
@@ -200,18 +218,39 @@ class NotarySidecar:
         log.info("notary_sidecar_restarting")
         return await self.start()
 
+    async def _tcp_probe(self) -> bool:
+        """Check if the notary port is actually accepting connections."""
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", self._port),
+                timeout=3.0,
+            )
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except (ConnectionRefusedError, TimeoutError, OSError):
+            return False
+
     async def watchdog_loop(self, interval: float = 30.0) -> None:
         """Periodically check sidecar health and restart if crashed.
 
-        Runs forever until cancelled. Call as an asyncio task.
+        Checks both process state (zombie detection) and TCP liveness
+        (port accepting connections). Runs forever until cancelled.
         """
         while True:
             try:
                 await asyncio.sleep(interval)
                 if not self._enabled:
                     continue
+                needs_restart = False
                 if not self.is_running():
                     log.warning("notary_watchdog_detected_crash")
+                    needs_restart = True
+                elif not await self._tcp_probe():
+                    log.warning("notary_watchdog_port_dead", port=self._port)
+                    needs_restart = True
+                if needs_restart:
+                    await self.stop()
                     restarted = await self.restart_if_needed()
                     if not restarted:
                         log.error("notary_watchdog_restart_failed")
