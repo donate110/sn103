@@ -139,8 +139,41 @@ async fn handle_connection(
     let mut socket = driver_task.await??;
 
     // Read the attestation request from the prover (bincode-serialized).
+    // WASM provers (e.g. browser extensions) skip the attestation phase and
+    // just close the connection after reveal(). Without a timeout here the
+    // notary would block on read_to_end() forever, holding the WS proxy
+    // semaphore slot and preventing new sessions.
     let mut request_bytes = Vec::new();
-    socket.read_to_end(&mut request_bytes).await?;
+    let read_result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        socket.read_to_end(&mut request_bytes),
+    )
+    .await;
+
+    match read_result {
+        Ok(Ok(_)) if request_bytes.is_empty() => {
+            // Prover closed connection without sending attestation request.
+            // This is normal for WASM provers that handle proof artifacts
+            // client-side via ProverOutput.
+            info!("Prover disconnected without attestation request (WASM prover)");
+            return Ok(());
+        }
+        Ok(Ok(_)) => {
+            // Got attestation request bytes, proceed with signing.
+        }
+        Ok(Err(e)) => {
+            // Read error on the socket.
+            return Err(e).context("failed to read attestation request");
+        }
+        Err(_) => {
+            // Timed out waiting for attestation request. Prover is likely a
+            // WASM client that finished the MPC protocol but left the
+            // connection open without sending anything.
+            info!("Timed out waiting for attestation request, closing connection");
+            return Ok(());
+        }
+    }
+
     let request: AttestationRequest =
         bincode::deserialize(&request_bytes).context("failed to deserialize attestation request")?;
 
