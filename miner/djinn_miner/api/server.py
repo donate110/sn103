@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger()
 
 
-_ATTEST_MAX_CONCURRENT = int(os.getenv("ATTEST_MAX_CONCURRENT", "3"))
+_ATTEST_MAX_CONCURRENT = int(os.getenv("ATTEST_MAX_CONCURRENT", "5"))
 
 
 def create_app(
@@ -249,7 +249,7 @@ def create_app(
 
     # Notary MPC sessions are stateful and heavy — limit concurrency.
     # The sidecar can handle a few concurrent sessions but degrades fast.
-    _notary_sem = asyncio.Semaphore(int(os.getenv("NOTARY_MAX_CONCURRENT", "2")))
+    _notary_sem = asyncio.Semaphore(int(os.getenv("NOTARY_MAX_CONCURRENT", "4")))
 
     @app.websocket("/v1/notary/ws")
     async def notary_ws_proxy(ws: WebSocket) -> None:
@@ -260,7 +260,7 @@ def create_app(
         This lets peers reach the notary through the existing API port
         with zero firewall changes.
 
-        Concurrency is limited by NOTARY_MAX_CONCURRENT (default 2) to
+        Concurrency is limited by NOTARY_MAX_CONCURRENT (default 4) to
         prevent overwhelming the notary sidecar.
         """
         if notary_sidecar is None or not notary_sidecar.is_running():

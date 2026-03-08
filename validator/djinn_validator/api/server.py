@@ -940,7 +940,7 @@ def create_app(
             candidates=[(c[0]["uid"], c[1]) for c in candidates],
         )
 
-        # Fan out to up to 3 miners in parallel — first success wins
+        # Fan out to up to 5 miners in parallel, first success wins
         _auth_hdrs: dict[str, str] = {}
 
         last_error = "No miners attempted"
@@ -1054,10 +1054,10 @@ def create_app(
 
             return (axon, data, phex, _t.perf_counter() - attempt_start)
 
-        # Launch parallel tasks for all candidates (up to 3)
+        # Launch parallel tasks for all candidates (up to 5)
         import asyncio as _aio
 
-        pick = candidates[:3]
+        pick = candidates[:5]
         tasks = [_aio.create_task(_try_miner(axon, tier)) for axon, tier in pick]
 
         async def _score_runner_ups(
@@ -1117,6 +1117,8 @@ def create_app(
                 url=req.url,
                 success=False,
                 error=last_error,
+                busy=True,
+                retry_after=15,
             )
 
         # Verify the TLSNotary proof
@@ -1281,9 +1283,12 @@ def create_app(
             )
             # Aggregate challenge rounds
             for b in raw.get("challenge_round", []):
-                challenged = sum(d.get("challenged", 0) for d in b["details"])
-                responded = sum(d.get("responses", d.get("responded", 0)) for d in b["details"])
-                correct = sum(d.get("correct", 0) for d in b["details"])
+                challenged = sum(d.get("miners_challenged", d.get("challenged", 0)) for d in b["details"])
+                responded = sum(d.get("responding", d.get("responded", 0)) for d in b["details"])
+                correct = sum(
+                    sum(1 for mr in d.get("miners", []) if mr.get("correct"))
+                    for d in b["details"]
+                )
                 challenge_buckets.append({
                     "t": b["t"],
                     "rounds": b["count"],
