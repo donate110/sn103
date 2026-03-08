@@ -250,7 +250,7 @@ def verify_burn_tx(
         return False, entry["error"]
 
     except Exception as e:
-        log.warning("burn_gate_verify_error", tx_hash=tx_hash[:16], error=str(e))
+        log.warning("burn_gate_verify_error", tx_hash=tx_hash[:16], tx_hash_full=tx_hash, error=str(e))
         return False, f"Chain lookup failed: {e}"
 
 
