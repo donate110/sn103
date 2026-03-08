@@ -201,9 +201,18 @@ class NotarySidecar:
         if not self._started or self._process is None:
             return False
         if self._process.returncode is not None:
+            # Capture stderr to diagnose why the binary crashed
+            stderr_text = ""
+            if self._process.stderr:
+                try:
+                    raw = await asyncio.wait_for(self._process.stderr.read(4096), timeout=1.0)
+                    stderr_text = raw.decode(errors="replace").strip()
+                except Exception:
+                    pass
             log.warning(
                 "notary_sidecar_exited",
                 returncode=self._process.returncode,
+                stderr=stderr_text[:500] if stderr_text else "",
             )
             self._started = False
             return False
