@@ -41,7 +41,6 @@ async fn main() -> Result<()> {
     let presentation: Presentation = bincode::deserialize(&presentation_bytes)
         .context("failed to deserialize presentation")?;
 
-    // Use default crypto provider (accepts system root CAs).
     let crypto_provider = CryptoProvider::default();
 
     let verifying_key = presentation.verifying_key();
