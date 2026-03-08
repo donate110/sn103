@@ -251,6 +251,9 @@ def verify_burn_tx(
 
     except Exception as e:
         log.warning("burn_gate_verify_error", tx_hash=tx_hash[:16], tx_hash_full=tx_hash, error=str(e))
+        # Do NOT cache chain lookup failures (e.g. "State discarded").
+        # The burn may be valid but unprovable right now. A peer validator
+        # or a future archive node query could still verify it.
         return False, f"Chain lookup failed: {e}"
 
 
