@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -25,6 +26,9 @@ log = structlog.get_logger()
 from djinn_miner.core.tlsn_bootstrap import ensure_binary
 
 PROVER_BINARY = ensure_binary("djinn-tlsn-prover")
+
+# Max age (seconds) before a prover process is considered stuck and killed.
+_PROVER_MAX_AGE = int(os.getenv("TLSN_PROVER_MAX_AGE", "300"))
 
 NOTARY_HOST = os.getenv("TLSN_NOTARY_HOST", "notary.pse.dev")
 NOTARY_PORT = int(os.getenv("TLSN_NOTARY_PORT", "443"))
@@ -213,12 +217,13 @@ async def _run_prover(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
+            start_new_session=True,  # own process group so we can kill the tree
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except TimeoutError:
-        log.error("tlsn_proof_timeout", timeout=timeout)
+        log.error("tlsn_proof_timeout", timeout=timeout, pid=proc.pid)
         try:
-            proc.kill()
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         except (ProcessLookupError, OSError) as kill_err:
             log.debug("tlsn_process_kill_failed", error=str(kill_err))
         try:
@@ -390,3 +395,50 @@ def _cleanup_dir(file_path: str) -> None:
             shutil.rmtree(parent, ignore_errors=True)
     except OSError as e:
         log.warning("tlsn_cleanup_failed", path=file_path, error=str(e))
+
+
+def reap_stale_provers(max_age: int | None = None) -> int:
+    """Kill djinn-tlsn-prover processes older than max_age seconds.
+
+    Called at miner startup to clean up orphans from previous runs
+    (e.g. after a watchtower restart via os.execv). Returns the number
+    of processes killed.
+    """
+    import subprocess
+
+    max_age = max_age or _PROVER_MAX_AGE
+    killed = 0
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "djinn-tlsn-prover"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return 0
+        my_pid = os.getpid()
+        for line in result.stdout.strip().splitlines():
+            pid = int(line.strip())
+            if pid == my_pid:
+                continue
+            try:
+                # Check process age via /proc/PID/stat
+                stat = Path(f"/proc/{pid}/stat").read_text()
+                starttime_ticks = int(stat.split(")")[1].split()[19])
+                uptime_s = float(Path("/proc/uptime").read_text().split()[0])
+                clock_ticks = os.sysconf("SC_CLK_TCK")
+                proc_age = uptime_s - (starttime_ticks / clock_ticks)
+                if proc_age > max_age:
+                    os.kill(pid, signal.SIGKILL)
+                    killed += 1
+                    log.warning(
+                        "stale_prover_killed",
+                        pid=pid,
+                        age_s=round(proc_age),
+                    )
+            except (ProcessLookupError, FileNotFoundError, ValueError, OSError):
+                continue
+    except Exception as e:
+        log.debug("reap_stale_provers_error", error=str(e))
+    if killed:
+        log.info("stale_provers_reaped", count=killed)
+    return killed

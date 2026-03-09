@@ -135,6 +135,11 @@ async def async_main() -> None:
         odds_api_connected=odds_api_ok,
     )
 
+    # Kill orphaned prover processes from previous runs (watchtower restarts
+    # via os.execv leave children running as orphans under PID 1).
+    from djinn_miner.core.tlsn import reap_stale_provers
+    reap_stale_provers()
+
     checker = LineChecker(
         odds_client=odds_client,
         line_tolerance=config.line_tolerance,
