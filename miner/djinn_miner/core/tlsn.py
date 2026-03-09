@@ -122,8 +122,9 @@ async def generate_proof(
             "This will be blocked in a future update.",
         )
 
-    # Resolve redirects: the prover can't follow them, so we do a HEAD
-    # request first and use the final URL.
+    # Resolve redirects and probe response size. The prover can't follow
+    # redirects, and knowing the size lets us right-size the MPC circuit.
+    preflight_content_length: int | None = None
     try:
         import httpx
 
@@ -133,6 +134,9 @@ async def generate_proof(
             if final_url != url:
                 log.info("tlsn_redirect_resolved", original=url, final=final_url)
                 url = final_url
+            cl = head.headers.get("content-length")
+            if cl and cl.isdigit():
+                preflight_content_length = int(cl)
     except Exception as e:
         log.debug("tlsn_redirect_check_failed", error=str(e))
 
@@ -145,10 +149,29 @@ async def generate_proof(
         tmp_dir = tempfile.mkdtemp(prefix="djinn-tlsn-")
         output_path = os.path.join(tmp_dir, "presentation.bin")
 
+    # Right-size the MPC circuit based on preflight Content-Length.
+    # Round up to the next power of two after doubling (2x headroom for
+    # response variance, HTTP headers, and TLS framing overhead).
+    # Floor of 256KB; falls back to 256KB when Content-Length is absent.
+    _MIN_RECV = 262_144  # 256 KB floor
+    if preflight_content_length is not None and preflight_content_length > 0:
+        raw = preflight_content_length * 2
+        # Next power of two >= raw
+        recv_data_size = 1 << (raw - 1).bit_length()
+        recv_data_size = max(_MIN_RECV, recv_data_size)
+        log.info(
+            "tlsn_circuit_sized",
+            content_length=preflight_content_length,
+            max_recv_data=recv_data_size,
+        )
+    else:
+        recv_data_size = _MIN_RECV
+
     try:
         if notary_ws and notary_host:
             result = await _run_prover_via_ws(
                 url, notary_host, port, output_path, timeout,
+                max_recv_data=recv_data_size,
             )
             # If peer notary failed, fall back to PSE rather than returning error
             if not result.success and not REQUIRE_PEER_NOTARY:
@@ -163,9 +186,11 @@ async def generate_proof(
                     CENTRALIZED_NOTARY_FALLBACKS.inc()
                 except Exception:
                     pass
-                return await _run_prover(url, NOTARY_HOST, NOTARY_PORT, output_path, timeout)
+                return await _run_prover(url, NOTARY_HOST, NOTARY_PORT, output_path, timeout,
+                                         max_recv_data=recv_data_size)
             return result
-        return await _run_prover(url, host, port, output_path, timeout)
+        return await _run_prover(url, host, port, output_path, timeout,
+                                 max_recv_data=recv_data_size)
     except Exception:
         # Ensure temp dir is cleaned up on any unexpected exception
         if tmp_dir:
@@ -179,6 +204,7 @@ async def _run_prover(
     port: int,
     output_path: str,
     timeout: float,
+    max_recv_data: int = 0,
 ) -> TLSNProofResult:
     """Run the TLSNotary prover binary and return the result."""
     # Split URL at query params to avoid leaking API key in /proc/*/cmdline
@@ -205,9 +231,10 @@ async def _run_prover(
         REDACT_HEADERS,
     ]
 
-    # Use smaller MPC circuit for known-small responses (faster proving)
-    if MAX_RECV_DATA > 0:
-        cmd.extend(["--max-recv-data", str(MAX_RECV_DATA)])
+    # Right-size MPC circuit: prefer caller's value, then env override, then binary default
+    recv_limit = max_recv_data or MAX_RECV_DATA
+    if recv_limit > 0:
+        cmd.extend(["--max-recv-data", str(recv_limit)])
 
     log.info(
         "tlsn_proof_starting",
@@ -307,6 +334,7 @@ async def _run_prover_via_ws(
     notary_api_port: int,
     output_path: str,
     timeout: float,
+    max_recv_data: int = 0,
 ) -> TLSNProofResult:
     """Run the prover via a WebSocket bridge to a peer notary.
 
@@ -380,6 +408,7 @@ async def _run_prover_via_ws(
         # Run the prover pointing at our local bridge
         result = await _run_prover(
             url, "127.0.0.1", bridge_port, output_path, timeout,
+            max_recv_data=max_recv_data,
         )
         if not result.success and bridge_error:
             result.error = f"WebSocket bridge: {bridge_error}; {result.error}"
