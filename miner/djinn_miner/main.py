@@ -212,11 +212,21 @@ async def async_main() -> None:
         log_format=os.getenv("LOG_FORMAT", "console"),
     )
 
+    # Periodic reaper for stuck prover processes (runs every 5 min)
+    async def _prover_reaper_loop() -> None:
+        while True:
+            await asyncio.sleep(300)
+            try:
+                reap_stale_provers()
+            except Exception as e:
+                log.debug("prover_reaper_error", error=str(e))
+
     # Run API server, BT sync loop, and watchtower concurrently
     from pathlib import Path
     running_tasks = [
         asyncio.create_task(run_server(app, config.api_host, config.api_port)),
         asyncio.create_task(watchtower_loop(package_dir=Path(__file__).resolve().parent.parent)),
+        asyncio.create_task(_prover_reaper_loop()),
     ]
     if bt_ok:
         running_tasks.append(asyncio.create_task(bt_sync_loop(neuron, health_tracker, telemetry)))
