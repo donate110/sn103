@@ -34,10 +34,13 @@ class CircuitBreaker:
         failure_threshold: int = 5,
         recovery_timeout: float = 30.0,
         half_open_max: int = 1,
+        max_recovery_timeout: float = 600.0,
     ) -> None:
         self.name = name
         self._failure_threshold = failure_threshold
+        self._base_recovery_timeout = recovery_timeout
         self._recovery_timeout = recovery_timeout
+        self._max_recovery_timeout = max_recovery_timeout
         self._half_open_max = half_open_max
         self._state = CircuitState.CLOSED
         self._failure_count = 0
@@ -81,20 +84,29 @@ class CircuitBreaker:
             pass
 
     def record_success(self) -> None:
-        """Record a successful request."""
+        """Record a successful request. Resets backoff to base timeout."""
         if self._state in (CircuitState.HALF_OPEN, CircuitState.OPEN):
             log.info("circuit_breaker_closed", name=self.name)
         self._failure_count = 0
+        self._recovery_timeout = self._base_recovery_timeout
         self._state = CircuitState.CLOSED
         self._update_gauge()
 
     def record_failure(self) -> None:
-        """Record a failed request."""
+        """Record a failed request. Doubles backoff on repeated half-open failures."""
         self._failure_count += 1
         self._last_failure_time = time.monotonic()
         if self._state == CircuitState.HALF_OPEN:
+            # Probe failed; double the recovery timeout (exponential backoff)
+            self._recovery_timeout = min(
+                self._recovery_timeout * 2, self._max_recovery_timeout,
+            )
             self._state = CircuitState.OPEN
-            log.warning("circuit_breaker_reopened", name=self.name)
+            log.warning(
+                "circuit_breaker_reopened",
+                name=self.name,
+                next_probe_s=self._recovery_timeout,
+            )
         elif self._failure_count >= self._failure_threshold:
             self._state = CircuitState.OPEN
             log.warning(
@@ -109,3 +121,4 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._failure_count = 0
         self._half_open_attempts = 0
+        self._recovery_timeout = self._base_recovery_timeout
