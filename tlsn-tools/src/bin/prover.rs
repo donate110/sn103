@@ -70,6 +70,12 @@ struct Args {
     /// Headers to redact from the presentation (comma-separated, case-insensitive)
     #[arg(long, default_value = "authorization,apikey,x-api-key")]
     redact_headers: String,
+
+    /// Max bytes the MPC circuit allocates for received data.
+    /// Smaller values produce faster proofs for small responses (e.g. API JSON).
+    /// Must match or exceed the actual response size.
+    #[arg(long, default_value_t = MAX_RECV_DATA)]
+    max_recv_data: usize,
 }
 
 #[tokio::main]
@@ -115,7 +121,7 @@ async fn main() -> Result<()> {
                 .protocol(
                     MpcTlsConfig::builder()
                         .max_sent_data(MAX_SENT_DATA)
-                        .max_recv_data(MAX_RECV_DATA)
+                        .max_recv_data(args.max_recv_data)
                         .build()?,
                 )
                 .build()?,

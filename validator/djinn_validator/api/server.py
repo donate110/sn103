@@ -47,6 +47,7 @@ from djinn_validator.api.metrics import (
     UPTIME_SECONDS,
     metrics_response,
 )
+from djinn_validator.utils.circuit_breaker import CircuitBreaker
 from djinn_validator.api.middleware import (
     RateLimiter,
     RateLimitMiddleware,
@@ -804,6 +805,19 @@ def create_app(
     _ATTEST_MAX_CONCURRENT = int(_os.environ.get("ATTEST_MAX_CONCURRENT", "15"))
     _attest_inflight = 0
 
+    # Per-miner circuit breakers: 3 consecutive failures -> open for 60s.
+    # Prevents wasting parallel fan-out slots on miners whose sidecar is down.
+    _miner_breakers: dict[int, CircuitBreaker] = {}
+
+    def _get_miner_breaker(uid: int) -> CircuitBreaker:
+        if uid not in _miner_breakers:
+            _miner_breakers[uid] = CircuitBreaker(
+                name=f"miner_{uid}",
+                failure_threshold=3,
+                recovery_timeout=60.0,
+            )
+        return _miner_breakers[uid]
+
     @app.get("/v1/attest/capacity")
     async def attest_capacity() -> dict:
         """Return current attestation capacity for admission control."""
@@ -898,18 +912,27 @@ def create_app(
             except Exception as e:
                 log.warning("attest_peer_notary_discovery_failed", error=str(e))
 
-        # Smart miner selection: proven miners first, then unproven
+        # Smart miner selection: proven miners first, then unproven.
+        # Skip miners whose circuit breaker is open (known-down sidecars).
         candidates: list[tuple[dict, str]] = []  # (axon_info, tier)
+        breaker_deferred: list[tuple[dict, str]] = []  # circuit-broken, appended last
         if scorer is not None and axon_by_uid:
             ranked = scorer.select_attest_miners(list(axon_by_uid.keys()))
             for uid, tier in ranked:
                 if uid in axon_by_uid:
-                    candidates.append((axon_by_uid[uid], tier))
+                    breaker = _get_miner_breaker(uid)
+                    if breaker.allow_request():
+                        candidates.append((axon_by_uid[uid], tier))
+                    else:
+                        breaker_deferred.append((axon_by_uid[uid], tier))
+            candidates.extend(breaker_deferred)
 
         # Fallback: if scorer has no data yet, try all miners with health responses
         if not candidates and axon_by_uid:
             for uid, axon in list(axon_by_uid.items())[:5]:
-                candidates.append((axon, "unproven"))
+                breaker = _get_miner_breaker(uid)
+                if breaker.allow_request():
+                    candidates.append((axon, "unproven"))
 
         # Last resort: configured fallback miner URL
         if not candidates and fallback_miner_url:
@@ -958,6 +981,7 @@ def create_app(
             attempt_start = _t.perf_counter()
             miner_url = axon.get("_url") or f"http://{axon['ip']}:{axon['port']}/v1/attest"
             timeout = 210.0 if tier == "proven" else 60.0 if tier == "redemption" else 120.0
+            breaker = _get_miner_breaker(axon["uid"]) if axon["uid"] >= 0 else None
 
             # Assign a peer notary, excluding previously failed notaries
             assigned_notary = assign_peer_notary(
@@ -998,6 +1022,8 @@ def create_app(
             except httpx.HTTPError as e:
                 elapsed = _t.perf_counter() - attempt_start
                 log.warning("attest_miner_unreachable", miner_uid=axon["uid"], tier=tier, err=str(e), elapsed_s=round(elapsed, 1))
+                if breaker:
+                    breaker.record_failure()
                 if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=elapsed, proof_valid=False)
@@ -1007,6 +1033,8 @@ def create_app(
 
             if resp.status_code != 200:
                 log.warning("attest_miner_error", miner_uid=axon["uid"], status=resp.status_code)
+                if breaker:
+                    breaker.record_failure()
                 if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
@@ -1018,18 +1046,22 @@ def create_app(
                 data = resp.json()
             except Exception:
                 log.error("miner_malformed_json", miner_uid=axon["uid"])
+                if breaker:
+                    breaker.record_failure()
                 if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
                 return None
 
-            # Miner busy — skip without penalising (not a notary failure)
+            # Miner busy -- skip without penalising (not a notary failure)
             if data.get("busy"):
                 log.info("attest_miner_busy", miner_uid=axon["uid"])
                 return None
 
             if not data.get("success"):
                 err = data.get("error", f"Miner {axon['uid']} attestation failed")
+                if breaker:
+                    breaker.record_failure()
                 if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
@@ -1042,10 +1074,16 @@ def create_app(
             phex = data.get("proof_hex")
             if not phex:
                 log.warning("attest_miner_no_proof_hex", miner_uid=axon["uid"])
+                if breaker:
+                    breaker.record_failure()
                 if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
                 return None
+
+            # Miner produced a proof -- record circuit breaker success
+            if breaker:
+                breaker.record_success()
 
             # Store the assigned notary info for verification and logging
             if assigned_notary:

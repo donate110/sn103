@@ -41,6 +41,10 @@ REQUIRE_PEER_NOTARY = os.getenv("TLSN_REQUIRE_PEER_NOTARY", "true").lower() in (
 # Headers whose values should be redacted from the proof
 REDACT_HEADERS = os.getenv("TLSN_REDACT_HEADERS", "authorization,apikey,x-api-key")
 
+# Max receive data for MPC circuit (bytes). Smaller = faster proofs for small responses.
+# Default 0 = use binary default (2MB). Override for known-small API responses.
+MAX_RECV_DATA = int(os.getenv("TLSN_MAX_RECV_DATA", "0"))
+
 
 @dataclass
 class TLSNProofResult:
@@ -200,6 +204,10 @@ async def _run_prover(
         "--redact-headers",
         REDACT_HEADERS,
     ]
+
+    # Use smaller MPC circuit for known-small responses (faster proving)
+    if MAX_RECV_DATA > 0:
+        cmd.extend(["--max-recv-data", str(MAX_RECV_DATA)])
 
     log.info(
         "tlsn_proof_starting",
