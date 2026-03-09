@@ -34,10 +34,9 @@ NOTARY_HOST = os.getenv("TLSN_NOTARY_HOST", "notary.pse.dev")
 NOTARY_PORT = int(os.getenv("TLSN_NOTARY_PORT", "443"))
 
 # When True, refuse to fall back to the centralized PSE notary.
-# During transition: default is False (allow PSE) so miners don't break
-# if their validator hasn't updated to assign peer notaries yet.
-# Once all validators are confirmed assigning peer notaries, flip to True.
-REQUIRE_PEER_NOTARY = os.getenv("TLSN_REQUIRE_PEER_NOTARY", "false").lower() in ("true", "1", "yes")
+# All validators now assign peer notaries, so PSE fallback just creates
+# zombie provers that hang on notary.pse.dev for hours. Fail fast instead.
+REQUIRE_PEER_NOTARY = os.getenv("TLSN_REQUIRE_PEER_NOTARY", "true").lower() in ("true", "1", "yes")
 
 # Headers whose values should be redacted from the proof
 REDACT_HEADERS = os.getenv("TLSN_REDACT_HEADERS", "authorization,apikey,x-api-key")
