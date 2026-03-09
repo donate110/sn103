@@ -61,7 +61,11 @@ async fn main() -> Result<()> {
     let pubkey_hex = hex::encode(signing_key.verifying_key().to_sec1_bytes());
     info!(pubkey = %pubkey_hex, "Notary public key");
 
-    let listener = tokio::net::TcpListener::bind((args.bind.as_str(), args.port)).await?;
+    let addr: std::net::SocketAddr = format!("{}:{}", args.bind, args.port).parse()?;
+    let socket = tokio::net::TcpSocket::new_v4()?;
+    socket.set_reuseaddr(true)?;
+    socket.bind(addr)?;
+    let listener = socket.listen(64)?;
     info!(bind = %args.bind, port = args.port, "Listening for connections");
 
     loop {

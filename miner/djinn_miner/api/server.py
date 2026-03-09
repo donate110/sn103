@@ -309,8 +309,14 @@ def create_app(
                     pass
 
             try:
-                await asyncio.gather(ws_to_tcp(), tcp_to_ws())
+                await asyncio.wait_for(
+                    asyncio.gather(ws_to_tcp(), tcp_to_ws()),
+                    timeout=300.0,  # 5 min max per notary session
+                )
                 NOTARY_SESSIONS.labels(status="completed").inc()
+            except TimeoutError:
+                log.warning("notary_ws_session_timeout")
+                NOTARY_SESSIONS.labels(status="timeout").inc()
             except Exception:
                 NOTARY_SESSIONS.labels(status="error").inc()
             finally:
