@@ -132,7 +132,6 @@ while [ "$restart_count" -lt "$MAX_RESTARTS" ]; do
   fi
 
   # Check if we should stop (e.g., genius wallet drained)
-  local genius_bal
   genius_bal=$(cast balance 0x68fc8eeC9E5551d4c93a89b6d861f0a05e0A2A1d --rpc-url https://sepolia.base.org 2>/dev/null || echo "0")
   if [ "$genius_bal" != "0" ] && [ "$(echo "$genius_bal < 50000000000000" | bc 2>/dev/null)" = "1" ]; then
     log "WARNING: Genius G0 ETH critically low ($genius_bal wei), stopping runner"
