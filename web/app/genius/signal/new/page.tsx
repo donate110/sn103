@@ -317,16 +317,19 @@ export default function CreateSignal() {
       const healthChecks = await Promise.allSettled(
         preflightValidators.map((v) => v.health()),
       );
-      const healthyCount = healthChecks.filter(
-        (r) => r.status === "fulfilled" && r.value.status === "ok",
-      ).length;
+      const healthyValidators = preflightValidators.filter(
+        (_, i) => healthChecks[i].status === "fulfilled" && (healthChecks[i] as PromiseFulfilledResult<{ status: string }>).value.status === "ok",
+      );
+      const healthyCount = healthyValidators.length;
       if (healthyCount < SHAMIR_MIN) {
         setStepError(
-          `Only ${healthyCount} of ${SHAMIR_MIN} minimum validators are reachable. Try again in a moment.`,
+          `Only ${healthyCount} validators reachable, need at least ${SHAMIR_MIN}. The network may be down.`,
         );
         setStep("configure");
         return;
       }
+      // healthyValidators (not all preflightValidators) are used for
+      // distribution below, so shares only go to reachable validators.
 
       // Pre-flight: miner executability check — ALL 10 lines must be available.
       // Miners are blind to which line is real. If any line fails, the signal cannot be created.
@@ -487,7 +490,7 @@ export default function CreateSignal() {
 
       setStep("distributing");
 
-      const validators = preflightValidators;
+      const validators = healthyValidators;
       const signalIdStr = signalId.toString();
 
       // Shamir threshold: clamp(ceil(2/3 * validators), 3, 7).
