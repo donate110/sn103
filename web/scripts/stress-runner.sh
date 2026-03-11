@@ -55,12 +55,34 @@ archive_log() {
   fi
 }
 
+try_auto_faucet() {
+  # Attempt CDP faucet if credentials exist
+  local faucet_script="$SCRIPT_DIR/../scripts/auto-faucet.py"
+  if [ -f "$faucet_script" ]; then
+    local venv_python="$WEB_DIR/../.venv/bin/python3"
+    if [ -x "$venv_python" ]; then
+      log "Attempting auto-faucet claim..."
+      timeout 30 "$venv_python" "$faucet_script" "$1" 2>&1 | while read -r line; do
+        log "  [faucet] $line"
+      done
+      return $?
+    fi
+  fi
+  return 1
+}
+
 check_deployer_health() {
   local deployer_bal
   deployer_bal=$(cast balance 0xD717b5fbA93F123f6ad530ae2Ab327B4DcDa1e37 --rpc-url https://sepolia.base.org 2>/dev/null || echo "0")
   local deployer_eth
   deployer_eth=$(echo "scale=6; $deployer_bal / 1000000000000000000" | bc 2>/dev/null || echo "unknown")
   log "Deployer ETH: $deployer_eth"
+
+  # Auto-faucet if deployer is low (below 0.002 ETH)
+  if [ "$deployer_bal" != "0" ] && [ "$(echo "$deployer_bal < 2000000000000000" | bc 2>/dev/null)" = "1" ]; then
+    log "Deployer ETH low, attempting auto-faucet..."
+    try_auto_faucet "0xD717b5fbA93F123f6ad530ae2Ab327B4DcDa1e37" || log "Auto-faucet not available (set CDP_API_KEY_ID + CDP_API_KEY_SECRET)"
+  fi
 
   # Check genius balance too
   local genius_bal
