@@ -317,19 +317,35 @@ export default function CreateSignal() {
       const healthChecks = await Promise.allSettled(
         preflightValidators.map((v) => v.health()),
       );
-      const healthyValidators = preflightValidators.filter(
-        (_, i) => healthChecks[i].status === "fulfilled" && (healthChecks[i] as PromiseFulfilledResult<{ status: string }>).value.status === "ok",
-      );
+      // Filter to validators that are:
+      // 1. Healthy (status: "ok")
+      // 2. Running a version that accepts our dynamic threshold (>= 574).
+      //    Validators on v573 or below enforce a minimum threshold of 7,
+      //    which causes distribution to fail when fewer than 7 validators exist.
+      const MIN_COMPATIBLE_VERSION = 574;
+      const healthyValidators = preflightValidators.filter((_, i) => {
+        if (healthChecks[i].status !== "fulfilled") return false;
+        const health = (healthChecks[i] as PromiseFulfilledResult<{ status: string; version?: string | number }>).value;
+        if (health.status !== "ok") return false;
+        const ver = parseInt(String(health.version ?? "0"), 10);
+        if (isNaN(ver) || ver < MIN_COMPATIBLE_VERSION) return false;
+        return true;
+      });
       const healthyCount = healthyValidators.length;
       if (healthyCount < SHAMIR_MIN) {
+        const totalHealthy = healthChecks.filter(
+          (r) => r.status === "fulfilled" && (r as PromiseFulfilledResult<{ status: string }>).value.status === "ok",
+        ).length;
         setStepError(
-          `Only ${healthyCount} validators reachable, need at least ${SHAMIR_MIN}. The network may be down.`,
+          totalHealthy > healthyCount
+            ? `${totalHealthy} validators reachable but only ${healthyCount} running compatible software (need ${SHAMIR_MIN}). Some validators need to update.`
+            : `Only ${healthyCount} validators reachable, need at least ${SHAMIR_MIN}. The network may be down.`,
         );
         setStep("configure");
         return;
       }
       // healthyValidators (not all preflightValidators) are used for
-      // distribution below, so shares only go to reachable validators.
+      // distribution below, so shares only go to compatible validators.
 
       // Pre-flight: miner executability check — ALL 10 lines must be available.
       // Miners are blind to which line is real. If any line fails, the signal cannot be created.
