@@ -2,7 +2,9 @@
 # stress-runner.sh: Runs the signal stress test in a loop, auto-restarting on crash.
 # Archives logs between runs. Monitors health and reports stats.
 
-set -uo pipefail
+# Note: do NOT use set -e or set -u here. The runner must survive command failures
+# (cast balance errors, faucet failures, etc.) without exiting the restart loop.
+set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WEB_DIR="$(dirname "$SCRIPT_DIR")"
@@ -21,21 +23,24 @@ total_failures=0
 total_purchases=0
 
 log() {
-  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [RUNNER] $*" | tee -a "$LOG_DIR/runner.log"
+  local msg="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [RUNNER] $*"
+  echo "$msg" >> "$LOG_DIR/runner.log"
+  echo "$msg" >&2
 }
 
 archive_log() {
   if [ -f "$LIVE_LOG" ]; then
     local ts
     ts=$(date -u +%Y%m%d_%H%M%S)
-    cp "$LIVE_LOG" "$ARCHIVE_DIR/stress-$ts.log"
+    mkdir -p "$ARCHIVE_DIR" 2>/dev/null || true
+    cp "$LIVE_LOG" "$ARCHIVE_DIR/stress-$ts.log" 2>/dev/null || true
     log "Archived log to archive/stress-$ts.log"
 
-    # Extract stats from this run
+    # Extract stats from this run (grep -c returns 1 on no match, so capture safely)
     local signals failures purchases
-    signals=$(grep -c '\[OK\].*Signal created' "$LIVE_LOG" 2>/dev/null || echo 0)
-    failures=$(grep -c '\[WARN\].*FAILED' "$LIVE_LOG" 2>/dev/null || echo 0)
-    purchases=$(grep -c '\[OK\].*Purchase succeeded' "$LIVE_LOG" 2>/dev/null || echo 0)
+    signals=$(grep -c '\[OK\].*Signal created' "$LIVE_LOG" 2>/dev/null) || signals=0
+    failures=$(grep -c '\[WARN\].*FAILED' "$LIVE_LOG" 2>/dev/null) || failures=0
+    purchases=$(grep -c '\[OK\].*Purchase succeeded' "$LIVE_LOG" 2>/dev/null) || purchases=0
 
     total_signals=$((total_signals + signals))
     total_failures=$((total_failures + failures))
@@ -145,8 +150,9 @@ while [ "$restart_count" -lt "$MAX_RESTARTS" ]; do
     break
   fi
 
-  log "Waiting ${RESTART_DELAY}s before restart..."
+  log "Waiting ${RESTART_DELAY}s before restart... (restart_count=$restart_count, max=$MAX_RESTARTS)"
   sleep "$RESTART_DELAY"
+  log "Restarting..."
 done
 
 log "=== Stress runner complete: $restart_count runs, $total_signals signals, $total_purchases purchases ==="
