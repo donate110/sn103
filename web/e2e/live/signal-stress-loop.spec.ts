@@ -52,8 +52,9 @@ const MAX_PASSES = parseInt(process.env.STRESS_MAX_PASSES || "0", 10);
 // Delay between signals (ms) to avoid overwhelming validators
 const INTER_SIGNAL_DELAY = 5_000;
 
-// All sports to cycle through (in order of game availability likelihood)
-const ALL_SPORTS = ["NBA", "NHL", "MLB", "EPL", "MLS", "NFL", "NCAAB", "NCAAF", "Soccer", "MMA"];
+// All sports to cycle through (must match UI sport filter button labels exactly).
+// "Soccer" and "MMA" are not valid UI buttons; soccer is covered by EPL + MLS.
+const ALL_SPORTS = ["NBA", "NHL", "MLB", "EPL", "MLS", "NFL", "NCAAB", "NCAAF"];
 
 // Track sports with no games so we skip them on subsequent passes
 // (avoids wasting ~10s per off-season sport navigating to an empty page)
@@ -433,11 +434,14 @@ async function navigateToFreshSignalPage(
   await connectWallet(page);
   await page.waitForTimeout(3_000);
 
-  // Click the target sport
+  // Click the target sport (must match a UI button exactly)
   const sportBtn = page.getByRole("button", { name: new RegExp(`^${sport}$`, "i") });
   if (await sportBtn.isVisible({ timeout: 10_000 }).catch(() => false)) {
     await sportBtn.click();
     await page.waitForTimeout(5_000);
+  } else {
+    logLine("WARN", `Sport button "${sport}" not found in UI, skipping`);
+    throw new Error(`Sport button "${sport}" not found`);
   }
 }
 

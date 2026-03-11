@@ -368,10 +368,19 @@ export default function CreateSignal() {
         }
 
         if (realLineFailed) {
-          // Real pick is unavailable — hard block, must pick a new bet
+          // Real pick is unavailable — show specific reason if the miner provided one
+          const realResult = checkResult.results.find((r) => r.index === realLineIdx);
+          const reason = realResult?.unavailable_reason;
+          const reasonMessages: Record<string, string> = {
+            game_started: "This game has already started and betting lines are no longer available. Please select a different game.",
+            line_moved: "The line for your pick has moved and is no longer available at the value you selected. Please select a different bet or refresh the odds.",
+            market_unavailable: "This market type is no longer offered for this game. Please select a different bet type.",
+            no_data: "No sportsbook data is available for this game right now. Please try again in a few minutes.",
+          };
           setStepError(
-            "Your pick is not currently available at any sportsbook. " +
-            "The line may have moved or the game may have started. Please select a different bet.",
+            reason && reasonMessages[reason]
+              ? reasonMessages[reason]
+              : "Your pick is not currently available at any sportsbook. The line may have moved or the game may have started. Please select a different bet.",
           );
           setStep("browse");
           return;

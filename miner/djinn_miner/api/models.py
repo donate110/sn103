@@ -60,6 +60,12 @@ class LineResult(BaseModel):
     index: int = Field(ge=1, le=10)
     available: bool
     bookmakers: list[BookmakerAvailability] = Field(default_factory=list, max_length=50)
+    unavailable_reason: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Why the line is unavailable: 'game_started', 'line_moved', "
+        "'market_unavailable', 'no_data'. Null when available=True.",
+    )
 
 
 class CheckResponse(BaseModel):

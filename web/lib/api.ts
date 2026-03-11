@@ -70,6 +70,7 @@ export interface LineResult {
   index: number;
   available: boolean;
   bookmakers: BookmakerAvailability[];
+  unavailable_reason?: string | null;
 }
 
 export interface CheckResponse {

@@ -68,8 +68,8 @@ async def test_exact_spread_match(checker: LineChecker) -> None:
 
 
 @pytest.mark.asyncio
-async def test_spread_within_tolerance(checker: LineChecker) -> None:
-    """Lakers -3.5 @ DraftKings is within 0.5 tolerance of -3.0 request."""
+async def test_spread_exact_match_only(checker: LineChecker) -> None:
+    """Exact match: -3.0 matches FanDuel (-3.0) but not DraftKings (-3.5)."""
     lines = [
         CandidateLine(
             index=1,
@@ -82,11 +82,10 @@ async def test_spread_within_tolerance(checker: LineChecker) -> None:
             side="Los Angeles Lakers",
         ),
     ]
-    # DraftKings has -3.5, which is within 0.5 of -3.0
     results = (await checker.check(lines)).results
     bookmaker_names = [b.bookmaker for b in results[0].bookmakers]
     assert "FanDuel" in bookmaker_names
-    assert "DraftKings" in bookmaker_names
+    assert "DraftKings" not in bookmaker_names  # -3.5 != -3.0
 
 
 @pytest.mark.asyncio
@@ -107,6 +106,27 @@ async def test_spread_outside_tolerance(checker: LineChecker) -> None:
     results = (await checker.check(lines)).results
     assert results[0].available is False
     assert len(results[0].bookmakers) == 0
+    assert results[0].unavailable_reason == "line_moved"
+
+
+@pytest.mark.asyncio
+async def test_unavailable_reason_no_data(checker: LineChecker) -> None:
+    """Unknown event returns no_data or game_started reason."""
+    lines = [
+        CandidateLine(
+            index=1,
+            sport="basketball_nba",
+            event_id="event-nonexistent-999",
+            home_team="Nonexistent Team A",
+            away_team="Nonexistent Team B",
+            market="spreads",
+            line=-3.0,
+            side="Nonexistent Team A",
+        ),
+    ]
+    results = (await checker.check(lines)).results
+    assert results[0].available is False
+    assert results[0].unavailable_reason in ("game_started", "no_data")
 
 
 @pytest.mark.asyncio

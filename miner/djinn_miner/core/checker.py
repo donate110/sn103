@@ -168,8 +168,27 @@ class LineChecker:
         """Check if a single candidate line is available at any bookmaker."""
         matching_bookmakers: list[BookmakerAvailability] = []
         seen_bookmakers: set[str] = set()
+        # Track match failure reasons for diagnostics
+        found_event = False
+        found_market = False
+        found_side = False
+        closest_line: float | None = None
 
         for odds in sport_odds:
+            # Track how far we got matching this line
+            found_event = True  # We have odds data for this sport/event
+            if odds.market == line.market:
+                found_market = True
+                if self._side_matches(line.side, odds.name):
+                    found_side = True
+                    # Track closest line value for "line_moved" diagnostics
+                    if line.market in ("spreads", "totals") and odds.point is not None:
+                        if closest_line is None or (
+                            line.line is not None
+                            and abs(odds.point - line.line) < abs(closest_line - line.line)
+                        ):
+                            closest_line = odds.point
+
             if odds.bookmaker_key in seen_bookmakers:
                 continue
 
@@ -182,10 +201,25 @@ class LineChecker:
                 )
                 seen_bookmakers.add(odds.bookmaker_key)
 
+        # Determine specific reason when unavailable
+        reason: str | None = None
+        if not matching_bookmakers:
+            if not found_event:
+                reason = "game_started"  # No odds at all; game likely started or was removed
+            elif not found_market:
+                reason = "market_unavailable"
+            elif not found_side:
+                reason = "market_unavailable"
+            elif found_side and closest_line is not None and line.line is not None and closest_line != line.line:
+                reason = "line_moved"
+            else:
+                reason = "no_data"
+
         return LineResult(
             index=line.index,
             available=len(matching_bookmakers) > 0,
             bookmakers=matching_bookmakers,
+            unavailable_reason=reason,
         )
 
     def _line_matches(self, line: CandidateLine, odds: BookmakerOdds) -> bool:
