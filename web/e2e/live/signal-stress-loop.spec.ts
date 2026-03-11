@@ -47,8 +47,9 @@ const deployerAccount = privateKeyToAccount(DEPLOYER_KEY);
 
 // Number of genius wallets to cycle through (1 = just the pre-funded key)
 const NUM_GENIUSES = 1;
-// Max passes through all sports (0 = unlimited)
-const MAX_PASSES = parseInt(process.env.STRESS_MAX_PASSES || "0", 10);
+// Max passes through all sports per runner iteration (0 = unlimited).
+// Default 3: creates signals, then runs purchase test, then stress-runner restarts.
+const MAX_PASSES = parseInt(process.env.STRESS_MAX_PASSES || "3", 10);
 // Delay between signals (ms) to avoid overwhelming validators
 const INTER_SIGNAL_DELAY = 5_000;
 
