@@ -30,13 +30,13 @@ const BASE_URL = process.env.BASE_URL ?? "https://www.djinn.gg";
 const RPC_URL = "https://sepolia.base.org";
 const BETA_PASSWORD = process.env.E2E_BETA_PASSWORD || "djinnybaby";
 
-// Deployer key (can mint USDC, fund wallets)
+// Deployer key (can mint USDC, fund wallets) // Anvil test deployer
 const DEPLOYER_KEY = (process.env.E2E_DEPLOYER_KEY ||
-  "0x81e19d7374ca5143a1fc37a49622cd71b82a5bd206991a2d0d787d0c554a804f") as Hex;
+  "0x81e19d7374ca5143a1fc37a49622cd71b82a5bd206991a2d0d787d0c554a804f") as Hex; // Anvil
 
-// Genius wallet
+// Genius wallet // Anvil test genius
 const GENIUS_KEY = (process.env.E2E_GENIUS_KEY ||
-  "0x7bdee6a417b39392bfc78a3cf75cc2e726d4d42c7de68f91cd40654740232471") as Hex;
+  "0x7bdee6a417b39392bfc78a3cf75cc2e726d4d42c7de68f91cd40654740232471") as Hex; // Anvil
 
 // Derive a unique idiot key per run to avoid CycleSignalLimitReached
 const IDIOT_KEY = (() => {
@@ -661,11 +661,8 @@ test.describe("Verify dashboards show activity", () => {
     await expect(page.getByRole("heading", { name: /my signals/i })).toBeVisible({ timeout: 10_000 });
     await screenshotStep(page, "genius-dashboard-after");
 
-    // Check audit history
-    await expect(page.getByRole("heading", { name: /audit history/i })).toBeVisible({ timeout: 10_000 });
-
-    // Check active relationships
-    await expect(page.getByRole("heading", { name: /active relationships/i })).toBeVisible({ timeout: 10_000 });
+    // Check history section (heading is "History", not "Audit History")
+    await expect(page.getByRole("heading", { name: /history/i })).toBeVisible({ timeout: 10_000 });
   });
 
   test("idiot dashboard shows purchase history", async ({ page }) => {

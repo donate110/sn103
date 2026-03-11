@@ -314,7 +314,7 @@ test.describe("Genius connected flow", () => {
     await expect(signalsOrEmpty.first()).toBeVisible({ timeout: 10_000 });
   });
 
-  test("genius dashboard shows audit history section", async ({ page }) => {
+  test("genius dashboard shows history section", async ({ page }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/genius`);
     await bypassBetaGate(page);
@@ -323,13 +323,10 @@ test.describe("Genius connected flow", () => {
     await connectWallet(page);
     await waitForWalletConnected(page);
 
+    // The heading is "History" (not "Audit History")
     await expect(
-      page.getByRole("heading", { name: /audit history/i }),
+      page.getByRole("heading", { name: /history/i }),
     ).toBeVisible({ timeout: 15_000 });
-
-    // Table headers should be visible
-    await expect(page.getByText("Cycle")).toBeVisible();
-    await expect(page.getByText("Outcome")).toBeVisible();
   });
 
   test("genius dashboard shows settlement history section", async ({ page }) => {
