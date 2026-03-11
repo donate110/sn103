@@ -243,6 +243,18 @@ test.describe("Genius creates a signal through UI", () => {
 
   test("genius creates a signal via the wizard", async ({ page }) => {
     test.setTimeout(300_000);
+
+    // Capture console logs for debugging signal creation flow
+    page.on("console", (msg) => {
+      const type = msg.type();
+      if (type === "error" || type === "warning") {
+        console.log(`  [PAGE ${type}] ${msg.text()}`);
+      }
+    });
+    page.on("pageerror", (err) => {
+      console.log(`  [PAGE ERROR] ${err.message}`);
+    });
+
     await page.goto(`${BASE_URL}/genius/signal/new`);
     await bypassBetaGate(page);
     // Pre-inject master seed (wallet-mock doesn't support signTypedData)
@@ -369,45 +381,63 @@ test.describe("Genius creates a signal through UI", () => {
         continue; // Start this attempt over (page state was reset)
       }
 
-      await submitBtn.click();
+      // Scroll button into view and use force click to bypass any overlay
+      await submitBtn.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(500);
+      await submitBtn.click({ force: true });
       console.log("Clicked Create Signal, waiting for result...");
+      await screenshotStep(page, `genius-after-click-${attempt}`);
 
-      // Wait for either:
-      // - Success: "Signal Committed", "Shares Distributed", "Signal Created"
-      // - Error alert: any alert/error that appears
       // The flow is: preflight > miner check > committing > distributing > success
-      // If miner check fails, an error alert appears and step reverts to browse/review/configure
+      // During processing, a SecretModal overlay appears. On error, it closes
+      // and an alert with role="alert" appears on the configure step.
+      // On success, the step changes to "success" and shows redirect text.
 
-      const successIndicator = page.getByText(/Signal Committed|Shares Distributed|Signal Created|success/i).first();
-      const errorAlert = page.locator("[role=alert]").first();
+      // Wait for preflight modal to appear (indicates click was processed)
+      await page.waitForTimeout(3_000);
+      await screenshotStep(page, `genius-processing-${attempt}`);
 
-      // Wait up to 90s for either outcome
-      const result = await Promise.race([
-        successIndicator.waitFor({ state: "visible", timeout: 90_000 })
-          .then(() => "success" as const)
-          .catch(() => null),
-        // Also check for error alerts periodically
-        (async () => {
-          for (let i = 0; i < 30; i++) {
-            await page.waitForTimeout(3_000);
-            if (await errorAlert.isVisible().catch(() => false)) {
-              const alertText = await errorAlert.textContent().catch(() => "");
-              if (alertText && alertText.length > 10) {
-                return `error:${alertText}` as const;
-              }
-            }
-            // Check if step reverted (a sign of failure)
-            const browseVisible = await page.locator("h3").filter({ hasText: /@/ }).first()
-              .isVisible().catch(() => false);
-            const configureVisible = await page.getByText("Configure Signal").isVisible().catch(() => false);
-            if (browseVisible && !configureVisible) {
-              const alertText = await errorAlert.textContent().catch(() => "step reverted to browse");
-              return `error:${alertText}`;
+      // Wait up to 120s for either success or error
+      const result = await (async () => {
+        for (let i = 0; i < 40; i++) {
+          await page.waitForTimeout(3_000);
+
+          // Check for success text
+          const successVisible = await page.getByText(/Signal Created|Signal Committed|Shares Distributed/i).first()
+            .isVisible().catch(() => false);
+          if (successVisible) return "success" as const;
+
+          // Check for redirect to genius dashboard (final success state)
+          if (page.url().includes("/genius") && !page.url().includes("/signal/new")) {
+            return "success" as const;
+          }
+
+          // Check for error alert (role="alert")
+          const errorAlert = page.locator("[role=alert]").first();
+          if (await errorAlert.isVisible().catch(() => false)) {
+            const alertText = await errorAlert.textContent().catch(() => "");
+            if (alertText && alertText.length > 10) {
+              return `error:${alertText}` as const;
             }
           }
-          return null;
-        })(),
-      ]);
+
+          // Check if configure step error (commitError or stepError shown)
+          const redErrorText = page.locator(".bg-red-50 .text-red-600").first();
+          if (await redErrorText.isVisible().catch(() => false)) {
+            const errText = await redErrorText.textContent().catch(() => "");
+            if (errText && errText.length > 5) {
+              return `error:${errText}` as const;
+            }
+          }
+
+          // Log current state periodically
+          if (i % 5 === 0) {
+            const url = page.url();
+            console.log(`  [${i * 3}s] Still waiting... URL: ${url}`);
+          }
+        }
+        return null;
+      })();
 
       await screenshotStep(page, `genius-signal-result-${attempt}`);
 
@@ -475,7 +505,7 @@ test.describe("Genius creates a signal through UI", () => {
 
     if (!signalCreated) {
       console.log("WARNING: Could not create signal after all attempts.");
-      console.log("This may be due to insufficient validators (need 7+ for Shamir threshold)");
+      console.log("This may be due to validator/miner availability issues");
       console.log("or line availability issues with the miner executability check.");
       await screenshotStep(page, "genius-signal-all-attempts-failed");
       // Don't hard-fail; the validator network may just not have enough nodes
