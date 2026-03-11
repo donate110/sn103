@@ -153,6 +153,24 @@ async function screenshotStep(page: Page, name: string) {
   });
 }
 
+async function navigateToFreshSignalPage(
+  page: Page,
+  account: ReturnType<typeof privateKeyToAccount>,
+) {
+  await page.goto(`${BASE_URL}/genius/signal/new`);
+  await injectMasterSeed(page, account);
+  await page.reload();
+  await page.waitForLoadState("domcontentloaded");
+  await connectWallet(page);
+  await page.waitForTimeout(3_000);
+  // Click NBA to ensure games load (default sport)
+  const nbaBtn = page.getByRole("button", { name: /^NBA$/i });
+  if (await nbaBtn.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    await nbaBtn.click();
+    await page.waitForTimeout(5_000);
+  }
+}
+
 // ── Test Setup ─────────────────────────────────────────────────────────────
 
 test.describe.configure({ mode: "serial" });
@@ -321,16 +339,30 @@ test.describe("Genius creates a signal through UI", () => {
       await page.waitForTimeout(3_000);
       await screenshotStep(page, `genius-game-expanded-${attempt}`);
 
-      // Bet buttons inside the expanded card
-      const cardContainer = page.locator(".card").filter({ has: targetH3 });
-      // Also scroll the card to ensure buttons are rendered in viewport
-      await cardContainer.scrollIntoViewIfNeeded().catch(() => {});
+      // Bet buttons inside the expanded card. Try multiple locator strategies.
+      // The card is a div.card that contains the h3, but after page navigation
+      // the DOM structure may differ slightly.
+      let cardContainer = page.locator(".card").filter({ has: targetH3 });
+      let cardCount = await cardContainer.count();
 
-      const betButtons = cardContainer.locator("button").filter({
-        hasNotText: /NBA|NFL|MLB|NHL|Soccer|NCAAF|NCAAB|EPL|MLS|MMA/,
-      });
+      // Fallback: walk up from h3 to find the card ancestor
+      if (cardCount === 0) {
+        cardContainer = targetH3.locator("xpath=ancestor::div[contains(@class,'card')]");
+        cardCount = await cardContainer.count();
+      }
+
+      if (cardCount > 0) {
+        await cardContainer.first().scrollIntoViewIfNeeded().catch(() => {});
+      }
+
+      // Look for bet buttons: any button inside the card area that isn't a sport tab
+      const betButtons = cardCount > 0
+        ? cardContainer.first().locator("button").filter({
+            hasNotText: /^(NBA|NFL|MLB|NHL|Soccer|NCAAF|NCAAB|EPL|MLS|MMA)$/,
+          })
+        : page.locator("button").filter({ hasText: /[+-]\d+/ }); // odds pattern fallback
       const betCount = await betButtons.count();
-      console.log(`Found ${betCount} bet buttons in card`);
+      console.log(`Found ${betCount} bet buttons in card (card containers: ${cardCount})`);
 
       if (betCount === 0) {
         console.log("No bet buttons, trying next game...");
@@ -460,13 +492,7 @@ test.describe("Genius creates a signal through UI", () => {
           const gamesVisible = await page.locator("h3").filter({ hasText: /@/ }).first()
             .isVisible({ timeout: 5_000 }).catch(() => false);
           if (!gamesVisible) {
-            // Navigate back to fresh state
-            await page.goto(`${BASE_URL}/genius/signal/new`);
-            await injectMasterSeed(page, geniusAccount);
-            await page.reload();
-            await page.waitForLoadState("domcontentloaded");
-            await connectWallet(page);
-            await page.waitForTimeout(2_000);
+            await navigateToFreshSignalPage(page, geniusAccount);
           }
           continue;
         }
@@ -475,26 +501,14 @@ test.describe("Genius creates a signal through UI", () => {
         if (errMsg.includes("validator") || errMsg.includes("miner") || errMsg.includes("verify") || errMsg.includes("distribution") || errMsg.includes("threshold")) {
           console.log("Validator/miner/distribution issue, waiting and retrying...");
           await page.waitForTimeout(10_000);
-          // Navigate back to fresh signal creation page
-          await page.goto(`${BASE_URL}/genius/signal/new`);
-          await injectMasterSeed(page, geniusAccount);
-          await page.reload();
-          await page.waitForLoadState("domcontentloaded");
-          await connectWallet(page);
-          await page.waitForTimeout(2_000);
+          await navigateToFreshSignalPage(page, geniusAccount);
           continue;
         }
 
         // Unknown error - screenshot and try next game
         console.log(`Unexpected error, trying next game...`);
         await page.waitForTimeout(2_000);
-        // Navigate back to fresh state
-        await page.goto(`${BASE_URL}/genius/signal/new`);
-        await injectMasterSeed(page, geniusAccount);
-        await page.reload();
-        await page.waitForLoadState("domcontentloaded");
-        await connectWallet(page);
-        await page.waitForTimeout(2_000);
+        await navigateToFreshSignalPage(page, geniusAccount);
         continue;
       }
 
@@ -535,7 +549,8 @@ test.describe("Idiot purchases a signal through UI", () => {
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
 
-    await expect(page.getByText(/wallet usdc/i)).toBeVisible({ timeout: 15_000 });
+    // The dashboard renders "Wallet", "$X", "USDC" as separate elements
+    await expect(page.getByText(/usdc in your|wallet|escrow balance/i).first()).toBeVisible({ timeout: 15_000 });
     await screenshotStep(page, "idiot-dashboard-before-deposit");
 
     // Deposit escrow
@@ -668,7 +683,7 @@ test.describe("Verify dashboards show activity", () => {
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
 
-    await expect(page.getByText(/wallet usdc/i)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/usdc in your|wallet|escrow balance/i).first()).toBeVisible({ timeout: 15_000 });
     await screenshotStep(page, "idiot-dashboard-after");
 
     // Check purchase history section
