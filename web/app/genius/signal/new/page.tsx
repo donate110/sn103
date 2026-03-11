@@ -144,11 +144,20 @@ export default function CreateSignal() {
   const [txHash, setTxHash] = useState<string | null>(null);
   const [stepError, setStepError] = useState<string | null>(null);
 
-  // Sort events by commence time, exclude live/started games, and filter by search
+  // Tick every 60s so the filter drops games that start while the page is open
+  const [filterTick, setFilterTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setFilterTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Sort events by commence time, exclude live/started games and games
+  // starting within 15 min (odds likely pulled before signal completes).
+  const BUFFER_MS = 15 * 60_000;
   const filteredEvents = useMemo(() => {
     const now = Date.now();
     const sorted = [...events]
-      .filter((ev) => new Date(ev.commence_time).getTime() > now) // Only upcoming games
+      .filter((ev) => new Date(ev.commence_time).getTime() > now + BUFFER_MS)
       .sort(
         (a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime(),
       );
@@ -159,7 +168,8 @@ export default function CreateSignal() {
         ev.home_team.toLowerCase().includes(q) ||
         ev.away_team.toLowerCase().includes(q),
     );
-  }, [events, searchQuery]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events, searchQuery, filterTick]);
 
   const fetchEvents = useCallback(async (sport: SportOption) => {
     setEventsLoading(true);
@@ -1615,29 +1625,32 @@ export default function CreateSignal() {
 // ---------------------------------------------------------------------------
 
 /** Format a relative countdown like "Starts in 3h 12m" or "Started 45m ago" */
-function timeUntil(dateStr: string): { text: string; isLive: boolean } {
+function timeUntil(dateStr: string): { text: string; isLive: boolean; imminent: boolean } {
   const target = new Date(dateStr).getTime();
   const now = Date.now();
   const diffMs = target - now;
 
   if (diffMs <= 0) {
     const ago = Math.abs(diffMs);
-    if (ago < 60_000) return { text: "Just started", isLive: true };
-    if (ago < 3_600_000) return { text: `Started ${Math.floor(ago / 60_000)}m ago`, isLive: true };
-    return { text: `Started ${Math.floor(ago / 3_600_000)}h ago`, isLive: true };
+    if (ago < 60_000) return { text: "Just started", isLive: true, imminent: false };
+    if (ago < 3_600_000) return { text: `Started ${Math.floor(ago / 60_000)}m ago`, isLive: true, imminent: false };
+    return { text: `Started ${Math.floor(ago / 3_600_000)}h ago`, isLive: true, imminent: false };
   }
+
+  // Games starting within 60 min are "imminent" (odds may be pulled any time)
+  const imminent = diffMs < 3_600_000;
 
   const hours = Math.floor(diffMs / 3_600_000);
   const minutes = Math.floor((diffMs % 3_600_000) / 60_000);
 
   if (hours > 24) {
     const days = Math.floor(hours / 24);
-    return { text: `in ${days}d ${hours % 24}h`, isLive: false };
+    return { text: `in ${days}d ${hours % 24}h`, isLive: false, imminent };
   }
   if (hours > 0) {
-    return { text: `in ${hours}h ${minutes}m`, isLive: false };
+    return { text: `in ${hours}h ${minutes}m`, isLive: false, imminent };
   }
-  return { text: `in ${minutes}m`, isLive: false };
+  return { text: `in ${minutes}m`, isLive: false, imminent };
 }
 
 function EventCard({
@@ -1651,7 +1664,7 @@ function EventCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const bets = extractBets(event);
-  const { text: countdown, isLive } = timeUntil(event.commence_time);
+  const { text: countdown, isLive, imminent } = timeUntil(event.commence_time);
   const commence = new Date(event.commence_time);
 
   const spreadBets = bets.filter((b) => b.market === "spreads");
@@ -1676,7 +1689,7 @@ function EventCard({
     : null;
 
   return (
-    <div className="card">
+    <div className={`card ${isLive ? "opacity-40 pointer-events-none" : ""}`}>
       <div
         className="flex items-center justify-between cursor-pointer gap-3"
         onClick={() => setExpanded(!expanded)}
@@ -1687,9 +1700,19 @@ function EventCard({
             {event.away_team} @ {event.home_team}
           </h3>
           <div className="flex items-center gap-2 mt-0.5">
-            <span className={`text-xs font-medium ${isLive ? "text-red-600" : "text-slate-500"}`}>
+            <span className={`text-xs font-medium ${isLive ? "text-red-600" : imminent ? "text-amber-600" : "text-slate-500"}`}>
               {isLive ? "LIVE" : countdown}
             </span>
+            {imminent && !isLive && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium" title="Odds may be pulled before game starts">
+                Starting soon
+              </span>
+            )}
+            {isLive && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium">
+                Odds unavailable
+              </span>
+            )}
             <span className="text-xs text-slate-400">
               {commence.toLocaleDateString(undefined, {
                 weekday: "short",

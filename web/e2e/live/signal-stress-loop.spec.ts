@@ -826,12 +826,18 @@ test.describe("Signal stress loop", () => {
         logLine("INFO", `  Found ${gameCount} games in ${sport}`);
         stats.gamesFound += gameCount;
 
-        // Try to create signals on each game (up to 5 per sport per pass).
-        // Bail after 2 consecutive "pick not available" failures: if the first
-        // games in a sport are unavailable, the rest likely are too (same time slot).
-        const maxGamesPerSport = Math.min(gameCount, 5);
+        // Try games from the END of the list first (future games have active odds).
+        // Games are sorted by commence_time, so early entries have already started
+        // and their odds are pulled. Working backwards maximizes signal creation.
+        const maxGamesPerSport = Math.min(gameCount, 10);
         let consecutivePickFails = 0;
-        for (let gIdx = 0; gIdx < maxGamesPerSport; gIdx++) {
+        // Build index list: start from the last game, work backwards
+        const gameIndices: number[] = [];
+        for (let i = gameCount - 1; i >= 0 && gameIndices.length < maxGamesPerSport; i--) {
+          gameIndices.push(i);
+        }
+        for (let gi = 0; gi < gameIndices.length; gi++) {
+          const gIdx = gameIndices[gi];
           try {
             const result = await createSignalOnGame(page, genius.account, gIdx, sport);
             if (result.success) {
@@ -843,8 +849,8 @@ test.describe("Signal stress loop", () => {
               // If picks are unavailable, odds are pulled for this time window
               if (result.error?.includes("not currently available")) {
                 consecutivePickFails++;
-                if (consecutivePickFails >= 2) {
-                  logLine("INFO", `  Skipping remaining ${sport} games (${consecutivePickFails} consecutive pick failures, odds likely pulled for this time window)`);
+                if (consecutivePickFails >= 4) {
+                  logLine("INFO", `  Skipping remaining ${sport} games (${consecutivePickFails} consecutive pick failures)`);
                   break;
                 }
               } else {
@@ -857,12 +863,12 @@ test.describe("Signal stress loop", () => {
           }
 
           // Navigate back to fresh signal page for the next game
-          if (gIdx < maxGamesPerSport - 1) {
+          if (gi < gameIndices.length - 1) {
             await page.waitForTimeout(INTER_SIGNAL_DELAY);
             try {
               await navigateToFreshSignalPage(page, genius.account, sport);
             } catch {
-              logLine("WARN", `  Failed to navigate back for game ${gIdx + 1}, skipping remaining games in ${sport}`);
+              logLine("WARN", `  Failed to navigate back for game ${gi + 1}, skipping remaining games in ${sport}`);
               break;
             }
           }
