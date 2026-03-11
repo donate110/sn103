@@ -366,11 +366,12 @@ def create_app(
 
     _ETH_ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
-    # Protocol-enforced minimum Shamir threshold. Validators reject shares
-    # from polynomials with threshold below this value regardless of client
-    # configuration. This prevents a compromised frontend or custom client
-    # from weakening signal secrecy by using threshold=1.
-    _MIN_SHAMIR_THRESHOLD = 7
+    # Shamir threshold bounds. Floor of 3 (subnet dead below that), cap of 7
+    # (don't require too many validators even at scale). The client computes
+    # clamp(ceil(2/3 * discovered), 3, 7); the validator enforces the same
+    # floor to prevent threshold=1 attacks from compromised clients.
+    _MIN_SHAMIR_THRESHOLD = 3
+    _MAX_SHAMIR_THRESHOLD = 7
 
     @app.post("/v1/signal", response_model=StoreShareResponse)
     async def store_share(req: StoreShareRequest) -> StoreShareResponse:

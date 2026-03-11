@@ -298,3 +298,13 @@ See the whitepaper for design intent.
 **Trust model:** The notary can't see plaintext data (MPC guarantees). A dishonest notary can refuse to cooperate (DoS → penalized) but can't forge data. Random, unpredictable pairing by the validator prevents pre-arranged collusion. The trust assumption is "the randomly paired miner is not colluding with the prover."
 **Backwards compatibility:** All changes are additive and optional. Old miners work with new validators (no notary fields = use default). New miners work with old validators (notary sidecar just sits idle). Transition: as miners and validators update, peer notarization gradually replaces centralized notary dependency.
 **Impact:** Eliminates the only centralized dependency in the entire protocol — the TLSNotary notary server. PSE's `notary.pse.dev` (which explicitly says "do not build your business on it") is no longer a single point of failure. The notary server code was removed from the TLSNotary repo in alpha.13, making self-hosting a maintenance burden; peer notarization sidesteps this entirely.
+
+---
+
+## DEV-013: Dynamic Shamir Threshold
+
+**Whitepaper Section:** Signal Lifecycle, Shamir Secret Sharing
+**Whitepaper Says:** Implies a fixed threshold (7 of 10) for Shamir secret sharing.
+**What we did:** Made the threshold dynamic based on active validator count: `clamp(ceil(2/3 * discovered_validators), 3, 7)`. Floor of 3 (subnet dead below that), cap of 7 (don't require too many even at scale). Both client and validator enforce the same bounds.
+**Reason:** With only 4 Djinn validators online, a fixed threshold of 7 made signal creation impossible. The 2/3 majority requirement preserves the security property (majority of validators must cooperate to reconstruct) while adapting to network size. The floor prevents threshold=1 attacks; the cap prevents fragility when the validator set grows beyond 10.
+**Impact:** Signal creation works with 3-10+ validators. Threshold scales from 3 (at 4 validators) to 7 (at 10+), then stays at 7 forever.

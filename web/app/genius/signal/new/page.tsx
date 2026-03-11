@@ -38,7 +38,11 @@ import {
   type SportOption,
 } from "@/lib/odds";
 
-const SHAMIR_THRESHOLD = parseInt(process.env.NEXT_PUBLIC_SHAMIR_THRESHOLD ?? "7", 10);
+// Shamir threshold bounds. Floor of 3 (subnet dead below that), cap of 7
+// (don't require too many validators even if the set grows large).
+// Actual threshold: clamp(ceil(2/3 * discovered), 3, 7).
+const SHAMIR_MIN = 3;
+const SHAMIR_MAX = 7;
 
 type WizardStep = "browse" | "review" | "configure" | "preflight" | "committing" | "distributing" | "success" | "error";
 
@@ -303,9 +307,9 @@ export default function CreateSignal() {
 
       // Pre-flight: discover validators and check that enough are reachable
       const preflightValidators = await discoverValidatorClients();
-      if (preflightValidators.length < SHAMIR_THRESHOLD) {
+      if (preflightValidators.length < SHAMIR_MIN) {
         setStepError(
-          `Only ${preflightValidators.length} validators discovered, need ${SHAMIR_THRESHOLD}. Try again in a moment.`,
+          `Only ${preflightValidators.length} validators discovered, need at least ${SHAMIR_MIN}. The network may be down.`,
         );
         setStep("configure");
         return;
@@ -316,9 +320,9 @@ export default function CreateSignal() {
       const healthyCount = healthChecks.filter(
         (r) => r.status === "fulfilled" && r.value.status === "ok",
       ).length;
-      if (healthyCount < SHAMIR_THRESHOLD) {
+      if (healthyCount < SHAMIR_MIN) {
         setStepError(
-          `Only ${healthyCount} of ${SHAMIR_THRESHOLD} required validators are reachable. Try again in a moment.`,
+          `Only ${healthyCount} of ${SHAMIR_MIN} minimum validators are reachable. Try again in a moment.`,
         );
         setStep("configure");
         return;
@@ -486,11 +490,13 @@ export default function CreateSignal() {
       const validators = preflightValidators;
       const signalIdStr = signalId.toString();
 
-      // Generate exactly one share per validator. The threshold is capped at
-      // the validator count so Shamir reconstruction always requires distinct
-      // validators -- never one validator holding enough shares to reconstruct.
+      // Shamir threshold: clamp(ceil(2/3 * validators), 3, 7).
+      // Never below 3 (subnet dead), never above 7 (too fragile at scale).
       const nShares = validators.length;
-      const effectiveThreshold = Math.min(SHAMIR_THRESHOLD, nShares);
+      const effectiveThreshold = Math.min(
+        SHAMIR_MAX,
+        Math.max(SHAMIR_MIN, Math.ceil(nShares * 2 / 3)),
+      );
 
       const keyBigInt = keyToBigInt(aesKey);
       const shares = splitSecret(keyBigInt, nShares, effectiveThreshold);
@@ -1559,7 +1565,7 @@ export default function CreateSignal() {
               <span className="text-slate-500 font-medium">What happens next:</span>{" "}
               Your pick is encrypted locally with AES-256. The encryption key is then
               split into one share per live validator using Shamir secret sharing
-              (threshold: {SHAMIR_THRESHOLD}). Multiple validators must cooperate via
+              (threshold: 2/3 of active validators). Multiple validators must cooperate via
               MPC to verify a purchase. No single party (including us) can see your signal.
             </div>
           )}
