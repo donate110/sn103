@@ -12,16 +12,16 @@ import { ethers } from "ethers";
 const RPC_URL = "https://sepolia.base.org";
 
 const ADDRESSES = {
-  signalCommitment: "0x184afff99bf4d742a1168281c029c06174477bf7",
-  escrow: "0xa41fc0bd7a1ae0e713c8c7c1f3c323b38b51bbcf",
-  collateral: "0x47bcae6055dff70137336211be22f34c7a631626",
-  creditLedger: "0xb2a4eac9baca31264894fb59a8a11c8ca1aa4efe",
-  account: "0x4f42f2c714ada4c55f2a967dda6effa19e211dec",
-  usdc: "0x7b8c194c848914c361cf34f2d2dd9eae74a9c9c6",
-  audit: "0x95002b53f4f53a27a060502fe1f026f74e9110e9",
+  signalCommitment: process.env.NEXT_PUBLIC_SIGNAL_COMMITMENT_ADDRESS || "0xF664eAF0564953ee0c374B92D9697191c3eBEb69",
+  escrow: process.env.NEXT_PUBLIC_ESCROW_ADDRESS || "0x50A1Bf4eacED9b9da4B1A5BA3001aA0979E91A21",
+  collateral: process.env.NEXT_PUBLIC_COLLATERAL_ADDRESS || "0x16C36aCe7aB4525Ed1D0F12a8E6c38f5be29cb16",
+  creditLedger: process.env.NEXT_PUBLIC_CREDIT_LEDGER_ADDRESS || "0x2d770Fd15E1E284743b0F08C33db5B6988C02f7B",
+  account: process.env.NEXT_PUBLIC_ACCOUNT_ADDRESS || "0x5DDa635bbfC9c0c108457873006Dfcecd94f39ec",
+  usdc: process.env.NEXT_PUBLIC_USDC_ADDRESS || "0x26a9F00523fa5Cf2f18119854b2dd959CF792fB8",
+  audit: process.env.NEXT_PUBLIC_AUDIT_ADDRESS || "0x46F6DE92b4C37876435c5564E675B0DB885F1155",
 };
 
-const E2E_PRIVATE_KEY = process.env.E2E_GENIUS_KEY || "";
+const E2E_PRIVATE_KEY = process.env.E2E_GENIUS_KEY || process.env.E2E_TEST_PRIVATE_KEY || "";
 
 let provider: ethers.JsonRpcProvider;
 let wallet: ethers.Wallet;
