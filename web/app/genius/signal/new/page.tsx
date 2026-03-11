@@ -38,10 +38,11 @@ import {
   type SportOption,
 } from "@/lib/odds";
 
-// Shamir threshold bounds. Floor of 3 (subnet dead below that), cap of 7
-// (don't require too many validators even if the set grows large).
-// Actual threshold: clamp(ceil(2/3 * discovered), 3, 7).
-const SHAMIR_MIN = 3;
+// Shamir threshold bounds. Cap of 7 (don't require too many validators
+// even if the set grows large). Floor of 2 during bootstrap while not all
+// validators run compatible software. Raise to 3 once the network stabilizes.
+// Actual threshold: clamp(ceil(2/3 * healthy_validators), SHAMIR_MIN, SHAMIR_MAX).
+const SHAMIR_MIN = 2;
 const SHAMIR_MAX = 7;
 
 type WizardStep = "browse" | "review" | "configure" | "preflight" | "committing" | "distributing" | "success" | "error";
@@ -317,35 +318,19 @@ export default function CreateSignal() {
       const healthChecks = await Promise.allSettled(
         preflightValidators.map((v) => v.health()),
       );
-      // Filter to validators that are:
-      // 1. Healthy (status: "ok")
-      // 2. Running a version that accepts our dynamic threshold (>= 574).
-      //    Validators on v573 or below enforce a minimum threshold of 7,
-      //    which causes distribution to fail when fewer than 7 validators exist.
-      const MIN_COMPATIBLE_VERSION = 574;
-      const healthyValidators = preflightValidators.filter((_, i) => {
-        if (healthChecks[i].status !== "fulfilled") return false;
-        const health = (healthChecks[i] as PromiseFulfilledResult<{ status: string; version?: string | number }>).value;
-        if (health.status !== "ok") return false;
-        const ver = parseInt(String(health.version ?? "0"), 10);
-        if (isNaN(ver) || ver < MIN_COMPATIBLE_VERSION) return false;
-        return true;
-      });
+      const healthyValidators = preflightValidators.filter(
+        (_, i) => healthChecks[i].status === "fulfilled" && (healthChecks[i] as PromiseFulfilledResult<{ status: string }>).value.status === "ok",
+      );
       const healthyCount = healthyValidators.length;
       if (healthyCount < SHAMIR_MIN) {
-        const totalHealthy = healthChecks.filter(
-          (r) => r.status === "fulfilled" && (r as PromiseFulfilledResult<{ status: string }>).value.status === "ok",
-        ).length;
         setStepError(
-          totalHealthy > healthyCount
-            ? `${totalHealthy} validators reachable but only ${healthyCount} running compatible software (need ${SHAMIR_MIN}). Some validators need to update.`
-            : `Only ${healthyCount} validators reachable, need at least ${SHAMIR_MIN}. The network may be down.`,
+          `Only ${healthyCount} validators reachable, need at least ${SHAMIR_MIN}. The network may be down.`,
         );
         setStep("configure");
         return;
       }
       // healthyValidators (not all preflightValidators) are used for
-      // distribution below, so shares only go to compatible validators.
+      // distribution below, so shares only go to reachable validators.
 
       // Pre-flight: miner executability check — ALL 10 lines must be available.
       // Miners are blind to which line is real. If any line fails, the signal cannot be created.

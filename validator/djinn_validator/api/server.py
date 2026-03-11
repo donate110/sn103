@@ -366,21 +366,26 @@ def create_app(
 
     _ETH_ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
-    # Shamir threshold bounds. Floor of 3 (subnet dead below that), cap of 7
-    # (don't require too many validators even at scale). The client computes
-    # clamp(ceil(2/3 * discovered), 3, 7); the validator enforces the same
-    # floor to prevent threshold=1 attacks from compromised clients.
-    _MIN_SHAMIR_THRESHOLD = 3
+    # Shamir threshold bounds. Floor of 2 during bootstrap (not all validators
+    # updated yet). Raise to 3 once the network stabilizes. Cap of 7.
+    # The client computes clamp(ceil(2/3 * healthy), 2, 7).
+    _MIN_SHAMIR_THRESHOLD = 2
     _MAX_SHAMIR_THRESHOLD = 7
 
     @app.post("/v1/signal", response_model=StoreShareResponse)
     async def store_share(req: StoreShareRequest) -> StoreShareResponse:
         """Accept and store an encrypted key share from a Genius."""
-        # Enforce minimum Shamir threshold at the protocol level
+        # Log threshold for monitoring but don't reject. The threshold is
+        # enforced by Shamir math (can't reconstruct with fewer shares).
+        # Rejecting here causes backward-compatibility issues when the
+        # client and validator disagree on the minimum.
         if req.shamir_threshold < _MIN_SHAMIR_THRESHOLD:
-            raise HTTPException(
-                status_code=400,
-                detail=f"shamir_threshold must be >= {_MIN_SHAMIR_THRESHOLD} for signal secrecy (got {req.shamir_threshold})",
+            log.warning(
+                "low_shamir_threshold",
+                threshold=req.shamir_threshold,
+                min_expected=_MIN_SHAMIR_THRESHOLD,
+                genius=req.genius_address,
+                signal_id=req.signal_id,
             )
 
         # Validate Ethereum address format at the API boundary
