@@ -88,6 +88,7 @@ const stats = {
 const createdSignals: Array<{
   sport: string;
   game: string;
+  signalId?: string;
   createdAt: number;
 }> = [];
 
@@ -189,23 +190,41 @@ async function injectMasterSeed(
 async function fundWallet(address: Hex, ethAmount = "0.001", usdcAmount = "10000") {
   const targetBalance = await publicClient.getBalance({ address });
   if (targetBalance < parseUnits("0.0005", 18)) {
-    // Check deployer has enough ETH before attempting transfer
-    const deployerBalance = await publicClient.getBalance({ address: deployerAccount.address });
     const sendAmount = parseUnits(ethAmount, 18);
+    // Try deployer first, fall back to genius G0 if deployer is low
+    const deployerBalance = await publicClient.getBalance({ address: deployerAccount.address });
+    const geniusAccount = privateKeyToAccount(GENIUS_BASE_KEY);
+    const geniusBalance = await publicClient.getBalance({ address: geniusAccount.address });
+
+    let funderAccount: typeof deployerAccount | null = deployerAccount;
+    let funderLabel = "deployer";
     if (deployerBalance < sendAmount + parseUnits("0.0002", 18)) {
-      logLine("WARN", `Deployer ETH low (${formatUnits(deployerBalance, 18)} ETH), skipping ETH funding for ${address}`);
-    } else {
+      if (geniusBalance >= sendAmount + parseUnits("0.0002", 18)) {
+        funderAccount = geniusAccount;
+        funderLabel = "genius";
+      } else {
+        logLine("WARN", `Both deployer (${formatUnits(deployerBalance, 18)}) and genius (${formatUnits(geniusBalance, 18)}) ETH low, skipping ETH funding for ${address}`);
+        funderAccount = null;
+      }
+    }
+
+    if (funderAccount) {
       const walletClient = createWalletClient({
-        account: deployerAccount,
+        account: funderAccount,
         chain: baseSepolia,
         transport,
       });
-      const hash = await walletClient.sendTransaction({
-        to: address,
-        value: sendAmount,
-      });
-      await publicClient.waitForTransactionReceipt({ hash });
-      await new Promise((r) => setTimeout(r, 3000));
+      try {
+        const hash = await walletClient.sendTransaction({
+          to: address,
+          value: sendAmount,
+        });
+        await publicClient.waitForTransactionReceipt({ hash });
+        logLine("INFO", `Funded ${address.slice(0, 10)}... with ${ethAmount} ETH from ${funderLabel}`);
+        await new Promise((r) => setTimeout(r, 3000));
+      } catch (err) {
+        logLine("WARN", `ETH transfer from ${funderLabel} failed: ${String(err).slice(0, 100)}`);
+      }
     }
   }
 
@@ -242,6 +261,7 @@ interface SignalResult {
   success: boolean;
   sport: string;
   game: string;
+  signalId?: string;
   error?: string;
 }
 
@@ -335,10 +355,11 @@ async function createSignalOnGame(
   // Wait for result (up to 120s)
   const result = await waitForSignalResult(page);
 
-  if (result === "success") {
+  if (result && result.startsWith("success")) {
     stats.signalsCreated++;
-    logLine("OK", `  Signal created: ${gameName} (${sport})`);
-    return { success: true, sport, game: gameName };
+    const signalId = result.includes(":") ? result.split(":")[1] : undefined;
+    logLine("OK", `  Signal created: ${gameName} (${sport})${signalId ? ` [id: ${signalId.slice(0, 16)}...]` : ""}`);
+    return { success: true, sport, game: gameName, signalId };
   }
 
   if (result && result.startsWith("error:")) {
@@ -363,11 +384,16 @@ async function waitForSignalResult(page: Page): Promise<string | null> {
       .first()
       .isVisible()
       .catch(() => false);
-    if (successVisible) return "success";
+    if (successVisible) {
+      // Try to extract signal ID from URL
+      const idMatch = page.url().match(/\/signal\/(\d+)/);
+      return idMatch ? `success:${idMatch[1]}` : "success";
+    }
 
-    // Redirect to genius dashboard
+    // Redirect to genius dashboard or signal detail page
     if (page.url().includes("/genius") && !page.url().includes("/signal/new")) {
-      return "success";
+      const idMatch = page.url().match(/\/signal\/(\d+)/);
+      return idMatch ? `success:${idMatch[1]}` : "success";
     }
 
     // Error alert
@@ -718,10 +744,14 @@ test.describe("Signal stress loop", () => {
     // 12 hours per test run
     test.setTimeout(43_200_000);
 
-    // Capture page errors for debugging
-    page.on("console", (msg) => {
-      if (msg.type() === "error") {
-        logLine("PAGE", msg.text().slice(0, 200));
+    // Capture failed network requests for debugging (shows URL + status)
+    page.on("response", (resp) => {
+      if (resp.status() >= 400) {
+        const url = new URL(resp.url());
+        // Only log our own API errors, not third-party resources
+        if (url.hostname.includes("djinn") || url.pathname.startsWith("/api/")) {
+          logLine("HTTP", `${resp.status()} ${url.pathname}${url.search.slice(0, 50)}`);
+        }
       }
     });
     page.on("pageerror", (err) => {
@@ -768,8 +798,8 @@ test.describe("Signal stress loop", () => {
           continue;
         }
 
-        // Count available games (these are already filtered by the UI to exclude
-        // games starting within 15 minutes, so every game shown should be actionable)
+        // Count available games (UI shows all games with commence_time > now;
+        // some may fail if the line has moved or the game just started)
         const gameHeadings = page.locator("h3").filter({ hasText: /@/ });
         let gameCount: number;
         try {
@@ -800,7 +830,7 @@ test.describe("Signal stress loop", () => {
           try {
             const result = await createSignalOnGame(page, genius.account, gIdx, sport);
             if (result.success) {
-              createdSignals.push({ sport, game: result.game, createdAt: Date.now() });
+              createdSignals.push({ sport, game: result.game, signalId: result.signalId, createdAt: Date.now() });
               logLine("OK", `  [${sport}] ${result.game}: SUCCESS (total: ${stats.signalsCreated})`);
               consecutivePickFails = 0;
             } else {
@@ -832,6 +862,15 @@ test.describe("Signal stress loop", () => {
             }
           }
         }
+
+        // Check genius ETH between sports; stop pass early if critically low
+        try {
+          const geniusEth = await publicClient.getBalance({ address: genius.account.address });
+          if (geniusEth < parseUnits("0.0002", 18)) {
+            logLine("WARN", `Genius ${genius.label} ETH critically low (${formatUnits(geniusEth, 18)}), ending pass early`);
+            break;
+          }
+        } catch {}
       }
 
       logStats();
