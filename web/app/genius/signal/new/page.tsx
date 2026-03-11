@@ -151,13 +151,12 @@ export default function CreateSignal() {
     return () => clearInterval(id);
   }, []);
 
-  // Sort events by commence time, exclude live/started games and games
-  // starting within 15 min (odds likely pulled before signal completes).
-  const BUFFER_MS = 15 * 60_000;
+  // Sort events by commence time, exclude started games only.
+  // Games about to start are kept (peak volume) but get a visual warning.
   const filteredEvents = useMemo(() => {
     const now = Date.now();
     const sorted = [...events]
-      .filter((ev) => new Date(ev.commence_time).getTime() > now + BUFFER_MS)
+      .filter((ev) => new Date(ev.commence_time).getTime() > now)
       .sort(
         (a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime(),
       );
