@@ -31,12 +31,12 @@ const BASE_URL = process.env.BASE_URL ?? "https://www.djinn.gg";
 const RPC_URL = "https://sepolia.base.org";
 const BETA_PASSWORD = process.env.E2E_BETA_PASSWORD || "djinnybaby";
 
-const DEPLOYER_KEY = (process.env.E2E_DEPLOYER_KEY || // Anvil test deployer
-  "0x81e19d7374ca5143a1fc37a49622cd71b82a5bd206991a2d0d787d0c554a804f") as Hex;
+const DEPLOYER_KEY = (process.env.E2E_DEPLOYER_KEY ||
+  "0x81e19d7374ca5143a1fc37a49622cd71b82a5bd206991a2d0d787d0c554a804f") as Hex; // Anvil test deployer
 
 // Base genius key; additional geniuses derived from this
-const GENIUS_BASE_KEY = (process.env.E2E_GENIUS_KEY || // Anvil test genius
-  "0x7bdee6a417b39392bfc78a3cf75cc2e726d4d42c7de68f91cd40654740232471") as Hex;
+const GENIUS_BASE_KEY = (process.env.E2E_GENIUS_KEY ||
+  "0x7bdee6a417b39392bfc78a3cf75cc2e726d4d42c7de68f91cd40654740232471") as Hex; // Anvil test genius
 
 const USDC_ADDRESS = (process.env.NEXT_PUBLIC_USDC_ADDRESS ||
   "0x26a9F00523fa5Cf2f18119854b2dd959CF792fB8") as Hex;
@@ -54,6 +54,11 @@ const INTER_SIGNAL_DELAY = 5_000;
 
 // All sports to cycle through (in order of game availability likelihood)
 const ALL_SPORTS = ["NBA", "NHL", "MLB", "EPL", "MLS", "NFL", "NCAAB", "NCAAF", "Soccer", "MMA"];
+
+// Track sports with no games so we skip them on subsequent passes
+// (avoids wasting ~10s per off-season sport navigating to an empty page)
+const emptySportsCount: Record<string, number> = {};
+const EMPTY_SKIP_THRESHOLD = 2; // skip sport after 2 consecutive empty passes
 
 const LOG_FILE = "test-results/signal-stress.log";
 
@@ -79,18 +84,33 @@ const stats = {
   startedAt: Date.now(),
 };
 
+// Track created signals so we can correlate with purchases and settlement
+const createdSignals: Array<{
+  sport: string;
+  game: string;
+  createdAt: number;
+}> = [];
+
 function logStats() {
   const elapsed = ((Date.now() - stats.startedAt) / 60_000).toFixed(1);
+  const successRate = stats.signalsCreated + stats.signalsFailed > 0
+    ? ((stats.signalsCreated / (stats.signalsCreated + stats.signalsFailed)) * 100).toFixed(0)
+    : "N/A";
+  const skippedSports = Object.entries(emptySportsCount)
+    .filter(([, v]) => v >= EMPTY_SKIP_THRESHOLD)
+    .map(([k]) => k);
   logLine("STATS", [
     `pass=${stats.passes}`,
     `signals=${stats.signalsCreated}`,
     `failed=${stats.signalsFailed}`,
+    `rate=${successRate}%`,
     `purchases=${stats.purchasesMade}`,
     `purchaseFails=${stats.purchasesFailed}`,
     `sports=${stats.sportsScanned}`,
     `games=${stats.gamesFound}`,
     `elapsed=${elapsed}min`,
-  ].join(", "));
+    skippedSports.length > 0 ? `offseason=[${skippedSports.join(",")}]` : "",
+  ].filter(Boolean).join(", "));
 }
 
 // ── Wallet derivation ───────────────────────────────────────────────────────
@@ -400,6 +420,7 @@ async function navigateToFreshSignalPage(
 async function purchaseFirstAvailableSignal(
   page: Page,
   idiotAccount: ReturnType<typeof privateKeyToAccount>,
+  signalIndex = 0,
 ): Promise<boolean> {
   await page.goto(`${BASE_URL}/idiot/browse`);
   await bypassBetaGate(page);
@@ -416,7 +437,7 @@ async function purchaseFirstAvailableSignal(
 
   await page.waitForTimeout(3_000);
 
-  // Look for signal cards
+  // Look for signal cards (links to /idiot/signal/*)
   const signalCards = page.locator("a[href*='/idiot/signal/']");
   const cardCount = await signalCards.count();
   if (cardCount === 0) {
@@ -424,52 +445,163 @@ async function purchaseFirstAvailableSignal(
     return false;
   }
 
-  logLine("INFO", `  Found ${cardCount} signals, clicking first...`);
-  await signalCards.first().click();
+  // Pick a signal (cycle through them to avoid re-buying the same one)
+  const idx = signalIndex % cardCount;
+  logLine("INFO", `  Found ${cardCount} signals, clicking #${idx + 1}...`);
+
+  // Grab the signal href for logging
+  const href = await signalCards.nth(idx).getAttribute("href").catch(() => "");
+  logLine("INFO", `  Signal URL: ${href}`);
+
+  await signalCards.nth(idx).click();
   await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(3_000);
 
-  // Check for purchase form
-  const purchaseForm = page.getByText(/purchase|buy|notional/i).first();
-  if (!(await purchaseForm.isVisible({ timeout: 5_000 }).catch(() => false))) {
-    logLine("WARN", "  No purchase form visible on signal detail page");
+  // Check if signal is unavailable (validators don't hold keys)
+  const unavailable = page.getByText(/signal unavailable|encryption keys are not held/i);
+  if (await unavailable.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    logLine("WARN", "  Signal unavailable (no validator keys)");
     return false;
   }
 
-  // Enter notional
+  // Check if this is our own signal
+  const ownSignal = page.getByText(/this is your own signal/i);
+  if (await ownSignal.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    logLine("WARN", "  Skipping own signal");
+    return false;
+  }
+
+  // Check escrow balance and deposit if needed
+  const escrowText = page.getByText(/your escrow balance/i);
+  if (await escrowText.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    const balText = await escrowText.textContent().catch(() => "");
+    logLine("INFO", `  ${balText}`);
+
+    // If balance is very low, deposit more
+    const balMatch = balText?.match(/\$?([\d,.]+)/);
+    const bal = balMatch ? parseFloat(balMatch[1].replace(/,/g, "")) : 0;
+    if (bal < 10) {
+      logLine("INFO", "  Escrow balance low, depositing 500 USDC...");
+      const depositInput = page.locator("#depositEscrow, input[placeholder*='Amount']").first();
+      if (await depositInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await depositInput.fill("500");
+        const depositBtn = page.getByRole("button", { name: /^deposit$/i });
+        if (await depositBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+          await depositBtn.click();
+          // Wait for approval popup then re-deposit
+          await page.waitForTimeout(5_000);
+          const approvalMsg = page.getByText(/approved.*click deposit again/i);
+          if (await approvalMsg.isVisible({ timeout: 30_000 }).catch(() => false)) {
+            logLine("INFO", "  USDC approved, clicking deposit again...");
+            await depositBtn.click();
+          }
+          // Wait for deposit to complete
+          const deposited = page.getByText(/deposited/i);
+          await deposited.isVisible({ timeout: 60_000 }).catch(() => false);
+          logLine("OK", "  Escrow deposit completed");
+          await page.waitForTimeout(2_000);
+        }
+      }
+    }
+  }
+
+  // Enter notional amount - look for the notional input
   const notionalInput = page
-    .locator("input[type=number], input[placeholder*='amount'], input[placeholder*='notional'], input[placeholder*='USDC']")
+    .locator("input[type=number]")
     .first();
   if (await notionalInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await notionalInput.fill("10");
-  }
-
-  // Click purchase
-  const purchaseBtn = page.getByRole("button", { name: /purchase|buy/i }).first();
-  if (!(await purchaseBtn.isVisible({ timeout: 5_000 }).catch(() => false))) {
-    logLine("WARN", "  Purchase button not visible");
+    // Try clicking "Min" quick-select first, otherwise type 10
+    const minBtn = page.getByRole("button", { name: /^min/i });
+    if (await minBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await minBtn.click();
+      logLine("INFO", "  Clicked Min button for notional");
+    } else {
+      await notionalInput.fill("10");
+      logLine("INFO", "  Set notional to 10 USDC");
+    }
+  } else {
+    logLine("WARN", "  No notional input found");
     return false;
   }
 
-  await purchaseBtn.click();
+  await page.waitForTimeout(1_000);
 
-  // Wait for purchase result (up to 120s)
-  const outcome = page.getByText(/purchased|decrypted|error|failed|insufficient/i).first();
-  const visible = await outcome.isVisible({ timeout: 120_000 }).catch(() => false);
-  if (visible) {
-    const text = await outcome.textContent().catch(() => "");
-    if (text?.toLowerCase().includes("purchased") || text?.toLowerCase().includes("decrypted")) {
+  // Click "Purchase Signal" button
+  const purchaseBtn = page.getByRole("button", { name: /purchase signal/i });
+  if (!(await purchaseBtn.isVisible({ timeout: 5_000 }).catch(() => false))) {
+    // Fallback to any purchase/buy button
+    const fallbackBtn = page.getByRole("button", { name: /purchase|buy/i }).first();
+    if (!(await fallbackBtn.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      logLine("WARN", "  Purchase button not visible");
+      return false;
+    }
+    if (await fallbackBtn.isDisabled()) {
+      logLine("WARN", "  Purchase button disabled (signal may be unavailable)");
+      return false;
+    }
+    await fallbackBtn.click();
+  } else {
+    if (await purchaseBtn.isDisabled()) {
+      logLine("WARN", "  Purchase button disabled");
+      return false;
+    }
+    await purchaseBtn.click();
+  }
+
+  logLine("INFO", "  Purchase clicked, waiting for result (up to 180s)...");
+
+  // Wait for the multi-step process to complete
+  // Steps: checking lines -> validator MPC -> on-chain tx -> collecting shares -> decrypting
+  // Watch for success heading "Signal Purchased & Decrypted" or error messages
+  const startTime = Date.now();
+  const maxWaitMs = 180_000;
+
+  while (Date.now() - startTime < maxWaitMs) {
+    // Check for success heading
+    const successHeading = page.getByText(/signal purchased.*decrypted/i);
+    if (await successHeading.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      // Try to read the real pick
+      const realPick = page.getByText(/real pick/i);
+      const pickText = await realPick.textContent().catch(() => "");
       stats.purchasesMade++;
-      logLine("OK", `  Purchase succeeded: ${text}`);
+      logLine("OK", `  Purchase succeeded! ${pickText}`);
       return true;
     }
-    stats.purchasesFailed++;
-    logLine("WARN", `  Purchase failed: ${text}`);
-    return false;
+
+    // Check for error
+    const errorAlert = page.locator("[role=alert]").first();
+    if (await errorAlert.isVisible({ timeout: 500 }).catch(() => false)) {
+      const errText = await errorAlert.textContent().catch(() => "");
+      if (errText && !errText.toLowerCase().includes("checking") && !errText.toLowerCase().includes("processing")) {
+        stats.purchasesFailed++;
+        logLine("WARN", `  Purchase error: ${errText?.substring(0, 200)}`);
+        return false;
+      }
+    }
+
+    // Check for insufficient escrow
+    const insufficient = page.getByText(/insufficient escrow/i);
+    if (await insufficient.isVisible({ timeout: 500 }).catch(() => false)) {
+      const msg = await insufficient.textContent().catch(() => "");
+      stats.purchasesFailed++;
+      logLine("WARN", `  ${msg}`);
+      return false;
+    }
+
+    // Log step progress periodically
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    if (elapsed % 15 === 0 && elapsed > 0) {
+      // Read any info/status banner
+      const statusBanner = page.locator("[aria-live=polite]").first();
+      const statusText = await statusBanner.textContent().catch(() => "");
+      logLine("INFO", `    [${elapsed}s] ${statusText || "waiting..."}`);
+    }
+
+    await page.waitForTimeout(2_000);
   }
 
   stats.purchasesFailed++;
-  logLine("WARN", "  Purchase timed out");
+  logLine("WARN", "  Purchase timed out after 180s");
   return false;
 }
 
@@ -620,6 +752,12 @@ test.describe("Signal stress loop", () => {
 
       // Scan all sports
       for (const sport of ALL_SPORTS) {
+        // Skip sports that have been empty multiple passes in a row (off-season)
+        if ((emptySportsCount[sport] ?? 0) >= EMPTY_SKIP_THRESHOLD) {
+          logLine("INFO", `\n--- ${sport} --- (skipped: no games ${emptySportsCount[sport]} passes in a row)`);
+          continue;
+        }
+
         logLine("INFO", `\n--- ${sport} ---`);
         stats.sportsScanned++;
 
@@ -630,7 +768,8 @@ test.describe("Signal stress loop", () => {
           continue;
         }
 
-        // Count available games
+        // Count available games (these are already filtered by the UI to exclude
+        // games starting within 15 minutes, so every game shown should be actionable)
         const gameHeadings = page.locator("h3").filter({ hasText: /@/ });
         let gameCount: number;
         try {
@@ -641,22 +780,41 @@ test.describe("Signal stress loop", () => {
         }
 
         if (gameCount === 0) {
-          logLine("INFO", `  No games in ${sport}, skipping`);
+          emptySportsCount[sport] = (emptySportsCount[sport] ?? 0) + 1;
+          logLine("INFO", `  No games in ${sport}, skipping (empty streak: ${emptySportsCount[sport]})`);
           continue;
         }
+
+        // Reset empty streak when games found
+        emptySportsCount[sport] = 0;
 
         logLine("INFO", `  Found ${gameCount} games in ${sport}`);
         stats.gamesFound += gameCount;
 
-        // Try to create signals on each game (up to 5 per sport per pass)
+        // Try to create signals on each game (up to 5 per sport per pass).
+        // Bail after 2 consecutive "pick not available" failures: if the first
+        // games in a sport are unavailable, the rest likely are too (same time slot).
         const maxGamesPerSport = Math.min(gameCount, 5);
+        let consecutivePickFails = 0;
         for (let gIdx = 0; gIdx < maxGamesPerSport; gIdx++) {
           try {
             const result = await createSignalOnGame(page, genius.account, gIdx, sport);
             if (result.success) {
+              createdSignals.push({ sport, game: result.game, createdAt: Date.now() });
               logLine("OK", `  [${sport}] ${result.game}: SUCCESS (total: ${stats.signalsCreated})`);
+              consecutivePickFails = 0;
             } else {
               logLine("WARN", `  [${sport}] ${result.game}: FAILED - ${result.error}`);
+              // If picks are unavailable, odds are pulled for this time window
+              if (result.error?.includes("not currently available")) {
+                consecutivePickFails++;
+                if (consecutivePickFails >= 2) {
+                  logLine("INFO", `  Skipping remaining ${sport} games (${consecutivePickFails} consecutive pick failures, odds likely pulled for this time window)`);
+                  break;
+                }
+              } else {
+                consecutivePickFails = 0;
+              }
             }
           } catch (err) {
             stats.signalsFailed++;
@@ -700,8 +858,8 @@ test.describe("Signal stress loop", () => {
   });
 
   test("purchase signals as idiots", async ({ page }) => {
-    // 2 hours for purchase pass
-    test.setTimeout(7_200_000);
+    // 4 hours for purchase pass
+    test.setTimeout(14_400_000);
 
     // Derive a fresh idiot
     const idiotKey = deriveIdiotKey(0, Date.now());
@@ -709,9 +867,9 @@ test.describe("Signal stress loop", () => {
 
     logLine("INFO", `Idiot address: ${idiotAcc.address}`);
 
-    // Fund idiot
+    // Fund idiot with minimal ETH (0.0005 is enough for several txs)
     logLine("INFO", "Funding idiot wallet...");
-    await fundWallet(idiotAcc.address, "0.002", "10000");
+    await fundWallet(idiotAcc.address, "0.0005", "5000");
 
     // Install wallet mock
     await installMockWallet({
@@ -721,23 +879,39 @@ test.describe("Signal stress loop", () => {
       transports: { [baseSepolia.id]: http(RPC_URL) },
     });
 
-    // Deposit escrow
-    await ensureIdiotEscrow(page, idiotAcc);
-
-    // Purchase signals in a loop (wallet mock already installed above)
-    const maxPurchases = 20;
+    // Purchase signals in a loop (escrow deposit handled inside purchaseFirstAvailableSignal)
+    const maxPurchases = 50;
+    let consecutiveFailures = 0;
     for (let i = 0; i < maxPurchases; i++) {
-      logLine("INFO", `Purchase attempt ${i + 1}/${maxPurchases}...`);
+      logLine("INFO", `\nPurchase attempt ${i + 1}/${maxPurchases}...`);
 
-      const ok = await purchaseFirstAvailableSignal(page, idiotAcc);
-      if (!ok && i > 5) {
-        logLine("INFO", "Multiple purchase failures, stopping purchase loop");
-        break;
+      const ok = await purchaseFirstAvailableSignal(page, idiotAcc, i);
+      if (ok) {
+        consecutiveFailures = 0;
+      } else {
+        consecutiveFailures++;
+        if (consecutiveFailures >= 5) {
+          logLine("INFO", `${consecutiveFailures} consecutive failures, pausing 60s...`);
+          await page.waitForTimeout(60_000);
+          consecutiveFailures = 0;
+        }
+      }
+
+      // Check idiot ETH balance periodically
+      if (i % 10 === 0) {
+        try {
+          const ethBal = await publicClient.getBalance({ address: idiotAcc.address });
+          logLine("INFO", `  Idiot ETH: ${formatUnits(ethBal, 18)}`);
+          if (ethBal < parseUnits("0.0001", 18)) {
+            logLine("WARN", "  Idiot ETH critically low, stopping purchases");
+            break;
+          }
+        } catch {}
       }
 
       await page.waitForTimeout(5_000);
     }
 
-    logLine("INFO", `Purchases complete: ${stats.purchasesMade} succeeded, ${stats.purchasesFailed} failed`);
+    logLine("INFO", `\nPurchases complete: ${stats.purchasesMade} succeeded, ${stats.purchasesFailed} failed`);
   });
 });

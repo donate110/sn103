@@ -49,8 +49,10 @@ class Config:
     # Cache TTL in seconds
     odds_cache_ttl: int = _int_env("ODDS_CACHE_TTL", "30")
 
-    # Line matching tolerance: how close a sportsbook line must be to match
-    line_tolerance: float = _float_env("LINE_TOLERANCE", "0.5")
+    # Line matching tolerance: how close a sportsbook line must be to match.
+    # Default 0.0 = exact match only. A signal's line must exist at the exact
+    # value at a sportsbook for verification to pass.
+    line_tolerance: float = _float_env("LINE_TOLERANCE", "0.0")
 
     # Timeouts (seconds)
     http_timeout: int = _int_env("HTTP_TIMEOUT", "30")

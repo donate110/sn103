@@ -194,7 +194,7 @@ class LineChecker:
         Matching rules:
         - Market type must match (spreads, totals, h2h)
         - Side must match (team name or Over/Under)
-        - For spreads/totals: line value must be within tolerance
+        - For spreads/totals: line value must match exactly
         - For h2h: no line value to check
         """
         if odds.market != line.market:
@@ -208,7 +208,7 @@ class LineChecker:
                 return False
             if not math.isfinite(line.line) or not math.isfinite(odds.point):
                 return False
-            if abs(line.line - odds.point) > self._tolerance:
+            if line.line != odds.point:
                 return False
 
         return True

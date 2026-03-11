@@ -35,7 +35,7 @@ class TestConfigDefaults:
 
     def test_default_line_tolerance(self) -> None:
         config = Config()
-        assert config.line_tolerance == 0.5
+        assert config.line_tolerance == 0.0
 
 
 class TestConfigValidation:
