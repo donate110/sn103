@@ -745,23 +745,9 @@ test.describe("Signal stress loop", () => {
     }
   });
 
-  test("create signals across all sports continuously", async ({ page, context }) => {
+  test("create signals across all sports continuously", async ({ context }) => {
     // 12 hours per test run
     test.setTimeout(43_200_000);
-
-    // Capture failed network requests for debugging (shows URL + status)
-    page.on("response", (resp) => {
-      if (resp.status() >= 400) {
-        const url = new URL(resp.url());
-        // Only log our own API errors, not third-party resources
-        if (url.hostname.includes("djinn") || url.pathname.startsWith("/api/")) {
-          logLine("HTTP", `${resp.status()} ${url.pathname}${url.search.slice(0, 50)}`);
-        }
-      }
-    });
-    page.on("pageerror", (err) => {
-      logLine("PAGE_ERR", err.message.slice(0, 200));
-    });
 
     let pass = 0;
 
@@ -776,6 +762,24 @@ test.describe("Signal stress loop", () => {
       const gIdx = (pass - 1) % NUM_GENIUSES;
       const genius = geniusAccounts[gIdx];
       logLine("INFO", `Using ${genius.label} (${genius.account.address})`);
+
+      // Create a fresh page per pass to prevent memory accumulation
+      const page = await context.newPage();
+
+      // Capture failed network requests for debugging
+      page.on("response", (resp) => {
+        if (resp.status() >= 400) {
+          try {
+            const url = new URL(resp.url());
+            if (url.hostname.includes("djinn") || url.pathname.startsWith("/api/")) {
+              logLine("HTTP", `${resp.status()} ${url.pathname}${url.search.slice(0, 50)}`);
+            }
+          } catch {}
+        }
+      });
+      page.on("pageerror", (err) => {
+        logLine("PAGE_ERR", err.message.slice(0, 200));
+      });
 
       // Install wallet mock for this genius
       await installMockWallet({
@@ -886,10 +890,13 @@ test.describe("Signal stress loop", () => {
 
       logStats();
 
+      // Close page to free memory before next pass
+      await page.close().catch(() => {});
+
       // Between passes: brief pause, then check if we should continue
       if (MAX_PASSES === 0 || pass < MAX_PASSES) {
         logLine("INFO", `Pass ${pass} complete. Waiting 30s before next pass...`);
-        await page.waitForTimeout(30_000);
+        await new Promise((r) => setTimeout(r, 30_000));
 
         // Refund genius if running low
         try {
