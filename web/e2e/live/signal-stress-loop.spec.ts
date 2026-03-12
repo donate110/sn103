@@ -448,6 +448,173 @@ async function navigateToFreshSignalPage(
 
 // ── Idiot purchase flow ─────────────────────────────────────────────────────
 
+/**
+ * Purchase a specific signal by navigating directly to its detail page.
+ * Skips the browse page entirely for faster, more targeted purchases.
+ */
+async function purchaseSignalById(
+  page: Page,
+  idiotAccount: ReturnType<typeof privateKeyToAccount>,
+  signalId: string,
+): Promise<boolean> {
+  await page.goto(`${BASE_URL}/idiot/signal/${signalId}`);
+  await bypassBetaGate(page);
+  await page.waitForLoadState("domcontentloaded");
+  await connectWallet(page);
+
+  // Wait for React hydration (same loading flash fix as browse-based flow)
+  try {
+    await page.getByText(/loading signal data/i).waitFor({ state: "visible", timeout: 5_000 });
+  } catch {
+    await page.waitForTimeout(2_000);
+  }
+
+  // Wait for the definitive post-loading state
+  const pageLoaded = await Promise.race([
+    page.getByText(/connect your wallet/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "connect" as const),
+    page.getByText(/signal not found/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "not-found" as const),
+    page.locator("#notional").waitFor({ state: "visible", timeout: 20_000 }).then(() => "ready" as const),
+    page.getByText(/no longer available/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "expired" as const),
+    page.getByText(/signal unavailable|encryption keys/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "unavailable" as const),
+    page.getByText(/your escrow balance/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "escrow-visible" as const),
+    new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 20_000)),
+  ]).catch(() => "timeout" as const);
+
+  logLine("INFO", `  Signal page state: ${pageLoaded}`);
+
+  if (pageLoaded === "connect") {
+    await connectWallet(page);
+    await page.waitForTimeout(3_000);
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(5_000);
+  } else if (pageLoaded === "not-found" || pageLoaded === "expired" || pageLoaded === "unavailable" || pageLoaded === "timeout") {
+    logLine("WARN", `  Signal ${pageLoaded}`);
+    return false;
+  }
+
+  // Check if this is our own signal
+  if (await page.getByText(/this is your own signal/i).isVisible().catch(() => false)) {
+    logLine("WARN", "  Skipping own signal");
+    return false;
+  }
+
+  // Escrow deposit if needed
+  const escrowText = page.getByText(/your escrow balance/i);
+  if (await escrowText.isVisible().catch(() => false)) {
+    const balText = await escrowText.textContent().catch(() => "");
+    const balMatch = balText?.match(/\$?([\d,.]+)/);
+    const bal = balMatch ? parseFloat(balMatch[1].replace(/,/g, "")) : 0;
+    if (bal < 10) {
+      logLine("INFO", "  Escrow balance low, depositing 500 USDC...");
+      const depositInput = page.locator("#depositEscrow, input[placeholder*='Amount']").first();
+      if (await depositInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await depositInput.fill("500");
+        const depositBtn = page.getByRole("button", { name: /^deposit$/i });
+        if (await depositBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+          await depositBtn.click();
+          await page.waitForTimeout(5_000);
+          const approvalMsg = page.getByText(/approved.*click deposit again/i);
+          if (await approvalMsg.isVisible({ timeout: 30_000 }).catch(() => false)) {
+            logLine("INFO", "  USDC approved, clicking deposit again...");
+            await depositBtn.click();
+          }
+          const deposited = page.getByText(/deposited/i);
+          await deposited.isVisible({ timeout: 60_000 }).catch(() => false);
+          logLine("OK", "  Escrow deposit completed");
+          await page.waitForTimeout(2_000);
+        }
+      }
+    }
+  }
+
+  // Enter notional
+  const notionalInput = page.locator("#notional");
+  try {
+    await notionalInput.waitFor({ state: "visible", timeout: 10_000 });
+  } catch {
+    logLine("WARN", "  No notional input found");
+    return false;
+  }
+
+  const minBtn = page.getByRole("button", { name: /^min/i });
+  if (await minBtn.isVisible().catch(() => false)) {
+    await minBtn.click();
+    logLine("INFO", "  Clicked Min button for notional");
+  } else {
+    await notionalInput.fill("10");
+    logLine("INFO", "  Set notional to 10 USDC");
+  }
+  await page.waitForTimeout(1_000);
+
+  // Click purchase
+  const purchaseBtn = page.getByRole("button", { name: /purchase signal/i });
+  if (!(await purchaseBtn.isVisible({ timeout: 5_000 }).catch(() => false))) {
+    const fallbackBtn = page.getByRole("button", { name: /purchase|buy/i }).first();
+    if (!(await fallbackBtn.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      logLine("WARN", "  Purchase button not visible");
+      return false;
+    }
+    if (await fallbackBtn.isDisabled()) {
+      logLine("WARN", "  Purchase button disabled");
+      return false;
+    }
+    await fallbackBtn.click();
+  } else {
+    if (await purchaseBtn.isDisabled()) {
+      logLine("WARN", "  Purchase button disabled");
+      return false;
+    }
+    await purchaseBtn.click();
+  }
+
+  logLine("INFO", "  Purchase clicked, waiting for result (up to 180s)...");
+
+  // Wait for result (same logic as purchaseFirstAvailableSignal)
+  const startTime = Date.now();
+  const maxWaitMs = 180_000;
+  while (Date.now() - startTime < maxWaitMs) {
+    const successHeading = page.getByText(/signal purchased.*decrypted/i);
+    if (await successHeading.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      const realPick = page.getByText(/real pick/i);
+      const pickText = await realPick.textContent().catch(() => "");
+      stats.purchasesMade++;
+      logLine("OK", `  Purchase succeeded! ${pickText}`);
+      return true;
+    }
+
+    const errorAlert = page.locator("[role=alert]").first();
+    if (await errorAlert.isVisible({ timeout: 500 }).catch(() => false)) {
+      const errText = await errorAlert.textContent().catch(() => "");
+      if (errText && !errText.toLowerCase().includes("checking") && !errText.toLowerCase().includes("processing")) {
+        stats.purchasesFailed++;
+        logLine("WARN", `  Purchase error: ${errText?.substring(0, 200)}`);
+        return false;
+      }
+    }
+
+    const insufficient = page.getByText(/insufficient escrow/i);
+    if (await insufficient.isVisible({ timeout: 500 }).catch(() => false)) {
+      stats.purchasesFailed++;
+      logLine("WARN", `  ${await insufficient.textContent().catch(() => "")}`);
+      return false;
+    }
+
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    if (elapsed % 15 === 0 && elapsed > 0) {
+      const statusBanner = page.locator("[aria-live=polite]").first();
+      const statusText = await statusBanner.textContent().catch(() => "");
+      logLine("INFO", `    [${elapsed}s] ${statusText || "waiting..."}`);
+    }
+
+    await page.waitForTimeout(2_000);
+  }
+
+  stats.purchasesFailed++;
+  logLine("WARN", "  Purchase timed out after 180s");
+  return false;
+}
+
 async function purchaseFirstAvailableSignal(
   page: Page,
   idiotAccount: ReturnType<typeof privateKeyToAccount>,
@@ -476,8 +643,15 @@ async function purchaseFirstAvailableSignal(
     return false;
   }
 
-  // Pick a signal (cycle through them to avoid re-buying the same one)
-  const idx = signalIndex % cardCount;
+  // Pick a signal. Negative signalIndex = pick from the end (newest first).
+  // Browse page sorts by expiry ascending, so last cards = most recently created.
+  let idx: number;
+  if (signalIndex < 0) {
+    // -1 = last card, -2 = second to last, etc.
+    idx = Math.max(0, cardCount + signalIndex) % cardCount;
+  } else {
+    idx = signalIndex % cardCount;
+  }
   logLine("INFO", `  Found ${cardCount} signals, clicking #${idx + 1}...`);
 
   // Grab the signal href for logging
@@ -981,21 +1155,23 @@ test.describe("Signal stress loop", () => {
       transports: { [baseSepolia.id]: http(RPC_URL) },
     });
 
-    // Purchase signals in a loop (escrow deposit handled inside purchaseFirstAvailableSignal)
+    // Purchase signals, starting from the END of the browse page (newest first).
+    // Browse page sorts by expiry ascending, so the last cards are the most
+    // recently created and most likely to have fresh picks at sportsbooks.
     const maxPurchases = 50;
     let consecutiveFailures = 0;
     for (let i = 0; i < maxPurchases; i++) {
       logLine("INFO", `\nPurchase attempt ${i + 1}/${maxPurchases}...`);
 
-      const ok = await purchaseFirstAvailableSignal(page, idiotAcc, i);
+      // Negative signalIndex tells the function to try from the end of the list
+      const ok = await purchaseFirstAvailableSignal(page, idiotAcc, -(i + 1));
       if (ok) {
         consecutiveFailures = 0;
       } else {
         consecutiveFailures++;
-        if (consecutiveFailures >= 5) {
-          logLine("INFO", `${consecutiveFailures} consecutive failures, pausing 60s...`);
-          await page.waitForTimeout(60_000);
-          consecutiveFailures = 0;
+        if (consecutiveFailures >= 10) {
+          logLine("INFO", `${consecutiveFailures} consecutive failures, stopping purchases`);
+          break;
         }
       }
 
