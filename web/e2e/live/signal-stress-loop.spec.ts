@@ -151,10 +151,24 @@ function deriveIdiotKey(geniusIdx: number, pass: number): Hex {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 async function bypassBetaGate(page: Page) {
-  await page.evaluate((pw) => {
-    localStorage.setItem("djinn-beta-access", "true");
-    localStorage.setItem("djinn-beta-password", pw);
+  // Beta gate uses httpOnly cookie set via /api/beta/verify POST.
+  // We call the API from the page context so the cookie gets set.
+  const result = await page.evaluate(async (pw) => {
+    try {
+      const res = await fetch("/api/beta/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pw }),
+        credentials: "same-origin",
+      });
+      return { ok: res.ok, status: res.status };
+    } catch (e) {
+      return { ok: false, status: 0, error: String(e) };
+    }
   }, BETA_PASSWORD);
+  if (!result.ok) {
+    logLine("WARN", `  Beta gate bypass failed: status=${result.status}`);
+  }
 }
 
 async function connectWallet(page: Page) {
