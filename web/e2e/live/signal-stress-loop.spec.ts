@@ -486,37 +486,56 @@ async function purchaseFirstAvailableSignal(
 
   await signalCards.nth(idx).click();
   await page.waitForLoadState("domcontentloaded");
-  await page.waitForTimeout(2_000);
 
-  // Wallet connection may be lost after navigation; reconnect if needed
-  const connectPrompt = page.getByText(/connect your wallet/i);
-  if (await connectPrompt.isVisible({ timeout: 2_000 }).catch(() => false)) {
+  // Wait for the signal page to finish loading React + blockchain data.
+  // The page renders one of: "Connect your wallet", "Signal Not Found",
+  // "Signal #xxx" (with form or "no longer available"). We wait for ANY
+  // of these definitive states to appear (up to 15s for blockchain queries).
+  const pageLoaded = await Promise.race([
+    page.getByText(/connect your wallet/i).waitFor({ state: "visible", timeout: 15_000 }).then(() => "connect" as const),
+    page.getByText(/signal not found/i).waitFor({ state: "visible", timeout: 15_000 }).then(() => "not-found" as const),
+    page.locator("#notional").waitFor({ state: "visible", timeout: 15_000 }).then(() => "ready" as const),
+    page.getByText(/no longer available/i).waitFor({ state: "visible", timeout: 15_000 }).then(() => "expired" as const),
+    page.getByText(/signal unavailable|encryption keys/i).waitFor({ state: "visible", timeout: 15_000 }).then(() => "unavailable" as const),
+    page.getByText(/your escrow balance/i).waitFor({ state: "visible", timeout: 15_000 }).then(() => "escrow-visible" as const),
+    new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 15_000)),
+  ]).catch(() => "timeout" as const);
+
+  logLine("INFO", `  Signal page state: ${pageLoaded}`);
+
+  if (pageLoaded === "connect") {
     logLine("INFO", "  Wallet disconnected on signal page, reconnecting...");
     await connectWallet(page);
     await page.waitForTimeout(3_000);
-    // Reload page so React picks up the connected state
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
-    await page.waitForTimeout(3_000);
-  }
-
-  // Check if signal is unavailable (validators don't hold keys)
-  const unavailable = page.getByText(/signal unavailable|encryption keys are not held/i);
-  if (await unavailable.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await page.waitForTimeout(5_000);
+  } else if (pageLoaded === "not-found") {
+    logLine("WARN", "  Signal not found on-chain");
+    return false;
+  } else if (pageLoaded === "expired") {
+    logLine("WARN", "  Signal expired (no longer available)");
+    return false;
+  } else if (pageLoaded === "unavailable") {
     logLine("WARN", "  Signal unavailable (no validator keys)");
     return false;
+  } else if (pageLoaded === "timeout") {
+    const h1Text = await page.locator("h1").first().textContent().catch(() => "none");
+    logLine("WARN", `  Signal page timed out loading (h1="${h1Text}")`);
+    return false;
   }
+  // pageLoaded === "ready" or "escrow-visible" — proceed with purchase
 
   // Check if this is our own signal
   const ownSignal = page.getByText(/this is your own signal/i);
-  if (await ownSignal.isVisible({ timeout: 1_000 }).catch(() => false)) {
+  if (await ownSignal.isVisible().catch(() => false)) {
     logLine("WARN", "  Skipping own signal");
     return false;
   }
 
-  // Check escrow balance and deposit if needed (wait longer for blockchain data to load)
+  // Check escrow balance and deposit if needed
   const escrowText = page.getByText(/your escrow balance/i);
-  if (await escrowText.isVisible({ timeout: 10_000 }).catch(() => false)) {
+  if (await escrowText.isVisible().catch(() => false)) {
     const balText = await escrowText.textContent().catch(() => "");
     logLine("INFO", `  ${balText}`);
 
@@ -548,25 +567,26 @@ async function purchaseFirstAvailableSignal(
     }
   }
 
-  // Enter notional amount - use #notional to avoid matching the deposit input
+  // Enter notional amount - use #notional to avoid matching the deposit input.
+  // Use waitFor instead of isVisible since the page needs time to render.
   const notionalInput = page.locator("#notional");
-  if (await notionalInput.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    // Try clicking "Min" quick-select first, otherwise type 10
-    const minBtn = page.getByRole("button", { name: /^min/i });
-    if (await minBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await minBtn.click();
-      logLine("INFO", "  Clicked Min button for notional");
-    } else {
-      await notionalInput.fill("10");
-      logLine("INFO", "  Set notional to 10 USDC");
-    }
-  } else {
-    // Diagnostic: log what's actually visible on the page
-    const pageTitle = await page.title().catch(() => "?");
+  try {
+    await notionalInput.waitFor({ state: "visible", timeout: 10_000 });
+  } catch {
     const h1Text = await page.locator("h1").first().textContent().catch(() => "none");
-    const bodySnippet = await page.locator("body").first().textContent().catch(() => "");
-    logLine("WARN", `  No notional input found (title="${pageTitle}", h1="${h1Text}", snippet="${bodySnippet?.slice(0, 200)}")`);
+    const bodyText = await page.locator("main, [role=main], body").first().textContent().catch(() => "");
+    logLine("WARN", `  No notional input after waitFor (h1="${h1Text}", body="${bodyText?.slice(0, 300)}")`);
     return false;
+  }
+
+  // Try clicking "Min" quick-select first, otherwise type 10
+  const minBtn = page.getByRole("button", { name: /^min/i });
+  if (await minBtn.isVisible().catch(() => false)) {
+    await minBtn.click();
+    logLine("INFO", "  Clicked Min button for notional");
+  } else {
+    await notionalInput.fill("10");
+    logLine("INFO", "  Set notional to 10 USDC");
   }
 
   await page.waitForTimeout(1_000);
