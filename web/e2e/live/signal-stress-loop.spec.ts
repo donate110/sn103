@@ -514,9 +514,9 @@ async function purchaseFirstAvailableSignal(
     return false;
   }
 
-  // Check escrow balance and deposit if needed
+  // Check escrow balance and deposit if needed (wait longer for blockchain data to load)
   const escrowText = page.getByText(/your escrow balance/i);
-  if (await escrowText.isVisible({ timeout: 3_000 }).catch(() => false)) {
+  if (await escrowText.isVisible({ timeout: 10_000 }).catch(() => false)) {
     const balText = await escrowText.textContent().catch(() => "");
     logLine("INFO", `  ${balText}`);
 
@@ -548,11 +548,9 @@ async function purchaseFirstAvailableSignal(
     }
   }
 
-  // Enter notional amount - look for the notional input
-  const notionalInput = page
-    .locator("input[type=number]")
-    .first();
-  if (await notionalInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
+  // Enter notional amount - use #notional to avoid matching the deposit input
+  const notionalInput = page.locator("#notional");
+  if (await notionalInput.isVisible({ timeout: 10_000 }).catch(() => false)) {
     // Try clicking "Min" quick-select first, otherwise type 10
     const minBtn = page.getByRole("button", { name: /^min/i });
     if (await minBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
