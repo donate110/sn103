@@ -244,15 +244,19 @@ export async function getActiveSignals(
   const now = BigInt(Math.floor(Date.now() / 1000));
   const notExpired = all.filter((s) => s.expiresAt > now);
 
-  // Always check on-chain status (cheap view calls) to avoid stale data
+  // Always check on-chain status (cheap view calls) to avoid stale data.
+  // Retry once on failure to avoid dropping valid signals on transient RPC errors.
   const enriched = await Promise.all(
     notExpired.map(async (s) => {
       const id = BigInt(s.signalId);
-      const [active, signalData] = await Promise.all([
-        contract.isActive(id).catch(() => false),
-        contract.getSignal(id).catch(() => null),
-      ]);
+      let active: boolean;
+      try {
+        active = await contract.isActive(id);
+      } catch {
+        try { active = await contract.isActive(id); } catch { active = false; }
+      }
       if (!active) return null;
+      const signalData = await contract.getSignal(id).catch(() => null);
       if (signalData && signalData.minNotional != null) {
         s.minNotional = BigInt(signalData.minNotional);
       }
@@ -313,15 +317,19 @@ export async function getSignalsByGenius(
   const now = BigInt(Math.floor(Date.now() / 1000));
   const notExpired = all.filter((s) => s.expiresAt > now);
 
-  // Check on-chain status and fetch minNotional (for exclusive badge)
+  // Check on-chain status and fetch minNotional (for exclusive badge).
+  // Retry once on failure to avoid dropping valid signals on transient RPC errors.
   const enriched = await Promise.all(
     notExpired.map(async (s) => {
       const id = BigInt(s.signalId);
-      const [active, signalData] = await Promise.all([
-        contract.isActive(id).catch(() => false),
-        contract.getSignal(id).catch(() => null),
-      ]);
+      let active: boolean;
+      try {
+        active = await contract.isActive(id);
+      } catch {
+        try { active = await contract.isActive(id); } catch { active = false; }
+      }
       if (!active) return null;
+      const signalData = await contract.getSignal(id).catch(() => null);
       if (signalData && signalData.minNotional != null) {
         s.minNotional = BigInt(signalData.minNotional);
       }

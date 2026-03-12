@@ -85,6 +85,7 @@ const stats = {
   sportsScanned: 0,
   gamesFound: 0,
   passes: 0,
+  staleSignalsSkipped: 0,
   startedAt: Date.now(),
 };
 
@@ -115,6 +116,7 @@ function logStats() {
     `purchases=${stats.purchasesMade}`,
     `purchaseFails=${stats.purchasesFailed}`,
     `immBuys=${stats.immediatePurchaseSuccesses}/${stats.immediatePurchaseAttempts} (${immPurchaseRate}%)`,
+    `staleSkips=${stats.staleSignalsSkipped}`,
     `sports=${stats.sportsScanned}`,
     `games=${stats.gamesFound}`,
     `elapsed=${elapsed}min`,
@@ -316,10 +318,29 @@ async function createSignalOnGame(
     return { success: false, sport, game: gameName, error: "no bet buttons" };
   }
 
-  // Pick a moneyline bet (last button tends to be moneyline)
-  const betIdx = betCount > 2 ? betCount - 1 : 0;
-  await betButtons.nth(betIdx).scrollIntoViewIfNeeded();
-  await betButtons.nth(betIdx).click();
+  // Prefer moneyline bets: no line value means they can't go stale from
+  // market movement. Moneyline section is labeled "Moneyline" in the UI.
+  // Fall back to any bet button if moneyline isn't available.
+  const mlSection = cardCount > 0
+    ? cardContainer.first().locator("text=Moneyline").locator("xpath=ancestor::div[1]")
+    : page.locator("text=Moneyline").locator("xpath=ancestor::div[1]");
+  const mlButtons = mlSection.locator("button");
+  const mlCount = await mlButtons.count().catch(() => 0);
+
+  let targetButton;
+  if (mlCount > 0) {
+    // Pick a random moneyline bet
+    const mlIdx = Math.floor(Math.random() * mlCount);
+    targetButton = mlButtons.nth(mlIdx);
+    logLine("INFO", `  Picking moneyline bet ${mlIdx + 1}/${mlCount} (line-stale-resistant)`);
+  } else {
+    // Fallback: pick last bet button (which tends to be moneyline anyway)
+    const betIdx = betCount > 2 ? betCount - 1 : 0;
+    targetButton = betButtons.nth(betIdx);
+    logLine("INFO", `  No moneyline section found, picking bet ${betIdx + 1}/${betCount}`);
+  }
+  await targetButton.scrollIntoViewIfNeeded();
+  await targetButton.click();
   await page.waitForTimeout(2_000);
 
   // Advance through Review Lines
@@ -631,7 +652,6 @@ async function purchaseFirstAvailableSignal(
   await page.reload();
   await page.waitForLoadState("domcontentloaded");
   await connectWallet(page);
-  await page.waitForTimeout(3_000);
 
   const heading = page.getByRole("heading", { name: /browse signals/i });
   if (!(await heading.isVisible({ timeout: 15_000 }).catch(() => false))) {
@@ -639,11 +659,25 @@ async function purchaseFirstAvailableSignal(
     return false;
   }
 
-  await page.waitForTimeout(3_000);
-
-  // Look for signal cards (links to /idiot/signal/*)
+  // Wait for signal cards to actually load (async blockchain query).
+  // The heading renders before data loads, so we need to wait for cards.
   const signalCards = page.locator("a[href*='/idiot/signal/']");
-  const cardCount = await signalCards.count();
+  try {
+    await signalCards.first().waitFor({ state: "visible", timeout: 15_000 });
+  } catch {
+    // Cards may genuinely be empty, or still loading. Try one reload.
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
+    await connectWallet(page);
+    try {
+      await signalCards.first().waitFor({ state: "visible", timeout: 15_000 });
+    } catch {
+      logLine("INFO", "  No signals available to purchase (waited 30s)");
+      return false;
+    }
+  }
+
+  let cardCount = await signalCards.count();
   if (cardCount === 0) {
     logLine("INFO", "  No signals available to purchase");
     return false;
@@ -651,76 +685,104 @@ async function purchaseFirstAvailableSignal(
 
   // Pick a signal. Negative signalIndex = pick from the end (newest first).
   // Browse page sorts by expiry ascending, so last cards = most recently created.
-  let idx: number;
+  let startIdx: number;
   if (signalIndex < 0) {
-    // -1 = last card, -2 = second to last, etc.
-    idx = Math.max(0, cardCount + signalIndex) % cardCount;
+    startIdx = Math.max(0, cardCount + signalIndex) % cardCount;
   } else {
-    idx = signalIndex % cardCount;
-  }
-  logLine("INFO", `  Found ${cardCount} signals, clicking #${idx + 1}...`);
-
-  // Grab the signal href for logging
-  const href = await signalCards.nth(idx).getAttribute("href").catch(() => "");
-  logLine("INFO", `  Signal URL: ${href}`);
-
-  await signalCards.nth(idx).click();
-  await page.waitForLoadState("domcontentloaded");
-
-  // Wait for React hydration and initial useEffect to fire.
-  // The useSignal hook starts with loading=false, signal=null which briefly
-  // renders "Signal not found" before useEffect sets loading=true.
-  // We must wait past this initial flash before checking page state.
-  // Strategy: wait for "Loading signal data..." to appear (useEffect fired),
-  // then wait for the final state (loading complete).
-  try {
-    await page.getByText(/loading signal data/i).waitFor({ state: "visible", timeout: 5_000 });
-  } catch {
-    // If loading text never appears, the page might have hydrated very fast
-    // or the wallet isn't connected. Wait a moment to let React settle.
-    await page.waitForTimeout(2_000);
+    startIdx = signalIndex % cardCount;
   }
 
-  // Now wait for the definitive post-loading state
-  const pageLoaded = await Promise.race([
-    page.getByText(/connect your wallet/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "connect" as const),
-    page.getByText(/signal not found/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "not-found" as const),
-    page.locator("#notional").waitFor({ state: "visible", timeout: 20_000 }).then(() => "ready" as const),
-    page.getByText(/no longer available/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "expired" as const),
-    page.getByText(/signal unavailable|encryption keys/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "unavailable" as const),
-    page.getByText(/your escrow balance/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "escrow-visible" as const),
-    new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 20_000)),
-  ]).catch(() => "timeout" as const);
+  // Try up to 5 signals from the browse page before giving up.
+  // Stale/expired/not-found signals get skipped instead of failing the whole attempt.
+  const MAX_SIGNAL_RETRIES = 5;
+  const triedHrefs = new Set<string>();
 
-  logLine("INFO", `  Signal page state: ${pageLoaded}`);
+  for (let attempt = 0; attempt < MAX_SIGNAL_RETRIES; attempt++) {
+    // On retry, reload the browse page to get a fresh card list
+    if (attempt > 0) {
+      await page.goto(`${BASE_URL}/idiot/browse`);
+      await page.waitForLoadState("domcontentloaded");
+      await connectWallet(page);
+      try {
+        await signalCards.first().waitFor({ state: "visible", timeout: 10_000 });
+      } catch {
+        logLine("INFO", "  No signals on retry reload");
+        return false;
+      }
+      cardCount = await signalCards.count();
+    }
 
-  if (pageLoaded === "connect") {
-    logLine("INFO", "  Wallet disconnected on signal page, reconnecting...");
-    await connectWallet(page);
-    await page.waitForTimeout(3_000);
-    await page.reload();
+    const idx = (startIdx + attempt) % cardCount;
+    logLine("INFO", `  Found ${cardCount} signals, clicking #${idx + 1} (attempt ${attempt + 1})...`);
+
+    const href = await signalCards.nth(idx).getAttribute("href").catch(() => "");
+    if (triedHrefs.has(href || "")) {
+      logLine("INFO", `  Already tried ${href}, skipping`);
+      continue;
+    }
+    triedHrefs.add(href || "");
+    logLine("INFO", `  Signal URL: ${href}`);
+
+    await signalCards.nth(idx).click();
     await page.waitForLoadState("domcontentloaded");
-    await page.waitForTimeout(5_000);
-  } else if (pageLoaded === "not-found") {
-    logLine("WARN", "  Signal not found on-chain");
-    return false;
-  } else if (pageLoaded === "expired") {
-    logLine("WARN", "  Signal expired (no longer available)");
-    return false;
-  } else if (pageLoaded === "unavailable") {
-    logLine("WARN", "  Signal unavailable (no validator keys)");
-    return false;
-  } else if (pageLoaded === "timeout") {
-    const h1Text = await page.locator("h1").first().textContent().catch(() => "none");
-    logLine("WARN", `  Signal page timed out loading (h1="${h1Text}")`);
-    return false;
-  }
-  // pageLoaded === "ready" or "escrow-visible" — proceed with purchase
 
-  // Check if this is our own signal
-  const ownSignal = page.getByText(/this is your own signal/i);
-  if (await ownSignal.isVisible().catch(() => false)) {
-    logLine("WARN", "  Skipping own signal");
+    // Wait for React hydration. The useSignal hook starts with loading=false,
+    // signal=null which briefly renders "Signal not found" before useEffect
+    // sets loading=true. Wait for "Loading signal data..." first.
+    try {
+      await page.getByText(/loading signal data/i).waitFor({ state: "visible", timeout: 5_000 });
+    } catch {
+      await page.waitForTimeout(2_000);
+    }
+
+    // Wait for the definitive post-loading state
+    const pageLoaded = await Promise.race([
+      page.getByText(/connect your wallet/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "connect" as const),
+      page.getByText(/signal not found/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "not-found" as const),
+      page.locator("#notional").waitFor({ state: "visible", timeout: 20_000 }).then(() => "ready" as const),
+      page.getByText(/no longer available/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "expired" as const),
+      page.getByText(/signal unavailable|encryption keys/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "unavailable" as const),
+      page.getByText(/your escrow balance/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "escrow-visible" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 20_000)),
+    ]).catch(() => "timeout" as const);
+
+    logLine("INFO", `  Signal page state: ${pageLoaded}`);
+
+    if (pageLoaded === "connect") {
+      logLine("INFO", "  Wallet disconnected on signal page, reconnecting...");
+      await connectWallet(page);
+      await page.waitForTimeout(3_000);
+      await page.reload();
+      await page.waitForLoadState("domcontentloaded");
+      await page.waitForTimeout(5_000);
+      // Fall through to check for #notional below
+    } else if (pageLoaded === "not-found" || pageLoaded === "expired" || pageLoaded === "unavailable") {
+      stats.staleSignalsSkipped++;
+      logLine("WARN", `  Signal ${pageLoaded}, trying next signal...`);
+      continue;
+    } else if (pageLoaded === "timeout") {
+      const h1Text = await page.locator("h1").first().textContent().catch(() => "none");
+      logLine("WARN", `  Signal page timed out loading (h1="${h1Text}"), trying next...`);
+      stats.staleSignalsSkipped++;
+      continue;
+    }
+    // pageLoaded === "ready" or "escrow-visible" or reconnected wallet
+
+    // Check if this is our own signal
+    const ownSignal = page.getByText(/this is your own signal/i);
+    if (await ownSignal.isVisible().catch(() => false)) {
+      logLine("WARN", "  Skipping own signal");
+      continue;
+    }
+
+    // If we got here, we have a purchasable signal. Break out of retry loop.
+    break;
+  }
+
+  // Verify we're actually on a purchasable signal page
+  const notionalCheck = page.locator("#notional");
+  if (!(await notionalCheck.isVisible({ timeout: 3_000 }).catch(() => false))) {
+    logLine("WARN", "  No purchasable signal found after retries");
     return false;
   }
 
@@ -1103,32 +1165,29 @@ test.describe("Signal stress loop", () => {
               logLine("OK", `  [${sport}] ${result.game}: SUCCESS (total: ${stats.signalsCreated})`);
               consecutivePickFails = 0;
 
-              // Immediate purchase: try several signals from the browse page.
-              // Cycle through different positions since the newest card might
-              // not be the signal we just created (browse sorts by expiry, not
-              // creation time). Try up to 3 different signals per attempt.
+              // Immediate purchase: try to buy a signal from the browse page.
+              // purchaseFirstAvailableSignal internally retries up to 5 signals
+              // when individual signals are stale/expired/not-found.
               if (idiotPage && idiotAcc) {
                 stats.immediatePurchaseAttempts++;
-                logLine("INFO", `  Attempting immediate purchase (trying up to 3 signals)...`);
+                logLine("INFO", `  Attempting immediate purchase...`);
                 let purchased = false;
-                for (let tryIdx = 0; tryIdx < 3 && !purchased; tryIdx++) {
-                  // Cycle: -1 (last), -2 (second to last), -3, etc.
-                  // Use immediatePurchaseAttempts to vary position across attempts
-                  const signalPos = -((stats.immediatePurchaseAttempts - 1) * 3 + tryIdx + 1);
-                  try {
-                    purchased = await Promise.race([
-                      purchaseFirstAvailableSignal(idiotPage, idiotAcc, signalPos),
-                      new Promise<false>((r) => setTimeout(() => r(false), 60_000)),
-                    ]);
-                  } catch (purchaseErr) {
-                    logLine("WARN", `  Purchase try ${tryIdx + 1} error: ${String(purchaseErr).slice(0, 100)}`);
-                  }
+                try {
+                  // Start from the end of the browse page (newest signals).
+                  // Vary starting position across attempts to cover more signals.
+                  const signalPos = -(stats.immediatePurchaseAttempts);
+                  purchased = await Promise.race([
+                    purchaseFirstAvailableSignal(idiotPage, idiotAcc, signalPos),
+                    new Promise<false>((r) => setTimeout(() => r(false), 120_000)),
+                  ]);
+                } catch (purchaseErr) {
+                  logLine("WARN", `  Purchase error: ${String(purchaseErr).slice(0, 100)}`);
                 }
                 if (purchased) {
                   stats.immediatePurchaseSuccesses++;
                   logLine("OK", `  >>> IMMEDIATE PURCHASE for ${result.game}! <<<`);
                 } else {
-                  logLine("INFO", `  Immediate purchase: all attempts failed (line moved)`);
+                  logLine("INFO", `  Immediate purchase failed (line moved or signal stale)`);
                 }
               }
             } else {
