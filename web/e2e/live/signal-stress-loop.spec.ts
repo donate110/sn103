@@ -172,23 +172,29 @@ async function bypassBetaGate(page: Page) {
 }
 
 async function connectWallet(page: Page) {
+  // Wait for the "Get Started" button to appear. isVisible() returns instantly
+  // (doesn't wait), so we use waitFor which actually waits for the element.
   const connectBtn = page.getByRole("button", { name: /get started/i });
-  if (await connectBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await connectBtn.click();
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const mockBtn = page.getByRole("button", { name: /mock/i });
-        await mockBtn.waitFor({ state: "visible", timeout: 5_000 });
-        await page.waitForTimeout(500);
-        await mockBtn.click({ timeout: 5_000 });
-        break;
-      } catch {
-        if (attempt === 2) break;
-        await page.waitForTimeout(1_000);
-      }
-    }
-    await page.waitForTimeout(2_000);
+  try {
+    await connectBtn.waitFor({ state: "visible", timeout: 10_000 });
+  } catch {
+    // Button not found: wallet might already be connected, or page hasn't loaded.
+    return;
   }
+  await connectBtn.click();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const mockBtn = page.getByRole("button", { name: /mock/i });
+      await mockBtn.waitFor({ state: "visible", timeout: 5_000 });
+      await page.waitForTimeout(500);
+      await mockBtn.click({ timeout: 5_000 });
+      break;
+    } catch {
+      if (attempt === 2) break;
+      await page.waitForTimeout(1_000);
+    }
+  }
+  await page.waitForTimeout(2_000);
 }
 
 async function injectMasterSeed(
@@ -667,10 +673,30 @@ async function purchaseFirstAvailableSignal(
   await page.waitForLoadState("domcontentloaded");
   await connectWallet(page);
 
-  const heading = page.getByRole("heading", { name: /browse signals/i });
-  if (!(await heading.isVisible({ timeout: 15_000 }).catch(() => false))) {
-    logLine("WARN", "  Could not load browse signals page");
-    return false;
+  // Wait for the browse page to load. Use a simple h1 text check since
+  // getByRole("heading") can be unreliable during React hydration.
+  const heading = page.locator("h1:has-text('Browse Signals')");
+  try {
+    await heading.waitFor({ state: "visible", timeout: 15_000 });
+  } catch {
+    // Heading didn't appear. Check if beta gate is blocking.
+    const hasBetaForm = await page.locator("input[aria-label='Beta password']").isVisible().catch(() => false);
+    if (hasBetaForm) {
+      logLine("INFO", "  Beta gate showing, submitting password via form...");
+      await page.locator("input[aria-label='Beta password']").fill(BETA_PASSWORD);
+      await page.locator("button[type='submit']").click();
+      try {
+        await heading.waitFor({ state: "visible", timeout: 10_000 });
+        logLine("OK", "  Beta gate bypassed via form");
+      } catch {
+        logLine("WARN", "  Browse page failed to load after beta form");
+        return false;
+      }
+    } else {
+      const h1 = await page.locator("h1").first().textContent().catch(() => "none");
+      logLine("WARN", `  Could not load browse signals page (h1="${h1}")`);
+      return false;
+    }
   }
 
   // Wait for signal cards to actually load (async blockchain query).
