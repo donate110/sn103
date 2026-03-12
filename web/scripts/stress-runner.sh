@@ -83,23 +83,28 @@ try_auto_faucet() {
   return 1
 }
 
+is_below() {
+  # Compare large integers without bc (which may not be installed)
+  python3 -c "print(1 if int('${1:-0}') < int('${2}') else 0)" 2>/dev/null
+}
+
+wei_to_eth() {
+  python3 -c "print(f'{int(\"${1:-0}\") / 1e18:.6f}')" 2>/dev/null || echo "unknown"
+}
+
 check_deployer_health() {
   local deployer_bal
   deployer_bal=$(cast balance 0xD717b5fbA93F123f6ad530ae2Ab327B4DcDa1e37 --rpc-url https://sepolia.base.org 2>/dev/null || echo "0")
-  local deployer_eth
-  deployer_eth=$(echo "scale=6; $deployer_bal / 1000000000000000000" | bc 2>/dev/null || echo "unknown")
-  log "Deployer ETH: $deployer_eth"
+  log "Deployer ETH: $(wei_to_eth "$deployer_bal")"
 
   local genius_bal
   genius_bal=$(cast balance 0x68fc8eeC9E5551d4c93a89b6d861f0a05e0A2A1d --rpc-url https://sepolia.base.org 2>/dev/null || echo "0")
-  local genius_eth
-  genius_eth=$(echo "scale=6; $genius_bal / 1000000000000000000" | bc 2>/dev/null || echo "unknown")
-  log "Genius G0 ETH: $genius_eth"
+  log "Genius G0 ETH: $(wei_to_eth "$genius_bal")"
 
   # Auto-faucet if either wallet is low (below 0.003 ETH)
-  if [ "$deployer_bal" != "0" ] && [ "$(echo "$deployer_bal < 3000000000000000" | bc 2>/dev/null)" = "1" ]; then
+  if [ "$deployer_bal" != "0" ] && [ "$(is_below "$deployer_bal" 3000000000000000)" = "1" ]; then
     try_auto_faucet || log "Auto-faucet not available"
-  elif [ "$genius_bal" != "0" ] && [ "$(echo "$genius_bal < 3000000000000000" | bc 2>/dev/null)" = "1" ]; then
+  elif [ "$genius_bal" != "0" ] && [ "$(is_below "$genius_bal" 3000000000000000)" = "1" ]; then
     try_auto_faucet || log "Auto-faucet not available"
   fi
 }
@@ -145,7 +150,7 @@ while [ "$restart_count" -lt "$MAX_RESTARTS" ]; do
 
   # Check if we should stop (e.g., genius wallet drained)
   genius_bal=$(cast balance 0x68fc8eeC9E5551d4c93a89b6d861f0a05e0A2A1d --rpc-url https://sepolia.base.org 2>/dev/null || echo "0")
-  if [ "$genius_bal" != "0" ] && [ "$(echo "$genius_bal < 50000000000000" | bc 2>/dev/null)" = "1" ]; then
+  if [ "$genius_bal" != "0" ] && [ "$(is_below "$genius_bal" 50000000000000)" = "1" ]; then
     log "WARNING: Genius G0 ETH critically low ($genius_bal wei), stopping runner"
     break
   fi
