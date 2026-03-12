@@ -486,7 +486,19 @@ async function purchaseFirstAvailableSignal(
 
   await signalCards.nth(idx).click();
   await page.waitForLoadState("domcontentloaded");
-  await page.waitForTimeout(3_000);
+  await page.waitForTimeout(2_000);
+
+  // Wallet connection may be lost after navigation; reconnect if needed
+  const connectPrompt = page.getByText(/connect your wallet/i);
+  if (await connectPrompt.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    logLine("INFO", "  Wallet disconnected on signal page, reconnecting...");
+    await connectWallet(page);
+    await page.waitForTimeout(3_000);
+    // Reload page so React picks up the connected state
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(3_000);
+  }
 
   // Check if signal is unavailable (validators don't hold keys)
   const unavailable = page.getByText(/signal unavailable|encryption keys are not held/i);
@@ -551,7 +563,11 @@ async function purchaseFirstAvailableSignal(
       logLine("INFO", "  Set notional to 10 USDC");
     }
   } else {
-    logLine("WARN", "  No notional input found");
+    // Diagnostic: log what's actually visible on the page
+    const pageTitle = await page.title().catch(() => "?");
+    const h1Text = await page.locator("h1").first().textContent().catch(() => "none");
+    const bodySnippet = await page.locator("body").first().textContent().catch(() => "");
+    logLine("WARN", `  No notional input found (title="${pageTitle}", h1="${h1Text}", snippet="${bodySnippet?.slice(0, 200)}")`);
     return false;
   }
 
