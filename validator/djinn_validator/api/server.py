@@ -2349,11 +2349,48 @@ def create_app(
             NOTARY_SESSIONS_ASSIGNED.labels(status="no_miners").inc()
             raise HTTPException(status_code=503, detail="No miners with active notary sidecars")
 
-        # Pick a random notary (prover_uid=-1 since the prover is external)
-        chosen = assign_peer_notary(prover_uid=-1, notaries=peer_notaries)
+        # Filter out miners whose circuit breaker is open (repeated failures)
+        breaker_open_uids: set[int] = set()
+        for pn in peer_notaries:
+            breaker = _get_miner_breaker(pn.uid)
+            if not breaker.allow_request():
+                breaker_open_uids.add(pn.uid)
+        if breaker_open_uids:
+            log.info(
+                "notary_session_breaker_filtered",
+                filtered_uids=sorted(breaker_open_uids),
+                remaining=len(peer_notaries) - len(breaker_open_uids),
+            )
+
+        # Rank notaries by proven MPC reliability instead of random selection.
+        # The scorer tracks which miners successfully complete attestation
+        # challenges and notary duties, so proven miners float to the top.
+        candidate_uids = [pn.uid for pn in peer_notaries]
+        ranked_uids = scorer.rank_notary_candidates(candidate_uids) if scorer is not None else None
+
+        chosen = assign_peer_notary(
+            prover_uid=-1,
+            notaries=peer_notaries,
+            exclude_uids=breaker_open_uids or None,
+            ranked_uids=ranked_uids,
+        )
         if chosen is None:
             NOTARY_SESSIONS_ASSIGNED.labels(status="no_miners").inc()
             raise HTTPException(status_code=503, detail="No eligible notary miners")
+
+        # Look up the reliability score for logging and response metadata
+        chosen_score = 0.0
+        chosen_tier = "unknown"
+        if ranked_uids:
+            for uid, score in ranked_uids:
+                if uid == chosen.uid:
+                    chosen_score = round(score, 4)
+                    m = scorer.get(uid) if scorer is not None else None
+                    if m and m.attestations_valid > 0:
+                        chosen_tier = "proven"
+                    elif m and m.health_checks_responded > 0:
+                        chosen_tier = "unproven"
+                    break
 
         session_id = _uuid.uuid4().hex[:16]
         expires_at = int(_time.time()) + 120  # 2 minute window to connect
@@ -2364,8 +2401,11 @@ def create_app(
             session_id=session_id,
             miner_uid=chosen.uid,
             miner_ip=chosen.ip,
+            tier=chosen_tier,
+            reliability=chosen_score,
             caller_coldkey=coldkey_ss58[:16] + "...",
             excluded_hotkeys=len(exclude_hotkeys),
+            breaker_filtered=len(breaker_open_uids),
         )
 
         return NotarySessionResponse(
@@ -2375,7 +2415,48 @@ def create_app(
             miner_hotkey=next((a["hotkey"] for a in axons if a["uid"] == chosen.uid), ""),
             notary_public_key=chosen.pubkey_hex,
             expires_at=expires_at,
+            miner_uid=chosen.uid,
+            tier=chosen_tier,
+            reliability_score=chosen_score,
         )
+
+    @app.post("/v1/notary/session/feedback")
+    async def notary_session_feedback(request: Request) -> dict:
+        """Report success or failure of a notary session back to the validator.
+
+        Feeds the circuit breaker so future assignments skip broken miners.
+        No auth required (feedback is cheap, and bad feedback just degrades
+        the reporter's own future assignments via weighted selection).
+
+        Body: {"session_id": str, "miner_uid": int, "success": bool, "error": str}
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="JSON body required")
+
+        miner_uid = body.get("miner_uid")
+        success = body.get("success", False)
+        error_msg = body.get("error", "")
+
+        if not isinstance(miner_uid, int) or miner_uid < 0:
+            raise HTTPException(status_code=400, detail="miner_uid (int >= 0) required")
+
+        breaker = _get_miner_breaker(miner_uid)
+        if success:
+            breaker.record_success()
+        else:
+            breaker.record_failure()
+
+        log.info(
+            "notary_session_feedback",
+            miner_uid=miner_uid,
+            success=success,
+            error=error_msg[:200] if error_msg else "",
+            breaker_state=breaker.state.value,
+            session_id=body.get("session_id", ""),
+        )
+        return {"ok": True}
 
     @app.get("/v1/burn/verify")
     async def burn_verify(tx_hash: str = "", coldkey: str = "") -> dict:

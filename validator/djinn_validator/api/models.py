@@ -528,6 +528,10 @@ class NotarySessionResponse(BaseModel):
     miner_hotkey: str
     notary_public_key: str
     expires_at: int
+    # Reliability metadata so consumers can assess assignment quality
+    miner_uid: int = -1
+    tier: str = "unknown"  # "proven", "unproven", or "unknown"
+    reliability_score: float = 0.0  # 0.0-1.0, composite notary reliability
 
 
 class AttestResponse(BaseModel):

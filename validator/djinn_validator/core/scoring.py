@@ -521,6 +521,55 @@ class MinerScorer:
 
         return result
 
+    def rank_notary_candidates(self, candidate_uids: list[int]) -> list[tuple[int, float]]:
+        """Rank notary candidates by MPC reliability for external prover assignment.
+
+        Combines attestation validity (can this miner complete a TLSNotary proof?)
+        with notary duty reliability (does its sidecar stay up through MPC?) and
+        uptime. Returns all candidates sorted best-first.
+
+        Returns list of (uid, score) where score is 0.0-1.0.
+        """
+        scored: list[tuple[int, float]] = []
+
+        for uid in candidate_uids:
+            m = self._miners.get(uid)
+            if m is None:
+                # Never seen by scorer: put at the bottom with zero score
+                scored.append((uid, 0.0))
+                continue
+
+            # Primary signal: has this miner's notary sidecar produced verified
+            # proofs when assigned as notary for other miners?
+            nr = m.notary_reliability()  # 0.0 if never assigned
+
+            # Secondary: can this miner itself produce valid attestation proofs?
+            # Miners that pass attestation challenges have working TLSNotary stacks.
+            av = m.attestation_validity_score()
+
+            # Tertiary: basic liveness
+            up = m.uptime_score()
+
+            # Combine. Notary reliability is the strongest signal because it
+            # directly measures "did MPC complete when this miner was the notary?"
+            # Attestation validity measures the full stack health. Uptime is a
+            # tiebreaker for miners with no attestation/notary history.
+            if m.notary_duties_assigned > 0:
+                # Has served as notary before: weight heavily on that track record
+                score = 0.50 * nr + 0.35 * av + 0.15 * up
+            elif m.attestations_total > 0:
+                # Never assigned as notary but has attestation history
+                score = 0.60 * av + 0.40 * up
+            else:
+                # No history at all: score on uptime only
+                score = 0.30 * up  # Cap at 0.30 so proven miners always rank above
+
+            scored.append((uid, score))
+
+        # Best first
+        scored.sort(key=lambda t: -t[1])
+        return scored
+
     def reset_epoch(self) -> None:
         """Reset per-epoch metrics while preserving history.
 

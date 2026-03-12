@@ -166,8 +166,14 @@ def assign_peer_notary(
     assignment_counts: dict[int, int] | None = None,
     max_per_notary: int = 4,
     exclude_uids: set[int] | None = None,
+    ranked_uids: list[tuple[int, float]] | None = None,
 ) -> PeerNotary | None:
-    """Randomly assign a peer notary for a prover miner.
+    """Assign a peer notary, preferring higher-ranked candidates.
+
+    When ``ranked_uids`` is provided (list of (uid, score) best-first),
+    eligible notaries are selected in rank order with weighted-random
+    sampling among the top tier to spread load. Without ranking, falls
+    back to uniform random selection.
 
     Excludes the prover itself and any notary on the same IP address
     (same operator running multiple miners on one machine could collude).
@@ -178,6 +184,9 @@ def assign_peer_notary(
             When None, no load-balancing cap is applied.
         max_per_notary: Maximum assignments per notary per round.
         exclude_uids: Notary UIDs to exclude (e.g. previously failed notaries).
+        ranked_uids: Optional list of (uid, score) sorted best-first from
+            scorer.rank_notary_candidates(). When provided, selection is
+            weighted by score rather than uniform random.
 
     Returns None if no eligible notary is available.
     """
@@ -190,6 +199,33 @@ def assign_peer_notary(
         eligible = [n for n in eligible if assignment_counts.get(n.uid, 0) < max_per_notary]
     if not eligible:
         return None
+
+    # If we have ranking data, use weighted selection instead of uniform random.
+    if ranked_uids:
+        eligible_set = {n.uid for n in eligible}
+        by_uid = {n.uid: n for n in eligible}
+
+        # Build ordered list of (notary, score) respecting the ranking
+        ranked_eligible: list[tuple[PeerNotary, float]] = []
+        for uid, score in ranked_uids:
+            if uid in eligible_set:
+                ranked_eligible.append((by_uid[uid], score))
+
+        if ranked_eligible:
+            # Weighted random: add a small floor so zero-score miners still
+            # have a tiny chance (exploration), then sample proportionally.
+            floor = 0.01
+            weights = [score + floor for _, score in ranked_eligible]
+            chosen = random.choices(
+                [n for n, _ in ranked_eligible],
+                weights=weights,
+                k=1,
+            )[0]
+            if assignment_counts is not None:
+                assignment_counts[chosen.uid] = assignment_counts.get(chosen.uid, 0) + 1
+            return chosen
+
+    # Fallback: uniform random (no ranking data or no ranked UIDs matched)
     chosen = random.choice(eligible)
     if assignment_counts is not None:
         assignment_counts[chosen.uid] = assignment_counts.get(chosen.uid, 0) + 1
