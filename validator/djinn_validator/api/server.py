@@ -2341,9 +2341,32 @@ def create_app(
             NOTARY_SESSIONS_ASSIGNED.labels(status="no_miners").inc()
             raise HTTPException(status_code=503, detail="No reachable miners (after exclusions)")
 
+        # Pre-filter to miners known to be notary-capable from scorer data.
+        # Probing all 245 miners takes 30-60s (WS handshake per miner).
+        # Narrowing to known-capable miners cuts this to <5s.
+        if scorer is not None:
+            capable_uids: set[int] = set()
+            for a in axons:
+                m = scorer.get(a["uid"])
+                if m is not None and m.notary_capable:
+                    capable_uids.add(a["uid"])
+            if capable_uids:
+                # Keep only capable miners for discovery, but fall back to
+                # full probe if none are known (cold start / fresh epoch).
+                axons_for_discovery = [a for a in axons if a["uid"] in capable_uids]
+                log.info(
+                    "notary_session_prefilter",
+                    total_axons=len(axons),
+                    capable=len(axons_for_discovery),
+                )
+            else:
+                axons_for_discovery = axons
+        else:
+            axons_for_discovery = axons
+
         # Discover which miners have live notary sidecars
         async with httpx.AsyncClient() as client:
-            peer_notaries = await discover_peer_notaries(client, axons)
+            peer_notaries = await discover_peer_notaries(client, axons_for_discovery)
 
         if not peer_notaries:
             NOTARY_SESSIONS_ASSIGNED.labels(status="no_miners").inc()
