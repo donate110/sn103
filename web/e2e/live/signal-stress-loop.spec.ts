@@ -80,6 +80,8 @@ const stats = {
   signalsFailed: 0,
   purchasesMade: 0,
   purchasesFailed: 0,
+  immediatePurchaseAttempts: 0,
+  immediatePurchaseSuccesses: 0,
   sportsScanned: 0,
   gamesFound: 0,
   passes: 0,
@@ -102,6 +104,9 @@ function logStats() {
   const skippedSports = Object.entries(emptySportsCount)
     .filter(([, v]) => v >= EMPTY_SKIP_THRESHOLD)
     .map(([k]) => k);
+  const immPurchaseRate = stats.immediatePurchaseAttempts > 0
+    ? ((stats.immediatePurchaseSuccesses / stats.immediatePurchaseAttempts) * 100).toFixed(0)
+    : "N/A";
   logLine("STATS", [
     `pass=${stats.passes}`,
     `signals=${stats.signalsCreated}`,
@@ -109,6 +114,7 @@ function logStats() {
     `rate=${successRate}%`,
     `purchases=${stats.purchasesMade}`,
     `purchaseFails=${stats.purchasesFailed}`,
+    `immBuys=${stats.immediatePurchaseSuccesses}/${stats.immediatePurchaseAttempts} (${immPurchaseRate}%)`,
     `sports=${stats.sportsScanned}`,
     `games=${stats.gamesFound}`,
     `elapsed=${elapsed}min`,
@@ -970,6 +976,35 @@ test.describe("Signal stress loop", () => {
 
     let pass = 0;
 
+    // Set up idiot for interleaved purchases: buy signals right after creation
+    // while the sportsbook line is still fresh (avoids the "stale pick" problem
+    // where lines move between creation passes and the purchase phase)
+    let idiotPage: Page | null = null;
+    let idiotAcc: ReturnType<typeof privateKeyToAccount> | null = null;
+    try {
+      const idiotKey = deriveIdiotKey(0, Date.now());
+      idiotAcc = privateKeyToAccount(idiotKey);
+      logLine("INFO", `Interleaved purchase idiot: ${idiotAcc.address}`);
+      await fundWallet(idiotAcc.address, "0.0005", "5000");
+
+      const browser = context.browser();
+      if (browser) {
+        const idiotContext = await browser.newContext();
+        idiotPage = await idiotContext.newPage();
+        await installMockWallet({
+          page: idiotPage,
+          account: idiotAcc,
+          defaultChain: baseSepolia,
+          transports: { [baseSepolia.id]: http(RPC_URL) },
+        });
+        // Pre-deposit escrow so first purchase doesn't need USDC approval flow
+        await ensureIdiotEscrow(idiotPage, idiotAcc);
+        logLine("OK", "Interleaved idiot ready (wallet + escrow)");
+      }
+    } catch (e) {
+      logLine("WARN", `Failed to set up interleaved idiot: ${String(e).slice(0, 100)}`);
+    }
+
     while (MAX_PASSES === 0 || pass < MAX_PASSES) {
       pass++;
       stats.passes = pass;
@@ -1067,6 +1102,28 @@ test.describe("Signal stress loop", () => {
               createdSignals.push({ sport, game: result.game, signalId: result.signalId, createdAt: Date.now() });
               logLine("OK", `  [${sport}] ${result.game}: SUCCESS (total: ${stats.signalsCreated})`);
               consecutivePickFails = 0;
+
+              // Immediate purchase: buy the signal while sportsbook lines are fresh.
+              // This dramatically improves purchase success vs waiting for the batch
+              // purchase phase (where lines may have moved hours later).
+              if (idiotPage && idiotAcc) {
+                stats.immediatePurchaseAttempts++;
+                logLine("INFO", `  Attempting immediate purchase...`);
+                try {
+                  const purchased = await Promise.race([
+                    purchaseFirstAvailableSignal(idiotPage, idiotAcc, -1),
+                    new Promise<false>((r) => setTimeout(() => r(false), 90_000)),
+                  ]);
+                  if (purchased) {
+                    stats.immediatePurchaseSuccesses++;
+                    logLine("OK", `  >>> IMMEDIATE PURCHASE for ${result.game}! <<<`);
+                  } else {
+                    logLine("INFO", `  Immediate purchase: line moved or unavailable`);
+                  }
+                } catch (purchaseErr) {
+                  logLine("WARN", `  Immediate purchase error: ${String(purchaseErr).slice(0, 100)}`);
+                }
+              }
             } else {
               logLine("WARN", `  [${sport}] ${result.game}: FAILED - ${result.error}`);
               // If picks are unavailable, odds are pulled for this time window
@@ -1126,6 +1183,13 @@ test.describe("Signal stress loop", () => {
           }
         } catch {}
       }
+    }
+
+    // Clean up interleaved idiot
+    if (idiotPage) {
+      const idiotCtx = idiotPage.context();
+      await idiotPage.close().catch(() => {});
+      await idiotCtx.close().catch(() => {});
     }
 
     logLine("INFO", "\n" + "=".repeat(60));
