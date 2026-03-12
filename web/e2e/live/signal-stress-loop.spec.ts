@@ -1213,9 +1213,12 @@ test.describe("Signal stress loop", () => {
                 logLine("INFO", `  Attempting immediate purchase...`);
                 let purchased = false;
                 try {
-                  // Start from the end of the browse page (newest signals).
-                  // Vary starting position across attempts to cover more signals.
-                  const signalPos = -(stats.immediatePurchaseAttempts);
+                  // Try from different browse page positions:
+                  // - Odd attempts: start from middle (older signals for future games)
+                  // - Even attempts: start from end (newest, freshest lines)
+                  // This covers both strategies for line stability.
+                  const n = stats.immediatePurchaseAttempts;
+                  const signalPos = n % 2 === 0 ? -(n / 2) : Math.floor(n / 2);
                   purchased = await Promise.race([
                     purchaseFirstAvailableSignal(idiotPage, idiotAcc, signalPos),
                     new Promise<false>((r) => setTimeout(() => r(false), 120_000)),
