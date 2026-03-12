@@ -487,18 +487,29 @@ async function purchaseFirstAvailableSignal(
   await signalCards.nth(idx).click();
   await page.waitForLoadState("domcontentloaded");
 
-  // Wait for the signal page to finish loading React + blockchain data.
-  // The page renders one of: "Connect your wallet", "Signal Not Found",
-  // "Signal #xxx" (with form or "no longer available"). We wait for ANY
-  // of these definitive states to appear (up to 15s for blockchain queries).
+  // Wait for React hydration and initial useEffect to fire.
+  // The useSignal hook starts with loading=false, signal=null which briefly
+  // renders "Signal not found" before useEffect sets loading=true.
+  // We must wait past this initial flash before checking page state.
+  // Strategy: wait for "Loading signal data..." to appear (useEffect fired),
+  // then wait for the final state (loading complete).
+  try {
+    await page.getByText(/loading signal data/i).waitFor({ state: "visible", timeout: 5_000 });
+  } catch {
+    // If loading text never appears, the page might have hydrated very fast
+    // or the wallet isn't connected. Wait a moment to let React settle.
+    await page.waitForTimeout(2_000);
+  }
+
+  // Now wait for the definitive post-loading state
   const pageLoaded = await Promise.race([
-    page.getByText(/connect your wallet/i).waitFor({ state: "visible", timeout: 15_000 }).then(() => "connect" as const),
-    page.getByText(/signal not found/i).waitFor({ state: "visible", timeout: 15_000 }).then(() => "not-found" as const),
-    page.locator("#notional").waitFor({ state: "visible", timeout: 15_000 }).then(() => "ready" as const),
-    page.getByText(/no longer available/i).waitFor({ state: "visible", timeout: 15_000 }).then(() => "expired" as const),
-    page.getByText(/signal unavailable|encryption keys/i).waitFor({ state: "visible", timeout: 15_000 }).then(() => "unavailable" as const),
-    page.getByText(/your escrow balance/i).waitFor({ state: "visible", timeout: 15_000 }).then(() => "escrow-visible" as const),
-    new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 15_000)),
+    page.getByText(/connect your wallet/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "connect" as const),
+    page.getByText(/signal not found/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "not-found" as const),
+    page.locator("#notional").waitFor({ state: "visible", timeout: 20_000 }).then(() => "ready" as const),
+    page.getByText(/no longer available/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "expired" as const),
+    page.getByText(/signal unavailable|encryption keys/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "unavailable" as const),
+    page.getByText(/your escrow balance/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "escrow-visible" as const),
+    new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 20_000)),
   ]).catch(() => "timeout" as const);
 
   logLine("INFO", `  Signal page state: ${pageLoaded}`);
