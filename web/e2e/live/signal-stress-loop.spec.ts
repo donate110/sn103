@@ -1103,25 +1103,32 @@ test.describe("Signal stress loop", () => {
               logLine("OK", `  [${sport}] ${result.game}: SUCCESS (total: ${stats.signalsCreated})`);
               consecutivePickFails = 0;
 
-              // Immediate purchase: buy the signal while sportsbook lines are fresh.
-              // This dramatically improves purchase success vs waiting for the batch
-              // purchase phase (where lines may have moved hours later).
+              // Immediate purchase: try several signals from the browse page.
+              // Cycle through different positions since the newest card might
+              // not be the signal we just created (browse sorts by expiry, not
+              // creation time). Try up to 3 different signals per attempt.
               if (idiotPage && idiotAcc) {
                 stats.immediatePurchaseAttempts++;
-                logLine("INFO", `  Attempting immediate purchase...`);
-                try {
-                  const purchased = await Promise.race([
-                    purchaseFirstAvailableSignal(idiotPage, idiotAcc, -1),
-                    new Promise<false>((r) => setTimeout(() => r(false), 90_000)),
-                  ]);
-                  if (purchased) {
-                    stats.immediatePurchaseSuccesses++;
-                    logLine("OK", `  >>> IMMEDIATE PURCHASE for ${result.game}! <<<`);
-                  } else {
-                    logLine("INFO", `  Immediate purchase: line moved or unavailable`);
+                logLine("INFO", `  Attempting immediate purchase (trying up to 3 signals)...`);
+                let purchased = false;
+                for (let tryIdx = 0; tryIdx < 3 && !purchased; tryIdx++) {
+                  // Cycle: -1 (last), -2 (second to last), -3, etc.
+                  // Use immediatePurchaseAttempts to vary position across attempts
+                  const signalPos = -((stats.immediatePurchaseAttempts - 1) * 3 + tryIdx + 1);
+                  try {
+                    purchased = await Promise.race([
+                      purchaseFirstAvailableSignal(idiotPage, idiotAcc, signalPos),
+                      new Promise<false>((r) => setTimeout(() => r(false), 60_000)),
+                    ]);
+                  } catch (purchaseErr) {
+                    logLine("WARN", `  Purchase try ${tryIdx + 1} error: ${String(purchaseErr).slice(0, 100)}`);
                   }
-                } catch (purchaseErr) {
-                  logLine("WARN", `  Immediate purchase error: ${String(purchaseErr).slice(0, 100)}`);
+                }
+                if (purchased) {
+                  stats.immediatePurchaseSuccesses++;
+                  logLine("OK", `  >>> IMMEDIATE PURCHASE for ${result.game}! <<<`);
+                } else {
+                  logLine("INFO", `  Immediate purchase: all attempts failed (line moved)`);
                 }
               }
             } else {
