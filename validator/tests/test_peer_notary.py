@@ -10,6 +10,7 @@ import pytest
 
 from djinn_validator.core.challenges import (
     PeerNotary,
+    _ws_handshake_ok,
     assign_peer_notary,
     discover_peer_notaries,
 )
@@ -22,7 +23,7 @@ class TestPeerNotaryDiscovery:
 
     @pytest.mark.asyncio
     async def test_discover_notary_miners(self) -> None:
-        """Miners with /v1/notary/info enabled are discovered."""
+        """Miners with /v1/notary/info enabled AND working WebSocket are discovered."""
         axons = [
             {"uid": 1, "hotkey": "hk1", "ip": "10.0.0.1", "port": 8422},
             {"uid": 2, "hotkey": "hk2", "ip": "10.0.0.2", "port": 8422},
@@ -55,12 +56,45 @@ class TestPeerNotaryDiscovery:
         client = MagicMock()
         client.get = mock_get
 
-        notaries = await discover_peer_notaries(client, axons)
+        with patch(
+            "djinn_validator.core.challenges._ws_handshake_ok",
+            return_value=True,
+        ):
+            notaries = await discover_peer_notaries(client, axons)
 
         assert len(notaries) == 1
         assert notaries[0].uid == 1
         assert notaries[0].pubkey_hex == "a" * 66
         assert notaries[0].notary_port == 7047
+
+    @pytest.mark.asyncio
+    async def test_discover_excludes_broken_websocket(self) -> None:
+        """Miners with HTTP 200 but broken WebSocket are excluded."""
+        axons = [
+            {"uid": 1, "hotkey": "hk1", "ip": "10.0.0.1", "port": 8422},
+        ]
+
+        async def mock_get(url: str, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.json.return_value = {
+                "enabled": True,
+                "pubkey_hex": "a" * 66,
+                "port": 7047,
+            }
+            return resp
+
+        client = MagicMock()
+        client.get = mock_get
+
+        # WebSocket probe fails (returns 403 or connection refused)
+        with patch(
+            "djinn_validator.core.challenges._ws_handshake_ok",
+            return_value=False,
+        ):
+            notaries = await discover_peer_notaries(client, axons)
+
+        assert len(notaries) == 0
 
     @pytest.mark.asyncio
     async def test_discover_handles_timeout(self) -> None:
@@ -291,10 +325,9 @@ class TestBackwardsCompatibility:
         assert new_payload["notary_host"] == "10.0.0.5"
         assert new_payload["notary_port"] == 7047
 
-    def test_discover_skips_old_miners_without_endpoint(self) -> None:
+    @pytest.mark.asyncio
+    async def test_discover_skips_old_miners_without_endpoint(self) -> None:
         """Old miners without /v1/notary/info return 404 and are skipped."""
-        import asyncio
-
         axons = [{"uid": 1, "hotkey": "hk1", "ip": "10.0.0.1", "port": 8422}]
 
         async def mock_get(url: str, **kwargs):
@@ -305,7 +338,5 @@ class TestBackwardsCompatibility:
         client = MagicMock()
         client.get = mock_get
 
-        notaries = asyncio.get_event_loop().run_until_complete(
-            discover_peer_notaries(client, axons)
-        )
+        notaries = await discover_peer_notaries(client, axons)
         assert len(notaries) == 0

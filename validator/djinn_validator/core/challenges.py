@@ -59,12 +59,57 @@ class PeerNotary:
     pubkey_hex: str
 
 
+async def _ws_handshake_ok(ip: str, port: int, timeout: float = 5.0) -> bool:
+    """Verify a WebSocket endpoint accepts connections (HTTP 101 upgrade).
+
+    Sends a minimal WebSocket upgrade request and checks for 101 status.
+    This catches miners whose HTTP /v1/notary/info returns 200 but whose
+    actual WebSocket sidecar at /v1/notary/ws is dead (returns 403 or hangs).
+    """
+    import base64
+    import os
+
+    ws_key = base64.b64encode(os.urandom(16)).decode()
+    request = (
+        f"GET /v1/notary/ws HTTP/1.1\r\n"
+        f"Host: {ip}:{port}\r\n"
+        f"Upgrade: websocket\r\n"
+        f"Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {ws_key}\r\n"
+        f"Sec-WebSocket-Version: 13\r\n"
+        f"\r\n"
+    )
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, port),
+            timeout=timeout,
+        )
+        writer.write(request.encode())
+        await writer.drain()
+        # Read just enough of the response to check the status line
+        response_line = await asyncio.wait_for(
+            reader.readline(),
+            timeout=timeout,
+        )
+        writer.close()
+        await writer.wait_closed()
+        # Expect "HTTP/1.1 101 Switching Protocols\r\n"
+        return b"101" in response_line
+    except Exception:
+        return False
+
+
 async def discover_peer_notaries(
     client: httpx.AsyncClient,
     axons: list[dict],
     concurrency: int = 20,
 ) -> list[PeerNotary]:
     """Discover miners running notary sidecars via /v1/notary/info.
+
+    After HTTP metadata check passes, performs a WebSocket handshake probe
+    on the notary port to verify the sidecar actually accepts connections.
+    Miners whose HTTP endpoint returns 200 but whose WebSocket is broken
+    (403, timeout, connection refused) are excluded.
 
     Old miners without the endpoint return 404/405 and are silently skipped.
     This ensures full backwards compatibility.
@@ -75,6 +120,7 @@ async def discover_peer_notaries(
     async def _probe(axon: dict) -> None:
         ip = axon.get("ip", "")
         port = axon.get("port", 0)
+        uid = axon.get("uid", -1)
         if not ip or not port:
             return
         url = f"http://{ip}:{port}/v1/notary/info"
@@ -84,14 +130,28 @@ async def discover_peer_notaries(
                 if resp.status_code != 200:
                     return
                 data = resp.json()
-                if data.get("enabled") and data.get("pubkey_hex"):
-                    notaries.append(PeerNotary(
-                        uid=axon["uid"],
+                if not (data.get("enabled") and data.get("pubkey_hex")):
+                    return
+                notary_port = data["port"]
+
+                # WebSocket pre-flight: verify the sidecar accepts WS connections
+                if not await _ws_handshake_ok(ip, notary_port):
+                    log.warning(
+                        "notary_ws_probe_failed",
+                        uid=uid,
                         ip=ip,
-                        port=port,
-                        notary_port=data["port"],
-                        pubkey_hex=data["pubkey_hex"],
-                    ))
+                        notary_port=notary_port,
+                        msg="HTTP info OK but WebSocket handshake failed, excluding",
+                    )
+                    return
+
+                notaries.append(PeerNotary(
+                    uid=uid,
+                    ip=ip,
+                    port=port,
+                    notary_port=notary_port,
+                    pubkey_hex=data["pubkey_hex"],
+                ))
             except (httpx.HTTPError, Exception):
                 pass
 
