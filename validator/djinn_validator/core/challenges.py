@@ -134,8 +134,10 @@ async def discover_peer_notaries(
                     return
                 notary_port = data["port"]
 
-                # WebSocket pre-flight: verify the sidecar accepts WS connections
-                if not await _ws_handshake_ok(ip, notary_port):
+                # WebSocket pre-flight: verify the WS proxy accepts connections.
+                # The proxy lives on the API port at /v1/notary/ws, NOT on the
+                # raw TCP notary_port (7047) which doesn't speak HTTP.
+                if not await _ws_handshake_ok(ip, port):
                     log.warning(
                         "notary_ws_probe_failed",
                         uid=uid,
