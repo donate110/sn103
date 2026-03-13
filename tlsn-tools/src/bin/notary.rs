@@ -147,9 +147,14 @@ async fn handle_connection(
     // just close the connection after reveal(). Without a timeout here the
     // notary would block on read_to_end() forever, holding the WS proxy
     // semaphore slot and preventing new sessions.
+    // Timeout is 120s (not 5s) because native provers doing large payloads
+    // (e.g. code audits) need 30+ seconds to parse the transcript, build
+    // the disclosure config, and run prove(). The WASM case is handled by
+    // the empty request_bytes check below, so this is just a safety net
+    // for truly abandoned connections.
     let mut request_bytes = Vec::new();
     let read_result = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(120),
         socket.read_to_end(&mut request_bytes),
     )
     .await;
