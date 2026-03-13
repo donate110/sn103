@@ -65,6 +65,9 @@ const NUM_GENIUSES = 1;
 const MAX_PASSES = parseInt(process.env.STRESS_MAX_PASSES || "3", 10);
 // Delay between signals (ms) to avoid overwhelming validators
 const INTER_SIGNAL_DELAY = 5_000;
+// Account contract limits each genius-idiot pair to 10 signals per audit cycle.
+// Rotate the idiot wallet before hitting this to avoid CycleSignalLimitReached reverts.
+const CYCLE_SIGNAL_LIMIT = 8;
 
 // All sports to cycle through (must match UI sport filter button labels exactly).
 // "Soccer" and "MMA" are not valid UI buttons; soccer is covered by EPL + MLS.
@@ -99,6 +102,7 @@ const stats = {
   gamesFound: 0,
   passes: 0,
   staleSignalsSkipped: 0,
+  idiotRotations: 0,
   startedAt: Date.now(),
 };
 
@@ -130,6 +134,7 @@ function logStats() {
     `purchaseFails=${stats.purchasesFailed}`,
     `immBuys=${stats.immediatePurchaseSuccesses}/${stats.immediatePurchaseAttempts} (${immPurchaseRate}%)`,
     `staleSkips=${stats.staleSignalsSkipped}`,
+    `idiotRotations=${stats.idiotRotations}`,
     `sports=${stats.sportsScanned}`,
     `games=${stats.gamesFound}`,
     `elapsed=${elapsed}min`,
@@ -728,6 +733,12 @@ async function purchaseSignalById(
       const errText = await errorAlert.textContent().catch(() => "");
       if (errText && !errText.toLowerCase().includes("checking") && !errText.toLowerCase().includes("processing")) {
         stats.purchasesFailed++;
+        const lower = errText.toLowerCase();
+        // Detect CycleSignalLimitReached from UI error text
+        if (lower.includes("signal purchase limit") || lower.includes("cyclesignal") || lower.includes("reverted")) {
+          logLine("WARN", `  CycleSignalLimitReached or revert: ${errText?.substring(0, 200)}`);
+          throw new Error("CycleSignalLimitReached");
+        }
         logLine("WARN", `  Purchase error: ${errText?.substring(0, 200)}`);
         return false;
       }
@@ -1087,6 +1098,11 @@ async function purchaseFirstAvailableSignal(
       const errText = await errorAlert.textContent().catch(() => "");
       if (errText && !errText.toLowerCase().includes("checking") && !errText.toLowerCase().includes("processing")) {
         stats.purchasesFailed++;
+        const lower = errText.toLowerCase();
+        if (lower.includes("signal purchase limit") || lower.includes("cyclesignal") || lower.includes("reverted")) {
+          logLine("WARN", `  CycleSignalLimitReached or revert: ${errText?.substring(0, 200)}`);
+          throw new Error("CycleSignalLimitReached");
+        }
         logLine("WARN", `  Purchase error: ${errText?.substring(0, 200)}`);
         return false;
       }
@@ -1448,6 +1464,47 @@ test.describe("Signal stress loop", () => {
     // where lines move between creation passes and the purchase phase)
     let idiotPage: Page | null = null;
     let idiotAcc: ReturnType<typeof privateKeyToAccount> | null = null;
+    let idiotPurchaseCount = 0;
+    let idiotRotationIdx = 0;
+
+    // Rotate the idiot wallet to a fresh address. Needed every CYCLE_SIGNAL_LIMIT
+    // purchases because the Account contract caps genius-idiot pairs at 10/cycle.
+    async function rotateIdiot() {
+      idiotRotationIdx++;
+      idiotPurchaseCount = 0;
+      const newKey = deriveIdiotKey(idiotRotationIdx, Date.now());
+      const newAcc = privateKeyToAccount(newKey);
+      logLine("INFO", `Rotating idiot -> ${newAcc.address.slice(0, 10)} (rotation #${idiotRotationIdx})`);
+
+      // Fund new wallet with ETH and USDC
+      await fundWallet(newAcc.address, "0.0005", "5000");
+
+      // Close old page/context, create fresh one
+      if (idiotPage) {
+        const oldCtx = idiotPage.context();
+        await idiotPage.close().catch(() => {});
+        await oldCtx.close().catch(() => {});
+      }
+
+      const browser = context.browser();
+      if (!browser) throw new Error("No browser for idiot rotation");
+      const newCtx = await browser.newContext();
+      const newPage = await newCtx.newPage();
+      await installMockWallet({
+        page: newPage,
+        account: newAcc,
+        defaultChain: baseSepolia,
+        transports: { [baseSepolia.id]: http(RPC_URL) },
+      });
+      // Direct escrow deposit (faster than UI)
+      await depositEscrowDirect(newAcc, "500");
+
+      idiotAcc = newAcc;
+      idiotPage = newPage;
+      stats.idiotRotations++;
+      logLine("OK", `Idiot rotated to ${newAcc.address.slice(0, 10)} (escrow funded)`);
+    }
+
     try {
       const idiotKey = deriveIdiotKey(0, Date.now());
       idiotAcc = privateKeyToAccount(idiotKey);
@@ -1574,8 +1631,17 @@ test.describe("Signal stress loop", () => {
               // If we captured the signal ID, navigate directly to it (fastest,
               // avoids stale browse page). Otherwise fall back to browse page.
               if (idiotPage && idiotAcc) {
+                // Rotate idiot before hitting the 10-signal-per-cycle limit
+                if (idiotPurchaseCount >= CYCLE_SIGNAL_LIMIT) {
+                  try {
+                    await rotateIdiot();
+                  } catch (rotErr) {
+                    logLine("WARN", `  Idiot rotation failed: ${String(rotErr).slice(0, 100)}`);
+                  }
+                }
+
                 stats.immediatePurchaseAttempts++;
-                logLine("INFO", `  Attempting immediate purchase...`);
+                logLine("INFO", `  Attempting immediate purchase (cycle ${idiotPurchaseCount + 1}/${CYCLE_SIGNAL_LIMIT})...`);
                 let purchased = false;
                 try {
                   if (result.signalId) {
@@ -1592,9 +1658,18 @@ test.describe("Signal stress loop", () => {
                     ]);
                   }
                 } catch (purchaseErr) {
-                  logLine("WARN", `  Purchase error: ${String(purchaseErr).slice(0, 100)}`);
+                  const errStr = String(purchaseErr);
+                  // Detect CycleSignalLimitReached (shouldn't happen with rotation,
+                  // but handle it gracefully just in case)
+                  if (errStr.includes("CycleSignalLimit") || errStr.includes("0x75f3fe47")) {
+                    logLine("WARN", `  CycleSignalLimitReached, rotating idiot...`);
+                    try { await rotateIdiot(); } catch {}
+                  } else {
+                    logLine("WARN", `  Purchase error: ${errStr.slice(0, 100)}`);
+                  }
                 }
                 if (purchased) {
+                  idiotPurchaseCount++;
                   stats.immediatePurchaseSuccesses++;
                   logLine("OK", `  >>> IMMEDIATE PURCHASE for ${result.game}! <<<`);
                 } else {
