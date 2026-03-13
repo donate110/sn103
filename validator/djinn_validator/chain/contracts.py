@@ -179,6 +179,7 @@ OUTCOME_VOTING_ABI = [
             {"name": "genius", "type": "address"},
             {"name": "idiot", "type": "address"},
             {"name": "qualityScore", "type": "int256"},
+            {"name": "totalNotional", "type": "uint256"},
         ],
         "name": "submitVote",
         "outputs": [],
@@ -202,6 +203,7 @@ OUTCOME_VOTING_ABI = [
             {"name": "idiot", "type": "address"},
             {"name": "cycle", "type": "uint256"},
             {"name": "qualityScore", "type": "int256"},
+            {"name": "totalNotional", "type": "uint256"},
         ],
         "name": "getVoteCount",
         "outputs": [{"name": "count", "type": "uint256"}],
@@ -737,6 +739,7 @@ class ChainClient:
         genius: str,
         idiot: str,
         quality_score: int,
+        total_notional: int,
     ) -> str:
         """Submit a quality score vote to OutcomeVoting. Returns tx hash."""
         if self._outcome_voting is None:
@@ -747,7 +750,7 @@ class ChainClient:
 
         return await self._send_tx(
             self._outcome_voting, "submitVote",
-            genius_addr, idiot_addr, quality_score,
+            genius_addr, idiot_addr, quality_score, total_notional,
             gas_limit=200_000,
         )
 

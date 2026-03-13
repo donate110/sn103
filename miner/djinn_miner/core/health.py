@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import time
 
 import structlog
 
 from djinn_miner import __version__
-from djinn_miner.api.models import HealthResponse
+from djinn_miner.api.models import HealthResponse, MinerCapabilities
 
 log = structlog.get_logger()
 
@@ -38,6 +40,10 @@ class HealthTracker:
         self._ping_count = 0
         self._consecutive_api_failures = 0
         self._consecutive_bt_failures = 0
+        self._tlsn_max_concurrent = 0
+        self._tlsn_active_sessions = 0
+        self._notary_max_concurrent = 0
+        self._notary_active_sessions = 0
 
     def record_ping(self) -> None:
         """Record a health check ping from a validator."""
@@ -83,6 +89,56 @@ class HealthTracker:
                 )
                 self._odds_api_connected = False
 
+    def set_tlsn_capacity(self, max_concurrent: int, active: int) -> None:
+        """Update TLSNotary attestation session counts."""
+        self._tlsn_max_concurrent = max_concurrent
+        self._tlsn_active_sessions = active
+
+    def set_notary_capacity(self, max_concurrent: int, active: int) -> None:
+        """Update notary sidecar session counts."""
+        self._notary_max_concurrent = max_concurrent
+        self._notary_active_sessions = active
+
+    def _collect_capabilities(self) -> MinerCapabilities:
+        """Collect current system resource metrics."""
+        caps = MinerCapabilities()
+
+        # Memory from /proc/meminfo (no dependency needed)
+        try:
+            with open("/proc/meminfo") as f:
+                meminfo: dict[str, int] = {}
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        meminfo[parts[0].rstrip(":")] = int(parts[1])
+                caps.memory_total_mb = meminfo.get("MemTotal", 0) // 1024
+                caps.memory_available_mb = meminfo.get("MemAvailable", 0) // 1024
+        except (OSError, ValueError):
+            pass
+
+        # CPU cores and load
+        try:
+            caps.cpu_cores = os.cpu_count() or 0
+            load1, _, _ = os.getloadavg()
+            caps.cpu_load_1m = round(load1, 2)
+        except OSError:
+            pass
+
+        # Disk free space
+        try:
+            usage = shutil.disk_usage("/")
+            caps.disk_free_gb = round(usage.free / (1024**3), 1)
+        except OSError:
+            pass
+
+        # TLSNotary and notary session capacity (set externally)
+        caps.tlsn_max_concurrent = self._tlsn_max_concurrent
+        caps.tlsn_active_sessions = self._tlsn_active_sessions
+        caps.notary_max_concurrent = self._notary_max_concurrent
+        caps.notary_active_sessions = self._notary_active_sessions
+
+        return caps
+
     def get_status(self) -> HealthResponse:
         """Return current health status."""
         uptime = time.monotonic() - self._start_time
@@ -99,6 +155,7 @@ class HealthTracker:
             odds_api_connected=self._odds_api_connected,
             bt_connected=self._bt_connected,
             uptime_seconds=round(uptime, 1),
+            capabilities=self._collect_capabilities(),
         )
 
     @property

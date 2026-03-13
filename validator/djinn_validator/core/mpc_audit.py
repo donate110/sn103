@@ -33,6 +33,7 @@ class AuditResult:
     idiot: str
     cycle: int
     quality_score: int  # Signed, in notional units (USDC 6-decimal)
+    total_notional: int  # Sum of notional for non-void signals (CF-06)
     wins: int
     losses: int
     voids: int
@@ -86,6 +87,7 @@ def batch_settle_audit_set(
         return None
 
     quality_score = 0
+    total_notional = 0
     wins = 0
     losses = 0
     voids = 0
@@ -136,10 +138,13 @@ def batch_settle_audit_set(
 
         if outcome == Outcome.FAVORABLE:
             wins += 1
+            total_notional += signal.notional
         elif outcome == Outcome.UNFAVORABLE:
             losses += 1
+            total_notional += signal.notional
         elif outcome == Outcome.VOID:
             voids += 1
+            # Void signals excluded from total_notional (CF-06)
         n += 1
 
     log.info(
@@ -148,6 +153,7 @@ def batch_settle_audit_set(
         idiot=audit_set.idiot_address,
         cycle=audit_set.cycle,
         quality_score=quality_score,
+        total_notional=total_notional,
         wins=wins,
         losses=losses,
         voids=voids,
@@ -159,6 +165,7 @@ def batch_settle_audit_set(
         idiot=audit_set.idiot_address,
         cycle=audit_set.cycle,
         quality_score=quality_score,
+        total_notional=total_notional,
         wins=wins,
         losses=losses,
         voids=voids,

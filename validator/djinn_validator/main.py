@@ -106,6 +106,24 @@ async def epoch_loop(
                 try:
                     resp = await client.get(url)
                     responded = resp.status_code == 200
+                    if responded:
+                        try:
+                            data = resp.json()
+                            caps = data.get("capabilities")
+                            if caps and isinstance(caps, dict):
+                                metrics.update_capabilities(
+                                    memory_total_mb=caps.get("memory_total_mb", 0),
+                                    memory_available_mb=caps.get("memory_available_mb", 0),
+                                    cpu_cores=caps.get("cpu_cores", 0),
+                                    cpu_load_1m=caps.get("cpu_load_1m", 0.0),
+                                    tlsn_max_concurrent=caps.get("tlsn_max_concurrent", 0),
+                                    tlsn_active_sessions=caps.get("tlsn_active_sessions", 0),
+                                    notary_max_concurrent=caps.get("notary_max_concurrent", 0),
+                                    notary_active_sessions=caps.get("notary_active_sessions", 0),
+                                    disk_free_gb=caps.get("disk_free_gb", 0.0),
+                                )
+                        except Exception:
+                            pass  # Old miners may not return JSON or capabilities
                 except httpx.HTTPError:
                     responded = False
                 metrics.record_health_check(responded=responded)
@@ -274,6 +292,7 @@ async def epoch_loop(
                         try:
                             tx_hash = await chain_client.submit_vote(
                                 result.genius, result.idiot, result.quality_score,
+                                result.total_notional,
                             )
                             log.info(
                                 "audit_vote_submitted",

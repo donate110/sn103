@@ -105,6 +105,20 @@ class ProofResponse(BaseModel):
     message: str = ""
 
 
+class MinerCapabilities(BaseModel):
+    """System resource advertisement for capability-aware scheduling."""
+
+    memory_total_mb: int = 0
+    memory_available_mb: int = 0
+    cpu_cores: int = 0
+    cpu_load_1m: float = 0.0
+    tlsn_max_concurrent: int = 0
+    tlsn_active_sessions: int = 0
+    notary_max_concurrent: int = 0
+    notary_active_sessions: int = 0
+    disk_free_gb: float = 0.0
+
+
 class HealthResponse(BaseModel):
     """GET /health — Miner health check."""
 
@@ -114,6 +128,7 @@ class HealthResponse(BaseModel):
     odds_api_connected: bool = False
     bt_connected: bool = False
     uptime_seconds: float = 0.0
+    capabilities: MinerCapabilities | None = None
 
 
 class ReadinessResponse(BaseModel):

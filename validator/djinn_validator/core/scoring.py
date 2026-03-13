@@ -1,10 +1,11 @@
 """Miner scoring module — implements split sports/attestation scoring.
 
 Sports challenge weights (executability checks via The Odds API):
-  - Accuracy: 40%  (Phase 1 matches TLSNotary ground truth)
-  - Speed:    25%  (Response latency, normalized across miners)
-  - Coverage: 20%  (% of queries with valid TLSNotary proof)
-  - Uptime:   15%  (% of epochs responding to health checks)
+  - Accuracy:   35%  (Phase 1 matches TLSNotary ground truth)
+  - Speed:      25%  (Response latency, normalized across miners)
+  - Coverage:   15%  (% of queries with valid TLSNotary proof)
+  - Uptime:     15%  (% of epochs responding to health checks)
+  - Capability: 10%  (System resource capability bonus)
 
 Attestation challenge weights (web attestation via TLSNotary, mandatory):
   - Proof validity: 60%  (TLSNotary proof verifies correctly)
@@ -59,6 +60,18 @@ class MinerMetrics:
     notary_duties_assigned: int = 0  # times assigned as notary for another miner
     notary_duties_completed: int = 0  # times the proof using this notary verified
     notary_capable: bool = False  # running a notary sidecar (discovered this epoch)
+
+    # ── Capability advertisement (from health check) ──
+    memory_total_mb: int = 0
+    memory_available_mb: int = 0
+    cpu_cores: int = 0
+    cpu_load_1m: float = 0.0
+    tlsn_max_concurrent: int = 0
+    tlsn_active_sessions: int = 0
+    notary_max_concurrent: int = 0
+    notary_active_sessions: int = 0
+    disk_free_gb: float = 0.0
+    capabilities_reported: bool = False  # True if miner reports capabilities
 
     # ── Shared metrics ──
     health_checks_total: int = 0
@@ -140,6 +153,30 @@ class MinerMetrics:
         if proof_valid:
             self.notary_duties_completed += 1
 
+    def update_capabilities(
+        self,
+        memory_total_mb: int,
+        memory_available_mb: int,
+        cpu_cores: int,
+        cpu_load_1m: float,
+        tlsn_max_concurrent: int,
+        tlsn_active_sessions: int,
+        notary_max_concurrent: int,
+        notary_active_sessions: int,
+        disk_free_gb: float,
+    ) -> None:
+        """Update capability metrics from health check response."""
+        self.memory_total_mb = memory_total_mb
+        self.memory_available_mb = memory_available_mb
+        self.cpu_cores = cpu_cores
+        self.cpu_load_1m = cpu_load_1m
+        self.tlsn_max_concurrent = tlsn_max_concurrent
+        self.tlsn_active_sessions = tlsn_active_sessions
+        self.notary_max_concurrent = notary_max_concurrent
+        self.notary_active_sessions = notary_active_sessions
+        self.disk_free_gb = disk_free_gb
+        self.capabilities_reported = True
+
 
 class MinerScorer:
     """Computes normalized scores across all miners for weight setting.
@@ -150,10 +187,11 @@ class MinerScorer:
     """
 
     # ── Sports challenge weights ──
-    W_ACCURACY = 0.40
+    W_ACCURACY = 0.35
     W_SPEED = 0.25
-    W_COVERAGE = 0.20
+    W_COVERAGE = 0.15
     W_UPTIME = 0.15
+    W_CAPABILITY = 0.10  # Resource capability bonus
 
     # ── Attestation challenge weights ──
     W_ATTEST_VALIDITY = 0.60  # TLSNotary proof correctness
@@ -248,6 +286,7 @@ class MinerScorer:
         attestation_scores = self._compute_attestation_scores(miners)
         sports_speed = self._normalize_speed(miners, use_attestation=False)
         attest_speed = self._normalize_speed(miners, use_attestation=True)
+        capability_scores = self._compute_capability_scores([m.uid for m in miners])
 
         has_attestation_data = any(m.attestations_total > 0 for m in miners)
 
@@ -269,6 +308,10 @@ class MinerScorer:
                 "speed": sports_speed.get(m.uid, 0.0),
                 "coverage": m.coverage_score(),
                 "uptime": m.uptime_score(),
+                "capability_score": capability_scores.get(m.uid, 0.3),
+                "memory_total_mb": m.memory_total_mb,
+                "cpu_cores": m.cpu_cores,
+                "capabilities_reported": m.capabilities_reported,
                 "sports_score": sports,
                 "attest_validity": m.attestation_validity_score(),
                 "attest_speed": attest_speed.get(m.uid, 0.0),
@@ -300,20 +343,23 @@ class MinerScorer:
         without changing weight structure (backwards compatible).
         """
         speed_scores = self._normalize_speed(miners, use_attestation=False)
+        capability_scores = self._compute_capability_scores([m.uid for m in miners])
 
         scores: dict[int, float] = {}
         for m in miners:
             # Notary bonus: up to 10% boost on the uptime component
             notary_bonus = 1.0 + 0.10 * m.notary_reliability()
             uptime = m.uptime_score() * notary_bonus
+            cap_score = capability_scores.get(m.uid, 0.3)
             if m.queries_total == 0:
-                scores[m.uid] = self.W_UPTIME * uptime
+                scores[m.uid] = self.W_UPTIME * uptime + self.W_CAPABILITY * cap_score
             else:
                 scores[m.uid] = (
                     self.W_ACCURACY * m.accuracy_score()
                     + self.W_SPEED * speed_scores.get(m.uid, 0.0)
                     + self.W_COVERAGE * m.coverage_score()
                     + self.W_UPTIME * uptime
+                    + self.W_CAPABILITY * cap_score
                 )
         return scores
 
@@ -346,6 +392,63 @@ class MinerScorer:
                 if not m.notary_capable:
                     base *= self.NOTARY_FREERIDER_PENALTY
                 scores[m.uid] = base
+        return scores
+
+    def _compute_capability_scores(self, uids: list[int]) -> dict[int, float]:
+        """Score miners based on advertised system capabilities.
+
+        Scoring formula (0-1 range):
+        - Memory tier: 0-0.4 based on total RAM (8GB=0.1, 16GB=0.2, 32GB=0.3, 64GB+=0.4)
+        - CPU tier: 0-0.2 based on core count (4=0.05, 8=0.1, 16=0.15, 32+=0.2)
+        - Availability: 0-0.2 based on memory_available / memory_total ratio
+        - Capacity headroom: 0-0.2 based on (max - active) / max for TLSNotary sessions
+
+        Miners that don't report capabilities get 0.3 (neutral, not penalized heavily).
+        """
+        scores: dict[int, float] = {}
+        for uid in uids:
+            m = self._miners.get(uid)
+            if m is None or not m.capabilities_reported:
+                scores[uid] = 0.3  # Neutral score for non-reporting miners
+                continue
+
+            score = 0.0
+
+            # Memory tier (0-0.4)
+            mem_gb = m.memory_total_mb / 1024
+            if mem_gb >= 64:
+                score += 0.4
+            elif mem_gb >= 32:
+                score += 0.3
+            elif mem_gb >= 16:
+                score += 0.2
+            elif mem_gb >= 8:
+                score += 0.1
+
+            # CPU tier (0-0.2)
+            if m.cpu_cores >= 32:
+                score += 0.2
+            elif m.cpu_cores >= 16:
+                score += 0.15
+            elif m.cpu_cores >= 8:
+                score += 0.1
+            elif m.cpu_cores >= 4:
+                score += 0.05
+
+            # Memory availability (0-0.2)
+            if m.memory_total_mb > 0:
+                avail_ratio = m.memory_available_mb / m.memory_total_mb
+                score += min(0.2, avail_ratio * 0.2)
+
+            # Session headroom (0-0.2)
+            if m.tlsn_max_concurrent > 0:
+                headroom = (m.tlsn_max_concurrent - m.tlsn_active_sessions) / m.tlsn_max_concurrent
+                score += min(0.2, max(0.0, headroom) * 0.2)
+            elif m.capabilities_reported:
+                score += 0.1  # No TLSNotary info but reports other caps
+
+            scores[uid] = min(1.0, score)
+
         return scores
 
     def _compute_empty_weights(self) -> dict[int, float]:
@@ -496,8 +599,17 @@ class MinerScorer:
                 # Treat same as unproven so miners aren't invisible.
                 unproven.append(uid)
 
-        # Sort proven: highest validity first, then fastest
-        proven.sort(key=lambda t: (-t[1], t[2]))
+        # Sort proven: highest validity first, then fastest, prefer available capacity
+        def _proven_sort_key(t: tuple[int, float, float]) -> tuple[float, float, float]:
+            uid, validity, latency = t
+            m = self._miners.get(uid)
+            # Prefer miners with TLSNotary capacity headroom
+            headroom = 0.0
+            if m and m.capabilities_reported and m.tlsn_max_concurrent > 0:
+                headroom = (m.tlsn_max_concurrent - m.tlsn_active_sessions) / m.tlsn_max_concurrent
+            return (-validity, -headroom, latency)
+
+        proven.sort(key=_proven_sort_key)
 
         result: list[tuple[int, str]] = []
         for uid, _, _ in proven:
@@ -554,15 +666,21 @@ class MinerScorer:
             # directly measures "did MPC complete when this miner was the notary?"
             # Attestation validity measures the full stack health. Uptime is a
             # tiebreaker for miners with no attestation/notary history.
+            # Capacity factor: prefer notaries with available sessions
+            cap_factor = 1.0
+            if m.capabilities_reported and m.notary_max_concurrent > 0:
+                active_ratio = m.notary_active_sessions / m.notary_max_concurrent
+                cap_factor = 1.0 - (active_ratio * 0.3)  # Up to 30% penalty when fully loaded
+
             if m.notary_duties_assigned > 0:
                 # Has served as notary before: weight heavily on that track record
-                score = 0.50 * nr + 0.35 * av + 0.15 * up
+                score = (0.50 * nr + 0.35 * av + 0.15 * up) * cap_factor
             elif m.attestations_total > 0:
                 # Never assigned as notary but has attestation history
-                score = 0.60 * av + 0.40 * up
+                score = (0.60 * av + 0.40 * up) * cap_factor
             else:
                 # No history at all: score on uptime only
-                score = 0.30 * up  # Cap at 0.30 so proven miners always rank above
+                score = 0.30 * up * cap_factor  # Cap at 0.30 so proven miners always rank above
 
             scored.append((uid, score))
 

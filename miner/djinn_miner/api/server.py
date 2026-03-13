@@ -466,6 +466,8 @@ def create_app(
     async def health() -> HealthResponse:
         """Health check endpoint for validator pings."""
         health_tracker.record_ping()
+        # Update live session counts for capability reporting
+        health_tracker.set_tlsn_capacity(_ATTEST_MAX_CONCURRENT, _attest_inflight)
         return health_tracker.get_status()
 
     # Cache Config for readiness checks (avoid re-loading dotenv on every probe)

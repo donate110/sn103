@@ -109,6 +109,8 @@ class TestBatchSettleAuditSet:
         assert result.n == 10
         # Each: 1M * (2M-1M)/1M = 1M profit; total = 10M
         assert result.quality_score == 10_000_000
+        # All non-void, so total_notional = 10 * 1M = 10M
+        assert result.total_notional == 10_000_000
 
     def test_all_unfavorable(self) -> None:
         """All 10 signals lose."""
@@ -129,6 +131,7 @@ class TestBatchSettleAuditSet:
         assert result.wins == 0
         assert result.losses == 10
         assert result.quality_score == -10_000_000
+        assert result.total_notional == 10_000_000
 
     def test_mixed_outcomes(self) -> None:
         """Mix of wins, losses, voids."""
@@ -160,6 +163,8 @@ class TestBatchSettleAuditSet:
         assert result.wins + result.losses + result.voids == result.n
         # 4 × 1M profit - 3 × 1M loss + 0 void = 1M
         assert result.quality_score == 1_000_000
+        # 7 non-void signals, each with notional=1M
+        assert result.total_notional == 7_000_000
 
     def test_void_contributes_zero(self) -> None:
         """All voids → score = 0."""
@@ -179,6 +184,7 @@ class TestBatchSettleAuditSet:
         assert result is not None
         assert result.quality_score == 0
         assert result.voids == 10
+        assert result.total_notional == 0  # All void
 
     def test_quality_formula_matches_audit_sol(self) -> None:
         """Verify exact formula with non-trivial odds and SLA."""
@@ -220,6 +226,8 @@ class TestBatchSettleAuditSet:
         assert result.losses == 1
         assert result.voids == 8
         assert result.quality_score == 750_000 - 360_000  # 390K
+        # Non-void: signal 0 (500K) + signal 1 (300K) = 800K
+        assert result.total_notional == 800_000
 
     def test_incomplete_set_returns_none(self) -> None:
         """Audit set with <10 signals isn't ready."""
