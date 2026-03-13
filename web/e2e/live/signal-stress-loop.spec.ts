@@ -44,13 +44,15 @@ const GENIUS_BASE_KEY = (process.env.E2E_GENIUS_KEY ||
 const USDC_ADDRESS = (process.env.E2E_USDC_ADDRESS ||
   "0x7B8c194C848914c361Cf34F2D2dD9EAE74a9C9c6") as Hex;
 
-// Collateral contract (for verifying genius collateral on-chain)
-const COLLATERAL_ADDRESS = (process.env.NEXT_PUBLIC_COLLATERAL_ADDRESS ||
-  "0x16C36aCe7aB4525Ed1D0F12a8E6c38f5be29cb16") as Hex;
+// Contract addresses for the DEPLOYED app at djinn.gg (Vercel env vars).
+// These differ from the local .env which has an older deployment.
+// The stress test runs against djinn.gg, so we must use these addresses
+// for on-chain reads and direct deposit fallbacks.
+const COLLATERAL_ADDRESS = (process.env.E2E_COLLATERAL_ADDRESS ||
+  "0x47bcae6055dff70137336211be22f34c7a631626") as Hex;
 
-// Escrow contract (for verifying idiot escrow balance on-chain)
-const ESCROW_ADDRESS = (process.env.NEXT_PUBLIC_ESCROW_ADDRESS ||
-  "0x50A1Bf4eacED9b9da4B1A5BA3001aA0979E91A21") as Hex;
+const ESCROW_ADDRESS = (process.env.E2E_ESCROW_ADDRESS ||
+  "0x290E97c4B26ef1FdcF7BC27aFc43169B4a804a75") as Hex;
 
 const transport = http(RPC_URL);
 const publicClient = createPublicClient({ chain: baseSepolia, transport });
