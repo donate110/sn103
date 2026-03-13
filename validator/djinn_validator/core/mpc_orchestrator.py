@@ -157,6 +157,25 @@ class MPCOrchestrator:
                 headers["X-Request-ID"] = ctx["request_id"]
         except Exception as e:
             log.debug("request_id_propagation_failed", error=str(e))
+
+        # Sign requests with validator hotkey for peer authentication
+        if self._neuron is not None and hasattr(self._neuron, "wallet") and self._neuron.wallet is not None:
+            try:
+                from djinn_validator.api.middleware import create_signed_headers
+                from urllib.parse import urlparse
+
+                parsed = urlparse(url)
+                endpoint = parsed.path
+                body = b""
+                if "json" in kwargs:
+                    body = json.dumps(kwargs["json"]).encode()
+                elif "data" in kwargs:
+                    body = kwargs["data"] if isinstance(kwargs["data"], bytes) else str(kwargs["data"]).encode()
+                auth_headers = create_signed_headers(endpoint, body, self._neuron.wallet)
+                headers.update(auth_headers)
+            except Exception as e:
+                log.debug("peer_request_signing_failed", error=str(e))
+
         kwargs["headers"] = headers
 
         last_exc: Exception | None = None
