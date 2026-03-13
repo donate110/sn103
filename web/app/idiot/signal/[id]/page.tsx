@@ -225,7 +225,7 @@ export default function PurchaseSignal() {
       console.log("[purchase] available_indices:", checkResult.available_indices,
         "total_lines:", candidateLines.length,
         "unavailable:", checkResult.results.filter(r => !r.available).map(r =>
-          `${r.index}:${(r as Record<string, unknown>).unavailable_reason ?? "unknown"}`
+          `${r.index}:${(r as unknown as Record<string, unknown>).unavailable_reason ?? "unknown"}`
         ));
 
       // Extract best odds across all bookmakers for any available line
