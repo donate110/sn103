@@ -312,19 +312,21 @@ export function getMinerClient(): MinerClient {
 }
 
 /**
- * Resilient line check that retries across multiple validators.
+ * Resilient line check that queries multiple validators in parallel and
+ * merges results.
  *
  * Each validator proxies to a random miner. ~50% of miners in the network
- * have broken or missing Odds API keys, returning 0 available lines for
- * valid games. This function fires parallel checks through multiple
- * validators and returns the first positive result.
+ * have broken Odds API data, returning 0 available lines for valid games.
+ * Even working miners may report different subsets of lines as available.
+ *
+ * Strategy: fire parallel checks through 4 validators, merge the union
+ * of all available_indices. For each index, use the richest bookmaker
+ * data from any response. This maximizes the chance that the real pick
+ * (unknown to the client) is in the available set for the MPC check.
  */
 export async function resilientCheckLines(
   req: CheckRequest,
 ): Promise<CheckResponse> {
-  // Discover all validators and fire parallel checks.
-  // Each validator routes to a different random miner, so parallel calls
-  // maximize the chance of hitting a working one.
   let validators: ValidatorClient[];
   try {
     validators = await discoverValidatorClients();
@@ -332,58 +334,79 @@ export async function resilientCheckLines(
     validators = [getValidatorClient()];
   }
 
-  // Shuffle to spread load, then take up to 4 validators
+  // Shuffle to spread load, take up to 4
   for (let i = validators.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [validators[i], validators[j]] = [validators[j], validators[i]];
   }
   const batch = validators.slice(0, 4);
 
-  // Fire all checks in parallel, race for the first positive result
-  const results = await Promise.allSettled(
+  // Fire parallel checks
+  const settled = await Promise.allSettled(
     batch.map((v) => v.checkLines(req)),
   );
 
-  // Pick the result with the most available indices (best miner data)
-  let best: CheckResponse | null = null;
-  for (const r of results) {
-    if (r.status !== "fulfilled") continue;
-    const resp = r.value;
-    if (resp.api_error) continue;
-    if (!best || resp.available_indices.length > best.available_indices.length) {
-      best = resp;
+  // Collect all successful responses
+  const responses: CheckResponse[] = [];
+  for (const r of settled) {
+    if (r.status === "fulfilled" && !r.value.api_error) {
+      responses.push(r.value);
     }
-    // Early exit if all lines are available
-    if (best.available_indices.length === req.lines.length) break;
   }
 
-  if (best && best.available_indices.length > 0) return best;
-
-  // All parallel checks returned empty. Try 4 more sequential attempts
-  // (each validator picks a new random miner per request).
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const v = validators[attempt % validators.length];
-    try {
-      const result = await v.checkLines(req);
-      if (result.available_indices.length > 0 && !result.api_error) {
-        return result;
+  // If all parallel checks failed, try 4 sequential retries
+  if (responses.length === 0) {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const v = validators[attempt % validators.length];
+      try {
+        const result = await v.checkLines(req);
+        if (!result.api_error) responses.push(result);
+        if (result.available_indices.length > 0) break;
+      } catch {
+        // Try next
       }
-      if (!best) best = result;
-    } catch {
-      // Try next
     }
   }
 
-  if (best) return best;
+  if (responses.length === 0) {
+    return {
+      results: req.lines.map((l) => ({
+        index: l.index,
+        available: false,
+        bookmakers: [],
+      })),
+      available_indices: [],
+      response_time_ms: 0,
+      api_error: "All validators/miners unreachable",
+    };
+  }
+
+  // Merge: for each line index, take the union of availability.
+  // If ANY miner says a line is available, it's available.
+  const mergedResults: Map<number, LineResult> = new Map();
+  for (const resp of responses) {
+    for (const lr of resp.results) {
+      const existing = mergedResults.get(lr.index);
+      if (!existing) {
+        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
+      } else if (lr.available && !existing.available) {
+        // Upgrade: this miner says available, use its data
+        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
+      } else if (lr.available && existing.available && lr.bookmakers.length > existing.bookmakers.length) {
+        // Both available, but this one has richer bookmaker data
+        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
+      }
+    }
+  }
+
+  const mergedArray = req.lines.map((l) =>
+    mergedResults.get(l.index) ?? { index: l.index, available: false, bookmakers: [] },
+  );
+  const mergedIndices = mergedArray.filter((r) => r.available).map((r) => r.index);
 
   return {
-    results: req.lines.map((l) => ({
-      index: l.index,
-      available: false,
-      bookmakers: [],
-    })),
-    available_indices: [],
-    response_time_ms: 0,
-    api_error: "All validators/miners unreachable",
+    results: mergedArray,
+    available_indices: mergedIndices,
+    response_time_ms: Math.max(...responses.map((r) => r.response_time_ms)),
   };
 }
