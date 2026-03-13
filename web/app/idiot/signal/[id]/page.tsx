@@ -281,7 +281,10 @@ export default function PurchaseSignal() {
       // Log MPC results from each validator for debugging
       console.log("[purchase] MPC results:", availabilityResults.map((r, i) => {
         if (r.status === "fulfilled") {
-          return `v${i}:${r.value.available ? "AVAIL" : "UNAVAIL"} (${r.value.status}/${r.value.message})`;
+          const v = r.value;
+          const reason = (v as Record<string, unknown>).mpc_failure_reason || "";
+          const parts = (v as Record<string, unknown>).mpc_participants || "";
+          return `v${i}:${v.available ? "AVAIL" : "UNAVAIL"} (${v.status}/${v.message}) participants=${parts} reason=${reason}`;
         }
         return `v${i}:REJECTED (${r.reason?.message?.slice(0, 80) || "unknown"})`;
       }));
