@@ -219,6 +219,11 @@ export default function PurchaseSignal() {
       // Store full check results so we can find best bookmaker after decryption
       checkResultRef.current = checkResult;
       setAvailableIndices(checkResult.available_indices);
+      console.log("[purchase] available_indices:", checkResult.available_indices,
+        "total_lines:", candidateLines.length,
+        "unavailable:", checkResult.results.filter(r => !r.available).map(r =>
+          `${r.index}:${(r as Record<string, unknown>).unavailable_reason ?? "unknown"}`
+        ));
 
       // Extract best odds across all bookmakers for any available line
       let bestOdds = 1.91; // fallback
@@ -269,6 +274,14 @@ export default function PurchaseSignal() {
       const anyAvailable = availabilityResults.some(
         (r) => r.status === "fulfilled" && r.value.available,
       );
+
+      // Log MPC results from each validator for debugging
+      console.log("[purchase] MPC results:", availabilityResults.map((r, i) => {
+        if (r.status === "fulfilled") {
+          return `v${i}:${r.value.available ? "AVAIL" : "UNAVAIL"} (${r.value.status}/${r.value.message})`;
+        }
+        return `v${i}:REJECTED (${r.reason?.message?.slice(0, 80) || "unknown"})`;
+      }));
 
       if (!anyAvailable) {
         const errors = availabilityResults

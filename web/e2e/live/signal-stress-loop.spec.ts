@@ -513,6 +513,13 @@ async function purchaseSignalById(
   idiotAccount: ReturnType<typeof privateKeyToAccount>,
   signalId: string,
 ): Promise<boolean> {
+  // Capture browser console logs for purchase diagnostics
+  page.on("console", (msg) => {
+    if (msg.text().includes("[purchase]")) {
+      logLine("DIAG", msg.text());
+    }
+  });
+
   await page.goto(`${BASE_URL}/idiot/signal/${signalId}`);
   await bypassBetaGate(page);
   await page.waitForLoadState("domcontentloaded");
