@@ -432,16 +432,23 @@ class MPCOrchestrator:
                 log.debug("peer_share_x_lookup_failed", peer_uid=peer["uid"], error=str(e))
             return None
 
-        try:
-            share_x_results = await asyncio.wait_for(
-                asyncio.gather(*(_lookup_share_x(p) for p in peers), return_exceptions=True),
-                timeout=GATHER_TIMEOUT,
-            )
-            for res in share_x_results:
-                if isinstance(res, tuple) and res is not None:
-                    peer_x_map[res[0]] = res[1]
-        except asyncio.TimeoutError:
-            log.warning("peer_share_x_lookup_timeout", n_peers=len(peers))
+        # Use asyncio.wait so slow/unreachable peers don't block results
+        # from fast peers. Previously, asyncio.wait_for wrapped the entire
+        # gather, meaning one hanging peer would discard ALL results.
+        tasks = [asyncio.create_task(_lookup_share_x(p)) for p in peers]
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=GATHER_TIMEOUT)
+            for t in pending:
+                t.cancel()
+            if pending:
+                log.warning("peer_share_x_lookup_timeout", n_timed_out=len(pending), n_completed=len(done))
+            for t in done:
+                try:
+                    res = t.result()
+                    if isinstance(res, tuple) and res is not None:
+                        peer_x_map[res[0]] = res[1]
+                except Exception:
+                    pass
 
         # Only keep peers that hold a share for this signal
         peers = [p for p in peers if p["uid"] in peer_x_map]
@@ -625,25 +632,21 @@ class MPCOrchestrator:
                 )
             return None
 
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(
-                    *(_init_peer(peer) for peer in peers),
-                    return_exceptions=True,
-                ),
-                timeout=GATHER_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            from djinn_validator.api.metrics import MPC_ERRORS
-
-            MPC_ERRORS.labels(reason="peer_init_timeout").inc()
-            log.warning(
-                "mpc_peer_init_timeout",
-                timeout=GATHER_TIMEOUT,
-                n_peers=len(peers),
-            )
-            self._mark_session_failed(session)
-            return None
+        init_tasks = [asyncio.create_task(_init_peer(peer)) for peer in peers]
+        results: list[Any] = []
+        if init_tasks:
+            done, pending = await asyncio.wait(init_tasks, timeout=GATHER_TIMEOUT)
+            for t_task in pending:
+                t_task.cancel()
+            if pending:
+                from djinn_validator.api.metrics import MPC_ERRORS
+                MPC_ERRORS.labels(reason="peer_init_timeout").inc()
+                log.warning("mpc_peer_init_timeout", n_timed_out=len(pending), n_completed=len(done))
+            for t_task in done:
+                try:
+                    results.append(t_task.result())
+                except Exception:
+                    results.append(None)
 
         init_failures = sum(1 for r in results if r is None or isinstance(r, BaseException))
         if init_failures > 0:
@@ -735,26 +738,24 @@ class MPCOrchestrator:
                     )
                 return None
 
-            try:
-                results = await asyncio.wait_for(
-                    asyncio.gather(
-                        *(_collect_gate(peer, gate_idx, prev_d, prev_e) for peer in active_peers),
-                        return_exceptions=True,
-                    ),
-                    timeout=GATHER_TIMEOUT,
-                )
-            except asyncio.TimeoutError:
-                from djinn_validator.api.metrics import MPC_ERRORS
-
-                MPC_ERRORS.labels(reason="gate_collect_timeout").inc()
-                log.warning(
-                    "mpc_gate_collect_timeout",
-                    gate_idx=gate_idx,
-                    timeout=GATHER_TIMEOUT,
-                    n_peers=len(active_peers),
-                )
-                self._mark_session_failed(session)
-                return None
+            gate_tasks = [asyncio.create_task(_collect_gate(peer, gate_idx, prev_d, prev_e)) for peer in active_peers]
+            results: list[Any] = [None] * len(active_peers)
+            if gate_tasks:
+                done_g, pending_g = await asyncio.wait(gate_tasks, timeout=GATHER_TIMEOUT)
+                for gt in pending_g:
+                    gt.cancel()
+                if pending_g:
+                    from djinn_validator.api.metrics import MPC_ERRORS
+                    MPC_ERRORS.labels(reason="gate_collect_timeout").inc()
+                    log.warning("mpc_gate_collect_timeout", gate_idx=gate_idx, n_timed_out=len(pending_g), n_completed=len(done_g))
+                # Map results back by task index
+                task_list = list(gate_tasks)
+                for i, gt in enumerate(task_list):
+                    if gt in done_g:
+                        try:
+                            results[i] = gt.result()
+                        except Exception:
+                            results[i] = None
 
             failed = []
             for i, result in enumerate(results):
@@ -864,15 +865,19 @@ class MPCOrchestrator:
                 log.warning("mpc_finalize_failed", peer_uid=peer["uid"], error=str(e))
             return None
 
-        try:
-            z_results = await asyncio.wait_for(
-                asyncio.gather(*(_collect_z(p) for p in active_peers), return_exceptions=True),
-                timeout=GATHER_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            log.warning("mpc_finalize_timeout", timeout=GATHER_TIMEOUT)
-            self._mark_session_failed(session)
-            return None
+        z_tasks = [asyncio.create_task(_collect_z(p)) for p in active_peers]
+        z_results: list[Any] = []
+        if z_tasks:
+            done_z, pending_z = await asyncio.wait(z_tasks, timeout=GATHER_TIMEOUT)
+            for zt in pending_z:
+                zt.cancel()
+            if pending_z:
+                log.warning("mpc_finalize_timeout", n_timed_out=len(pending_z), n_completed=len(done_z))
+            for zt in done_z:
+                try:
+                    z_results.append(zt.result())
+                except Exception:
+                    z_results.append(None)
 
         for result in z_results:
             if result is not None and not isinstance(result, BaseException):
