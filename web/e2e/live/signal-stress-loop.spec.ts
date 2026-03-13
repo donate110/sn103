@@ -38,8 +38,10 @@ const DEPLOYER_KEY = (process.env.E2E_DEPLOYER_KEY ||
 const GENIUS_BASE_KEY = (process.env.E2E_GENIUS_KEY ||
   "0x7bdee6a417b39392bfc78a3cf75cc2e726d4d42c7de68f91cd40654740232471") as Hex; // Anvil test genius
 
-const USDC_ADDRESS = (process.env.NEXT_PUBLIC_USDC_ADDRESS ||
-  "0x26a9F00523fa5Cf2f18119854b2dd959CF792fB8") as Hex;
+// Must match the USDC the Escrow contract was deployed with.
+// The .env may have a stale address; this default matches on-chain state.
+const USDC_ADDRESS = (process.env.E2E_USDC_ADDRESS ||
+  "0x7B8c194C848914c361Cf34F2D2dD9EAE74a9C9c6") as Hex;
 
 const transport = http(RPC_URL);
 const publicClient = createPublicClient({ chain: baseSepolia, transport });
@@ -1105,11 +1107,27 @@ async function ensureIdiotEscrow(
     const depositBtn = page.getByRole("button", { name: /^deposit$/i });
     if (await depositBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
       await depositBtn.click();
-      const success = page
-        .getByText(/deposited.*usdc/i)
-        .or(page.getByRole("button", { name: /^deposit$/i }));
-      await expect(success.first()).toBeVisible({ timeout: 60_000 }).catch(() => {});
-      logLine("OK", "  Idiot escrow deposited");
+      logLine("INFO", "  Clicked deposit for idiot escrow (step 1: approve)");
+
+      // Wait for USDC approval then click deposit again
+      const approvalMsg = page.getByText(/approved.*click deposit again/i);
+      try {
+        await approvalMsg.waitFor({ state: "visible", timeout: 30_000 });
+        logLine("INFO", "  USDC approved, clicking deposit again...");
+        await depositBtn.click();
+      } catch {
+        logLine("INFO", "  No approval prompt (allowance may already exist)");
+      }
+
+      // Wait for actual deposit confirmation
+      const deposited = page.getByText(/^deposited \$/i);
+      try {
+        await deposited.waitFor({ state: "visible", timeout: 60_000 });
+        logLine("OK", "  Idiot escrow deposited");
+      } catch {
+        logLine("WARN", "  Idiot escrow deposit may not have completed");
+      }
+      await page.waitForTimeout(3_000);
     }
   }
 }
