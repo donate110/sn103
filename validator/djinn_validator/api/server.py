@@ -2047,9 +2047,9 @@ def create_app(
         # Version cache
         version_cache = dict(list(_orchestrator._peer_versions.items())[:20])
 
-        # Try share_x lookup on known good peers
+        # Try share_x lookup on known good peers (unsigned)
         share_x_results = {}
-        import httpx
+        import httpx as _httpx_diag
         for peer in peers[:5]:
             try:
                 resp = await _orchestrator._http.get(
@@ -2064,6 +2064,44 @@ def create_app(
             except Exception as e:
                 share_x_results[peer["uid"]] = {"error": str(e)[:200]}
 
+        # Test signed request to peers that hold shares
+        signed_test = {}
+        peers_with_shares = [p for p in peers if p["uid"] in share_x_results and share_x_results[p["uid"]].get("status") == 200]
+        for peer in peers_with_shares[:3]:
+            import time as _t_diag
+            t0 = _t_diag.monotonic()
+            try:
+                resp = await _orchestrator._peer_request(
+                    "get",
+                    f"{peer['url']}/v1/signal/{signal_id}/share_info",
+                    peer_uid=peer["uid"],
+                )
+                elapsed = _t_diag.monotonic() - t0
+                signed_test[peer["uid"]] = {
+                    "status": resp.status_code,
+                    "elapsed_ms": round(elapsed * 1000),
+                    "signed": True,
+                }
+            except Exception as e:
+                elapsed = _t_diag.monotonic() - t0
+                signed_test[peer["uid"]] = {
+                    "error": str(e)[:200],
+                    "elapsed_ms": round(elapsed * 1000),
+                }
+
+        # Check signing capability
+        signing_ok = False
+        signing_error = None
+        if neuron is not None and hasattr(neuron, "wallet") and neuron.wallet is not None:
+            try:
+                from djinn_validator.api.middleware import create_signed_headers
+                test_headers = create_signed_headers("/v1/test", b"test", neuron.wallet)
+                signing_ok = "X-Signature" in test_headers
+            except Exception as e:
+                signing_error = str(e)[:200]
+        else:
+            signing_error = "no_wallet"
+
         return {
             "signal_id": signal_id[:40],
             "my_x": my_x,
@@ -2075,6 +2113,9 @@ def create_app(
             "breaker_state": breaker_state,
             "version_cache": version_cache,
             "share_x_lookup": share_x_results,
+            "signed_request_test": signed_test,
+            "signing_ok": signing_ok,
+            "signing_error": signing_error,
         }
 
     # ------------------------------------------------------------------
