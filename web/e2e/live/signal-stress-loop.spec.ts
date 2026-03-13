@@ -434,7 +434,11 @@ async function waitForSignalResult(page: Page): Promise<string | null> {
       .isVisible()
       .catch(() => false);
     if (successVisible) {
-      // Try to extract signal ID from URL
+      // Extract signal ID from data attribute (hidden element on success page)
+      const signalIdEl = page.locator("[data-signal-id]");
+      const signalId = await signalIdEl.getAttribute("data-signal-id").catch(() => null);
+      if (signalId) return `success:${signalId}`;
+      // Fallback: try URL
       const idMatch = page.url().match(/\/signal\/(\d+)/);
       return idMatch ? `success:${idMatch[1]}` : "success";
     }
@@ -1205,24 +1209,27 @@ test.describe("Signal stress loop", () => {
               logLine("OK", `  [${sport}] ${result.game}: SUCCESS (total: ${stats.signalsCreated})`);
               consecutivePickFails = 0;
 
-              // Immediate purchase: try to buy a signal from the browse page.
-              // purchaseFirstAvailableSignal internally retries up to 5 signals
-              // when individual signals are stale/expired/not-found.
+              // Immediate purchase: try to buy the signal we just created.
+              // If we captured the signal ID, navigate directly to it (fastest,
+              // avoids stale browse page). Otherwise fall back to browse page.
               if (idiotPage && idiotAcc) {
                 stats.immediatePurchaseAttempts++;
                 logLine("INFO", `  Attempting immediate purchase...`);
                 let purchased = false;
                 try {
-                  // Try from different browse page positions:
-                  // - Odd attempts: start from middle (older signals for future games)
-                  // - Even attempts: start from end (newest, freshest lines)
-                  // This covers both strategies for line stability.
-                  const n = stats.immediatePurchaseAttempts;
-                  const signalPos = n % 2 === 0 ? -(n / 2) : Math.floor(n / 2);
-                  purchased = await Promise.race([
-                    purchaseFirstAvailableSignal(idiotPage, idiotAcc, signalPos),
-                    new Promise<false>((r) => setTimeout(() => r(false), 120_000)),
-                  ]);
+                  if (result.signalId) {
+                    logLine("INFO", `  Direct purchase: /idiot/signal/${result.signalId.slice(0, 16)}...`);
+                    purchased = await Promise.race([
+                      purchaseSignalById(idiotPage, idiotAcc, result.signalId),
+                      new Promise<false>((r) => setTimeout(() => r(false), 120_000)),
+                    ]);
+                  } else {
+                    logLine("INFO", `  No signal ID captured, falling back to browse page`);
+                    purchased = await Promise.race([
+                      purchaseFirstAvailableSignal(idiotPage, idiotAcc, -1),
+                      new Promise<false>((r) => setTimeout(() => r(false), 120_000)),
+                    ]);
+                  }
                 } catch (purchaseErr) {
                   logLine("WARN", `  Purchase error: ${String(purchaseErr).slice(0, 100)}`);
                 }

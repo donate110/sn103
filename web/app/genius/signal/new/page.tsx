@@ -142,6 +142,7 @@ export default function CreateSignal() {
 
   // Progress
   const [txHash, setTxHash] = useState<string | null>(null);
+  const [committedSignalId, setCommittedSignalId] = useState<string | null>(null);
   const [stepError, setStepError] = useState<string | null>(null);
 
   // Tick every 60s so the filter drops games that start while the page is open
@@ -507,6 +508,7 @@ export default function CreateSignal() {
         availableSportsbooks: selectedSportsbooks,
       });
       setTxHash(hash);
+      setCommittedSignalId(signalId.toString());
 
       setStep("distributing");
 
@@ -645,6 +647,9 @@ export default function CreateSignal() {
         <p className="text-sm text-slate-500 font-mono break-all mb-8">
           tx: {txHash}
         </p>
+        {committedSignalId && (
+          <p data-signal-id={committedSignalId} className="hidden" />
+        )}
         <button onClick={() => router.push("/genius")} className="btn-primary">
           Back to Dashboard
         </button>
