@@ -95,6 +95,7 @@ class PurchaseResponse(BaseModel):
     encrypted_key_share: str | None = None  # Hex-encoded Shamir share y-value
     share_x: int | None = None  # Shamir share x-coordinate
     message: str = ""
+    mpc_participants: int | None = None  # Number of validators in MPC (diagnostic)
 
 
 class OutcomeRequest(BaseModel):

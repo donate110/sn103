@@ -558,6 +558,7 @@ def create_app(
                     status="unavailable",
                     available=False,
                     message="Signal not available at this sportsbook",
+                    mpc_participants=mpc_result.participating_validators,
                 )
 
             # Check for payment replay (TOCTOU prevention)

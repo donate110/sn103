@@ -458,6 +458,16 @@ class MPCOrchestrator:
             log.warning("duplicate_participant_x", raw=raw_xs, unique=list(set(raw_xs)))
         participant_xs = sorted(set(x for x in raw_xs if 1 <= x <= 255))
 
+        log.info(
+            "mpc_participant_summary",
+            signal_id=signal_id[:20],
+            my_x=my_x,
+            peer_x_map=peer_x_map,
+            participant_xs=participant_xs,
+            threshold=t,
+            total_peers_discovered=len(self._get_peer_validators()),
+        )
+
         if len(participant_xs) < t:
             from djinn_validator.api.metrics import MPC_ERRORS
 
