@@ -327,13 +327,16 @@ export function useCollateral(address: string | undefined) {
 
 export function useSignal(signalId: bigint | undefined) {
   const [signal, setSignal] = useState<Signal | null>(null);
-  const [loading, setLoading] = useState(false);
+  // Start loading=true when signalId is defined to prevent a brief flash of
+  // "Signal not found" during React hydration (before useEffect fires).
+  const [loading, setLoading] = useState(signalId !== undefined);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     if (signalId === undefined) {
       setSignal(null);
+      setLoading(false);
       return;
     }
 

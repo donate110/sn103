@@ -338,27 +338,27 @@ async function createSignalOnGame(
     return { success: false, sport, game: gameName, error: "no bet buttons" };
   }
 
-  // Prefer moneyline bets: no line value means they can't go stale from
-  // market movement. Moneyline section is labeled "Moneyline" in the UI.
-  // Fall back to any bet button if moneyline isn't available.
+  // ONLY pick moneyline bets: spreads/totals have a numeric line value that
+  // moves with market action, causing "Signal not currently available" failures
+  // when the miner checks current odds. Moneyline (h2h) has no line value,
+  // so it can only go stale if the game starts or odds are pulled entirely.
   const mlSection = cardCount > 0
     ? cardContainer.first().locator("text=Moneyline").locator("xpath=ancestor::div[1]")
     : page.locator("text=Moneyline").locator("xpath=ancestor::div[1]");
   const mlButtons = mlSection.locator("button");
   const mlCount = await mlButtons.count().catch(() => 0);
 
-  let targetButton;
-  if (mlCount > 0) {
-    // Pick a random moneyline bet
-    const mlIdx = Math.floor(Math.random() * mlCount);
-    targetButton = mlButtons.nth(mlIdx);
-    logLine("INFO", `  Picking moneyline bet ${mlIdx + 1}/${mlCount} (line-stale-resistant)`);
-  } else {
-    // Fallback: pick last bet button (which tends to be moneyline anyway)
-    const betIdx = betCount > 2 ? betCount - 1 : 0;
-    targetButton = betButtons.nth(betIdx);
-    logLine("INFO", `  No moneyline section found, picking bet ${betIdx + 1}/${betCount}`);
+  if (mlCount === 0) {
+    // No moneyline available: skip this game to avoid stale spread/total picks
+    await targetH3.click(); // collapse
+    await page.waitForTimeout(500);
+    return { success: false, sport, game: gameName, error: "no moneyline bets (skipping to avoid stale lines)" };
   }
+
+  // Pick a random moneyline bet
+  const mlIdx = Math.floor(Math.random() * mlCount);
+  const targetButton = mlButtons.nth(mlIdx);
+  logLine("INFO", `  Picking moneyline bet ${mlIdx + 1}/${mlCount} (line-stale-resistant)`);
   await targetButton.scrollIntoViewIfNeeded();
   await targetButton.click();
   await page.waitForTimeout(2_000);
@@ -424,8 +424,10 @@ async function createSignalOnGame(
 }
 
 async function waitForSignalResult(page: Page): Promise<string | null> {
-  for (let i = 0; i < 40; i++) {
-    await page.waitForTimeout(3_000);
+  // Poll at 1s intervals (not 3s) so we reliably capture the signal ID
+  // before the success page auto-redirects to /genius (8s timeout).
+  for (let i = 0; i < 120; i++) {
+    await page.waitForTimeout(1_000);
 
     // Success
     const successVisible = await page
@@ -443,7 +445,10 @@ async function waitForSignalResult(page: Page): Promise<string | null> {
       return idMatch ? `success:${idMatch[1]}` : "success";
     }
 
-    // Redirect to genius dashboard or signal detail page
+    // Redirect to genius dashboard or signal detail page.
+    // If the page already navigated away, try to extract signal ID from
+    // the committedSignalId state via the hidden data attribute one more time
+    // before giving up.
     if (page.url().includes("/genius") && !page.url().includes("/signal/new")) {
       const idMatch = page.url().match(/\/signal\/(\d+)/);
       return idMatch ? `success:${idMatch[1]}` : "success";
@@ -467,8 +472,8 @@ async function waitForSignalResult(page: Page): Promise<string | null> {
       }
     }
 
-    if (i % 5 === 0) {
-      logLine("INFO", `    [${i * 3}s] Still waiting... URL: ${page.url()}`);
+    if (i % 10 === 0 && i > 0) {
+      logLine("INFO", `    [${i}s] Still waiting... URL: ${page.url()}`);
     }
   }
   return null;

@@ -604,7 +604,7 @@ export default function CreateSignal() {
       }
 
       setStep("success");
-      setTimeout(() => router.push("/genius"), 3000);
+      setTimeout(() => router.push("/genius"), 8000);
     } catch (err) {
       const { humanizeError } = await import("@/lib/hooks");
       const msg = humanizeError(err, "Signal creation failed");
