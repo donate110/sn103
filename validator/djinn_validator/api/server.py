@@ -208,7 +208,7 @@ def create_app(
     mpc_coordinator: MPCCoordinator | None = None,
     rate_limit_capacity: int = 60,
     rate_limit_rate: int = 10,
-    mpc_availability_timeout: float = 15.0,
+    mpc_availability_timeout: float = 60.0,
     shares_threshold: int = 7,
     attestation_log: AttestationLog | None = None,
     fallback_miner_url: str | None = None,
@@ -1684,13 +1684,17 @@ def create_app(
                 message="Session already exists",
             )
 
-        # Create session locally (participant mirrors coordinator state)
+        # Create session locally (participant mirrors coordinator state).
+        # Pass empty pre_generated_triples to skip wasteful OT triple
+        # generation. The peer uses the coordinator's triple shares (from
+        # req.triple_shares), not locally-generated ones.
         session = _mpc.create_session(
             signal_id=req.signal_id,
             available_indices=req.available_indices,
             coordinator_x=req.coordinator_x,
             participant_xs=req.participant_xs,
             threshold=req.threshold,
+            pre_generated_triples=[],
         )
         # Override the session_id to match coordinator's
         if not _mpc.replace_session_id(session.session_id, req.session_id):

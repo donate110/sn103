@@ -634,20 +634,32 @@ class MPCOrchestrator:
                 init_payload["r_share_y"] = hex(peer_r)
 
             try:
+                t0 = time.monotonic()
                 resp = await self._peer_request(
                     "post",
                     f"{peer['url']}/v1/mpc/init",
                     peer_uid=peer["uid"],
                     json=init_payload,
                 )
+                elapsed = time.monotonic() - t0
                 if resp.status_code == 200 and resp.json().get("accepted"):
+                    log.info("mpc_init_accepted", peer_uid=peer["uid"], elapsed_ms=round(elapsed * 1000))
                     return peer
+                else:
+                    log.warning(
+                        "mpc_init_rejected",
+                        peer_uid=peer["uid"],
+                        status=resp.status_code,
+                        body=resp.text[:200],
+                        elapsed_ms=round(elapsed * 1000),
+                    )
             except (httpx.HTTPError, KeyError, ValueError, json.JSONDecodeError) as e:
                 log.warning(
                     "mpc_init_failed",
                     peer_uid=peer["uid"],
                     error_type=type(e).__name__,
-                    error=str(e),
+                    error=str(e)[:200],
+                    elapsed_ms=round((time.monotonic() - t0) * 1000) if 't0' in dir() else -1,
                 )
             return None
 
