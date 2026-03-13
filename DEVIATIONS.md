@@ -354,3 +354,11 @@ See the whitepaper for design intent.
 **What we did:** Renamed the `qualityScore` field in Account.sol's AccountState struct to `outcomeBalance`. This field tracks a simple +1/-1 counter (favorable/unfavorable outcomes) and is unrelated to the USDC-denominated Quality Score computed by `Audit.computeScore()`.
 **Why:** Audit finding CF-13. The name collision with the financial Quality Score could mislead off-chain consumers. "outcomeBalance" clearly indicates this is a directional outcome counter, not a dollar-denominated score.
 **Impact:** Interface change. Subgraph and off-chain consumers reading AccountState must use `outcomeBalance` instead of `qualityScore`.
+
+## DEV-027: SHAMIR_MAX Lowered from 7 to 3
+
+**Date:** 2026-03-13
+**Whitepaper Section:** Section 4 - Shamir Secret Sharing
+**What we did:** Capped the maximum Shamir threshold at 3 (was 7). The formula `clamp(ceil(2/3 * healthy_validators), SHAMIR_MIN, SHAMIR_MAX)` now produces threshold <= 3.
+**Why:** Only 3 validators (UID 2, 41, 189) reliably participate in direct peer-to-peer MPC communication. Other validators in the metagraph pass health checks via the Next.js proxy but are unreachable for direct MPC traffic. Signals created with threshold=7 cannot be purchased because the MPC protocol requires all threshold participants, and only 3 are available.
+**Impact:** Lower security threshold during bootstrap. Will raise back to 7 once more validators come online with stable MPC connectivity. Temporary measure.
