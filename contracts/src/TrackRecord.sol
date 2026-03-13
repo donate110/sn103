@@ -224,6 +224,27 @@ contract TrackRecord is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         return geniusRecordIds[genius];
     }
 
+    /// @notice Get a paginated slice of record IDs for a genius
+    /// @param genius Address of the genius
+    /// @param offset Starting index
+    /// @param limit Maximum number of IDs to return
+    /// @return ids Array of record IDs in the requested range
+    function getRecordIdsPaginated(address genius, uint256 offset, uint256 limit)
+        external
+        view
+        returns (uint256[] memory ids)
+    {
+        uint256[] storage allIds = geniusRecordIds[genius];
+        if (offset >= allIds.length) return new uint256[](0);
+        uint256 end = offset + limit;
+        if (end > allIds.length) end = allIds.length;
+        ids = new uint256[](end - offset);
+        for (uint256 i = offset; i < end;) {
+            ids[i - offset] = allIds[i];
+            unchecked { ++i; }
+        }
+    }
+
     /// @notice Get a specific verified record
     /// @param recordId The record ID
     /// @return record The verified record data

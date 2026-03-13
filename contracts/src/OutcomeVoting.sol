@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {StorageSlot} from "@openzeppelin/contracts/utils/StorageSlot.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IAudit, IAccount} from "./interfaces/IProtocol.sol";
@@ -86,6 +87,10 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
 
     /// @notice Address authorized to pause this contract in emergencies
     address public pauser;
+
+    /// @notice Sync nonce snapshot when first vote is cast per cycle.
+    /// @dev Prevents validators added after first vote from voting on the cycle.
+    mapping(bytes32 => uint256) public cycleSyncNonce;
 
     // ─── Events ─────────────────────────────────────────────────
 
@@ -175,6 +180,12 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     /// @notice Caller is not the pauser or the owner
     error NotPauserOrOwner(address caller);
 
+    /// @notice Validator set changed after first vote was cast for this cycle
+    error ValidatorSetChanged(bytes32 cycleKey, uint256 snapshotNonce, uint256 currentNonce);
+
+    /// @notice Voter was not a validator when this cycle's voting began
+    error NotSnapshotValidator(address voter, bytes32 cycleKey);
+
     // ─── Constructor / Initializer ──────────────────────────────
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -186,6 +197,7 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     function initialize(address _owner) public initializer {
         __Ownable_init(_owner);
         __Pausable_init();
+        StorageSlot.getUint256Slot(_reentrancyGuardStorageSlot()).value = 1;
     }
 
     // ─── Admin ──────────────────────────────────────────────────
@@ -353,9 +365,16 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
         if (finalized[cycleKey]) revert CycleAlreadyFinalized(cycleKey);
         if (hasVoted[cycleKey][msg.sender]) revert AlreadyVoted(msg.sender, cycleKey);
 
-        // Snapshot validator count on first vote for this cycle
+        // Snapshot validator count and sync nonce on first vote for this cycle
         if (cycleValidatorSnapshot[cycleKey] == 0) {
+            require(validators.length > 0, "OutcomeVoting: empty validator set");
             cycleValidatorSnapshot[cycleKey] = validators.length;
+            cycleSyncNonce[cycleKey] = syncNonce;
+        }
+
+        // Reject votes if validator set changed since snapshot (prevents quorum manipulation)
+        if (syncNonce != cycleSyncNonce[cycleKey]) {
+            revert ValidatorSetChanged(cycleKey, cycleSyncNonce[cycleKey], syncNonce);
         }
 
         // Record vote
@@ -379,8 +398,9 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
 
             emit QuorumReached(genius, idiot, cycle, qualityScore, newCount, totalValidators);
 
-            // Determine if this is a full cycle or early exit
-            bool isEarlyExit = earlyExitRequested[cycleKey];
+            // Prefer full settlement when audit-ready, even if early exit was requested.
+            // Early exit flag set at signal 5 should not force Credits-only at signal 10.
+            bool isEarlyExit = earlyExitRequested[cycleKey] && !account.isAuditReady(genius, idiot);
 
             if (isEarlyExit) {
                 audit.earlyExitByVote(genius, idiot, qualityScore);

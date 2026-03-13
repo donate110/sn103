@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {StorageSlot} from "@openzeppelin/contracts/utils/StorageSlot.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {Outcome, Purchase, Signal, SignalStatus} from "./interfaces/IDjinn.sol";
@@ -127,6 +128,8 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     error OutcomeAlreadySet(uint256 purchaseId, Outcome current);
     error InvalidOutcome(Outcome outcome);
     error NotPauserOrOwner(address caller);
+    error GeniusEqualsIdiot(address addr);
+    error LengthMismatch();
     /// @notice Minimum notional per purchase (1 USDC in 6 decimals — prevents dust griefing)
     uint256 public constant MIN_NOTIONAL = 1e6;
 
@@ -171,6 +174,7 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         if (_usdc == address(0)) revert ZeroAddress();
         __Ownable_init(_owner);
         __Pausable_init();
+        StorageSlot.getUint256Slot(_reentrancyGuardStorageSlot()).value = 1;
         usdc = IERC20(_usdc);
     }
 
@@ -228,6 +232,7 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     }
 
     /// @notice Update the outcome of a purchase. Called by authorized contracts (e.g. oracle/validator).
+    ///         Writes to both Escrow and Account to maintain a single source of truth.
     /// @param purchaseId The purchase to update
     /// @param outcome The new outcome (must not be Pending)
     function setOutcome(uint256 purchaseId, Outcome outcome) external {
@@ -237,6 +242,17 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         Outcome current = _purchases[purchaseId].outcome;
         if (current != Outcome.Pending) revert OutcomeAlreadySet(purchaseId, current);
         _purchases[purchaseId].outcome = outcome;
+
+        // Sync to Account (canonical source for settlement reads) if not already recorded
+        if (address(account) != address(0) && address(signalCommitment) != address(0)) {
+            Purchase memory p = _purchases[purchaseId];
+            Signal memory sig = signalCommitment.getSignal(p.signalId);
+            Outcome acctOutcome = account.getOutcome(sig.genius, p.idiot, purchaseId);
+            if (acctOutcome == Outcome.Pending) {
+                account.recordOutcome(sig.genius, p.idiot, purchaseId, outcome);
+            }
+        }
+
         emit OutcomeUpdated(purchaseId, outcome);
     }
 
@@ -297,6 +313,7 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         Signal memory sig = signalCommitment.getSignal(signalId);
         if (sig.status != SignalStatus.Active) revert SignalNotActive(signalId);
         if (block.timestamp >= sig.expiresAt) revert SignalExpired(signalId);
+        if (sig.genius == msg.sender) revert GeniusEqualsIdiot(msg.sender);
         if (hasPurchased[signalId][msg.sender]) revert AlreadyPurchased(signalId, msg.sender);
         if (sig.minNotional > 0 && notional < sig.minNotional) {
             revert NotionalTooSmall(notional, sig.minNotional);
@@ -414,7 +431,7 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     /// @param cycles Array of cycle numbers (must match idiots length)
     function claimFeesBatch(address[] calldata idiots, uint256[] calldata cycles) external whenNotPaused nonReentrant {
         if (auditContract == address(0)) revert ContractNotSet("Audit");
-        require(idiots.length == cycles.length, "Length mismatch");
+        if (idiots.length != cycles.length) revert LengthMismatch();
 
         uint256 total;
         for (uint256 i; i < idiots.length; ++i) {
@@ -488,6 +505,12 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         }
         if (notional < MIN_NOTIONAL) return (false, "Notional too small");
         if (notional > MAX_NOTIONAL) return (false, "Notional too large");
+        // Check genius has enough free collateral for the SLA lock
+        if (address(collateral) != address(0) && sig.slaMultiplierBps > 0) {
+            uint256 lockNeeded = (notional * sig.slaMultiplierBps) / 10_000;
+            uint256 available = collateral.getAvailable(sig.genius);
+            if (available < lockNeeded) return (false, "Insufficient genius collateral");
+        }
         return (true, "");
     }
 
@@ -513,8 +536,6 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         _unpause();
     }
 
-    /// @dev Owner can authorize upgrades only when escrow holds no USDC
-    function _authorizeUpgrade(address) internal override onlyOwner {
-        require(usdc.balanceOf(address(this)) == 0, "Escrow: withdraw all USDC first");
-    }
+    /// @dev Owner can authorize upgrades only when paused (active USDC may be held)
+    function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
 }

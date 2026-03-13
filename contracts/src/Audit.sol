@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {StorageSlot} from "@openzeppelin/contracts/utils/StorageSlot.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {Purchase, Outcome, Signal, AccountState} from "./interfaces/IDjinn.sol";
@@ -97,6 +98,9 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     /// @notice Emitted when the pauser address is updated
     event PauserUpdated(address indexed newPauser);
 
+    /// @notice Emitted when protocol fee slash returns less than intended
+    event ProtocolFeeShortfall(address indexed genius, uint256 intended, uint256 actual);
+
     // -------------------------------------------------------------------------
     // Errors
     // -------------------------------------------------------------------------
@@ -127,6 +131,9 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     function initialize(address _owner) public initializer {
         __Ownable_init(_owner);
         __Pausable_init();
+        // Pre-warm ReentrancyGuard storage for proxy (OZ v5 is @custom:stateless but
+        // first nonReentrant call pays cold SSTORE 0->2 without this)
+        StorageSlot.getUint256Slot(_reentrancyGuardStorageSlot()).value = 1;
     }
 
     // -------------------------------------------------------------------------
@@ -193,9 +200,8 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     // Core functions
     // -------------------------------------------------------------------------
 
-    /// @notice Trigger an audit for a Genius-Idiot pair. Alias for settle().
-    ///         Permissionless by design: any address can trigger settlement once the pair is audit-ready.
-    ///         This prevents either party from blocking settlement and matches standard DeFi settlement patterns.
+    /// @notice Trigger an audit for a Genius-Idiot pair.
+    /// @dev Alias for settle(). Kept for backwards compatibility.
     /// @param genius The Genius address
     /// @param idiot The Idiot address
     function trigger(address genius, address idiot) external whenNotPaused nonReentrant {
@@ -425,7 +431,9 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
             totalUsdcFeesPaid += p.usdcPaid;
         }
 
-        _settleCommon(genius, idiot, cycle, qualityScore, true, totalNotional, totalUsdcFeesPaid, purchaseIds);
+        // Use full settlement (Tranche A USDC) when audit-ready, early exit otherwise
+        bool isEarlyExit = !account.isAuditReady(genius, idiot);
+        _settleCommon(genius, idiot, cycle, qualityScore, isEarlyExit, totalNotional, totalUsdcFeesPaid, purchaseIds);
     }
 
     // -------------------------------------------------------------------------
@@ -543,7 +551,7 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     }
 
     /// @dev Core settlement logic shared by all settlement paths.
-    ///      Distributes damages, releases collateral locks, charges protocol fee,
+    ///      Releases collateral locks first, then distributes damages, charges protocol fee,
     ///      stores audit result, and advances the cycle.
     function _settleCommon(
         address genius,
@@ -557,6 +565,10 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     ) internal {
         // Protocol fee: 0.5% of total notional
         uint256 protocolFee = (totalNotional * PROTOCOL_FEE_BPS) / BPS_DENOMINATOR;
+
+        // Release signal locks FIRST so freed collateral covers the slashes below.
+        // This ensures slash() operates on accurate deposit/locked accounting.
+        _releaseSignalLocks(genius, purchaseIds);
 
         uint256 trancheA;
         uint256 trancheB;
@@ -573,13 +585,14 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
         }
         // If score >= 0 and not early exit: Genius keeps all fees, no damages
 
-        // Release signal locks FIRST so freed collateral covers the slashes below.
-        _releaseSignalLocks(genius, purchaseIds);
-
-        // Protocol fee -- slash from genius collateral to treasury.
+        // Protocol fee: slash from genius collateral to treasury.
         // Charged on ALL settlements including early exits to prevent fee dodging.
         if (protocolFee > 0) {
+            uint256 intendedFee = protocolFee;
             protocolFee = collateral.slash(genius, protocolFee, protocolTreasury);
+            if (protocolFee < intendedFee) {
+                emit ProtocolFeeShortfall(genius, intendedFee, protocolFee);
+            }
         }
 
         // Store audit result

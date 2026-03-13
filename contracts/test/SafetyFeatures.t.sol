@@ -194,37 +194,27 @@ contract SafetyFeaturesTest is Test {
         assertEq(AuditV2(address(audit)).version(), "v2");
     }
 
-    function test_escrow_upgradeBlocked_withUsdcBalance() public {
-        usdc.mint(idiot, 100e6);
-        vm.startPrank(idiot);
-        usdc.approve(address(escrow), 100e6);
-        escrow.deposit(100e6);
-        vm.stopPrank();
-
+    function test_escrow_upgradeBlocked_whenNotPaused() public {
         EscrowV2 newImpl = new EscrowV2();
-        vm.expectRevert("Escrow: withdraw all USDC first");
+        vm.expectRevert(abi.encodeWithSignature("ExpectedPause()"));
         escrow.upgradeToAndCall(address(newImpl), "");
     }
 
-    function test_escrow_upgradeAllowed_withZeroBalance() public {
+    function test_escrow_upgradeAllowed_whenPaused() public {
+        escrow.pause();
         EscrowV2 newImpl = new EscrowV2();
         escrow.upgradeToAndCall(address(newImpl), "");
         assertEq(EscrowV2(address(escrow)).version(), "v2");
     }
 
-    function test_collateral_upgradeBlocked_withUsdcBalance() public {
-        usdc.mint(genius, 100e6);
-        vm.startPrank(genius);
-        usdc.approve(address(collateral), 100e6);
-        collateral.deposit(100e6);
-        vm.stopPrank();
-
+    function test_collateral_upgradeBlocked_whenNotPaused() public {
         CollateralV2 newImpl = new CollateralV2();
-        vm.expectRevert("Collateral: withdraw all USDC first");
+        vm.expectRevert(abi.encodeWithSignature("ExpectedPause()"));
         collateral.upgradeToAndCall(address(newImpl), "");
     }
 
-    function test_collateral_upgradeAllowed_withZeroBalance() public {
+    function test_collateral_upgradeAllowed_whenPaused() public {
+        collateral.pause();
         CollateralV2 newImpl = new CollateralV2();
         collateral.upgradeToAndCall(address(newImpl), "");
         assertEq(CollateralV2(address(collateral)).version(), "v2");

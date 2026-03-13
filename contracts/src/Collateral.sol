@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {StorageSlot} from "@openzeppelin/contracts/utils/StorageSlot.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
@@ -34,6 +35,9 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
     /// @notice Address authorized to pause this contract in emergencies
     address public pauser;
 
+    /// @notice Whether withdrawals are frozen for a genius (set during pending audit settlement)
+    mapping(address genius => bool) public withdrawalsFrozen;
+
     /// @dev Emitted when a Genius deposits collateral
     event Deposited(address indexed genius, uint256 amount);
 
@@ -55,7 +59,11 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
     /// @notice Emitted when the pauser address is updated
     event PauserUpdated(address indexed newPauser);
 
+    /// @notice Emitted when withdrawal freeze status changes
+    event WithdrawalFreezeUpdated(address indexed genius, bool frozen);
+
     error Unauthorized();
+    error WithdrawalsFrozen(address genius);
     error NotPauserOrOwner(address caller);
     error ZeroAddress();
     error ZeroAmount();
@@ -80,6 +88,7 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
         if (_usdc == address(0)) revert ZeroAddress();
         __Ownable_init(_owner);
         __Pausable_init();
+        StorageSlot.getUint256Slot(_reentrancyGuardStorageSlot()).value = 1;
         usdc = IERC20(_usdc);
     }
 
@@ -105,6 +114,7 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
     /// @param amount Amount of USDC to withdraw (6 decimals)
     function withdraw(uint256 amount) external whenNotPaused nonReentrant {
         if (amount == 0) revert ZeroAmount();
+        if (withdrawalsFrozen[msg.sender]) revert WithdrawalsFrozen(msg.sender);
         uint256 dep = deposits[msg.sender];
         uint256 lck = locked[msg.sender];
         uint256 available = dep > lck ? dep - lck : 0;
@@ -153,6 +163,11 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
     }
 
     /// @notice Slash a Genius's collateral and transfer to a recipient. Called by Audit.
+    /// @dev Signal locks must be released BEFORE calling slash() to maintain accounting
+    ///      invariants. The Audit contract enforces this ordering in _settleCommon().
+    ///      Individual signalLocks entries are NOT adjusted here; they become stale after
+    ///      slash if not released first. This is by design since settlement always releases
+    ///      locks before slashing (see CF-02/CF-04).
     /// @param genius The Genius being slashed
     /// @param amount Amount of USDC to slash (6 decimals)
     /// @param recipient Address to receive the slashed USDC
@@ -192,6 +207,20 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
         return signalLocks[genius][signalId];
     }
 
+    /// @notice Freeze withdrawals for a genius (e.g. during pending audit settlement)
+    /// @param genius The genius whose withdrawals to freeze
+    function freezeWithdrawals(address genius) external onlyAuthorized {
+        withdrawalsFrozen[genius] = true;
+        emit WithdrawalFreezeUpdated(genius, true);
+    }
+
+    /// @notice Unfreeze withdrawals for a genius
+    /// @param genius The genius whose withdrawals to unfreeze
+    function unfreezeWithdrawals(address genius) external onlyAuthorized {
+        withdrawalsFrozen[genius] = false;
+        emit WithdrawalFreezeUpdated(genius, false);
+    }
+
     /// @notice Set the emergency pauser address
     /// @param _pauser New pauser address (address(0) to disable)
     function setPauser(address _pauser) external onlyOwner {
@@ -210,8 +239,6 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
         _unpause();
     }
 
-    /// @dev Owner can authorize upgrades only when collateral holds no USDC
-    function _authorizeUpgrade(address) internal override onlyOwner {
-        require(usdc.balanceOf(address(this)) == 0, "Collateral: withdraw all USDC first");
-    }
+    /// @dev Owner can authorize upgrades only when paused (active USDC may be locked)
+    function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
 }

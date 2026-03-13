@@ -41,6 +41,9 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @dev Incremented when signalCount goes 0→1; decremented on settleAudit/startNewCycle
     uint256 public activePairCount;
 
+    /// @dev Tracks whether a pair is currently counted in activePairCount (prevents double-decrement)
+    mapping(bytes32 => bool) private _pairIsActive;
+
     // ─── Events
     // ─────────────────────────────────────────────────────────
 
@@ -143,7 +146,8 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         }
 
         // Track new active pair (first purchase in this cycle)
-        if (acct.signalCount == 0) {
+        if (!_pairIsActive[key]) {
+            _pairIsActive[key] = true;
             activePairCount++;
         }
 
@@ -196,14 +200,16 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         bytes32 key = _accountKey(genius, idiot);
         AccountState storage acct = _accounts[key];
 
-        // Decrement active pair count before resetting
-        if (acct.signalCount > 0) {
+        // Decrement active pair count (guarded by flag to prevent double-decrement)
+        if (_pairIsActive[key]) {
+            _pairIsActive[key] = false;
             activePairCount--;
         }
 
-        // Clear purchase recorded flags for the current cycle
+        // Clear purchase recorded flags and stale outcomes for the current cycle
         uint256 len = acct.purchaseIds.length;
         for (uint256 i; i < len;) {
+            delete _outcomes[key][acct.purchaseIds[i]];
             delete _purchaseRecorded[key][acct.purchaseIds[i]];
             unchecked {
                 ++i;
@@ -243,25 +249,23 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         bytes32 key = _accountKey(genius, idiot);
         AccountState storage acct = _accounts[key];
 
-        // Decrement active pair count before resetting
-        if (acct.signalCount > 0) {
+        // Decrement active pair count (guarded by flag to prevent double-decrement)
+        if (_pairIsActive[key]) {
+            _pairIsActive[key] = false;
             activePairCount--;
         }
 
-        // Mark current cycle as settled
-        acct.settled = true;
-        emit SettledChanged(genius, idiot, true);
-
-        // Clear purchase recorded flags for the current cycle
+        // Clear purchase recorded flags and stale outcomes for the current cycle
         uint256 len = acct.purchaseIds.length;
         for (uint256 i; i < len;) {
+            delete _outcomes[key][acct.purchaseIds[i]];
             delete _purchaseRecorded[key][acct.purchaseIds[i]];
             unchecked {
                 ++i;
             }
         }
 
-        // Start new cycle
+        // Start new cycle (settled state is transient; emit only the new cycle event)
         unchecked {
             acct.currentCycle++;
         }
@@ -343,10 +347,11 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         return keccak256(abi.encode(genius, idiot));
     }
 
-    /// @dev Validates that genius and idiot addresses are non-zero
+    /// @dev Validates that genius and idiot addresses are non-zero and distinct
     function _validatePair(address genius, address idiot) internal pure {
         if (genius == address(0)) revert ZeroGeniusAddress();
         if (idiot == address(0)) revert ZeroIdiotAddress();
+        if (genius == idiot) revert GeniusEqualsIdiot(genius);
     }
 
     /// @dev Only the owner (TimelockController) can authorize upgrades.

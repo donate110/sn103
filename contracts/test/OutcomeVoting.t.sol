@@ -672,56 +672,58 @@ contract OutcomeVotingTest is Test {
         assertEq(voting.cycleValidatorSnapshot(cycleKey), 3, "Snapshot should be 3 after first vote");
     }
 
-    function test_quorumSnapshot_addingValidatorMidVoteDoesNotChangeThreshold() public {
+    function test_quorumSnapshot_addingValidatorMidVoteRejectsNewVotes() public {
         _create10SignalsNoOutcomes();
 
-        // First vote snapshots at 3 validators (quorum = ceil(3*2/3) = 2)
+        // First vote snapshots at 3 validators and syncNonce
         vm.prank(validator1);
         voting.submitVote(genius, idiot, 1000e6);
 
-        // Add 2 more validators after first vote
+        // Add 2 more validators after first vote (changes syncNonce)
         voting.addValidator(validator4);
         voting.addValidator(validator5);
 
-        // Current validator count is 5, but snapshot is 3
-        assertEq(voting.validatorCount(), 5);
+        // Subsequent votes should revert because validator set changed
         bytes32 cycleKey = _cycleKey(0);
-        assertEq(voting.cycleValidatorSnapshot(cycleKey), 3);
-
-        // Second matching vote should still trigger quorum (2/3 from snapshot)
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OutcomeVoting.ValidatorSetChanged.selector,
+                cycleKey,
+                voting.cycleSyncNonce(cycleKey),
+                voting.syncNonce()
+            )
+        );
         vm.prank(validator2);
         voting.submitVote(genius, idiot, 1000e6);
-
-        assertTrue(voting.isCycleFinalized(genius, idiot, 0), "Quorum should use snapshot, not current count");
     }
 
-    function test_quorumSnapshot_removingValidatorMidVoteDoesNotChangeThreshold() public {
-        // Start with 5 validators (quorum = ceil(5*2/3) = 4)
+    function test_quorumSnapshot_removingValidatorMidVoteRejectsNewVotes() public {
+        // Start with 5 validators
         voting.addValidator(validator4);
         voting.addValidator(validator5);
 
         _create10SignalsNoOutcomes();
 
-        // First vote snapshots at 5
+        // First vote snapshots at 5 and syncNonce
         vm.prank(validator1);
         voting.submitVote(genius, idiot, 2000e6);
 
-        bytes32 cycleKey = _cycleKey(0);
-        assertEq(voting.cycleValidatorSnapshot(cycleKey), 5);
-
-        // Remove 2 validators (current count drops to 3)
+        // Remove 2 validators (changes syncNonce)
         voting.removeValidator(validator4);
         voting.removeValidator(validator5);
-        assertEq(voting.validatorCount(), 3);
 
-        // 2 more matching votes (3 total of 5 snapshotted, need 4)
+        // Subsequent votes should revert because validator set changed
+        bytes32 cycleKey = _cycleKey(0);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OutcomeVoting.ValidatorSetChanged.selector,
+                cycleKey,
+                voting.cycleSyncNonce(cycleKey),
+                voting.syncNonce()
+            )
+        );
         vm.prank(validator2);
         voting.submitVote(genius, idiot, 2000e6);
-        vm.prank(validator3);
-        voting.submitVote(genius, idiot, 2000e6);
-
-        // 3/5 is not enough (need 4/5 from snapshot)
-        assertFalse(voting.isCycleFinalized(genius, idiot, 0), "Should need 4/5 from snapshot, not 2/3 from current");
     }
 
     function test_cycleQuorumThreshold_returnsZeroBeforeVotes() public {

@@ -305,6 +305,8 @@ See the whitepaper for design intent.
 
 **Whitepaper Section:** Signal Lifecycle, Shamir Secret Sharing
 **Whitepaper Says:** Implies a fixed threshold (7 of 10) for Shamir secret sharing.
-**What we did:** Made the threshold dynamic based on active validator count: `clamp(ceil(2/3 * discovered_validators), 3, 7)`. Floor of 3 (subnet dead below that), cap of 7 (don't require too many even at scale). Both client and validator enforce the same bounds.
-**Reason:** With only 4 Djinn validators online, a fixed threshold of 7 made signal creation impossible. The 2/3 majority requirement preserves the security property (majority of validators must cooperate to reconstruct) while adapting to network size. The floor prevents threshold=1 attacks; the cap prevents fragility when the validator set grows beyond 10.
-**Impact:** Signal creation works with 3-10+ validators. Threshold scales from 3 (at 4 validators) to 7 (at 10+), then stays at 7 forever.
+**What we did:** Made the threshold dynamic based on active validator count: `clamp(ceil(2/3 * healthy_validators), SHAMIR_MIN, 7)`. Cap of 7 (don't require too many even at scale). Both client and validator use the same formula.
+**Bootstrap phase (current):** SHAMIR_MIN temporarily set to 2 because not all validators have updated to compatible software (UID 2/Yuma stuck on v573, enforces threshold >= 7). The validator logs a warning instead of rejecting low thresholds, preventing backward-compatibility issues during rolling updates. Client distributes only to healthy validators.
+**Target state:** Raise SHAMIR_MIN to 3 once all Djinn validators run compatible versions (>= v574). The floor of 3 prevents threshold=1 attacks.
+**Reason:** With only 4 Djinn validators online (and only 2-3 on compatible software), a fixed threshold of 7 made signal creation impossible. The 2/3 majority requirement preserves the security property while adapting to network size.
+**Impact:** Signal creation works with 2-10+ validators. Threshold scales from 2 (bootstrap) to 7 (at 10+), then stays at 7 forever.

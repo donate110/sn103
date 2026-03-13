@@ -729,6 +729,8 @@ contract EscrowIntegrationTest is Test {
 
     function test_canPurchase_active_signal() public {
         _createSignal(SIGNAL_ID);
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        _depositGeniusCollateral(requiredCollateral);
         (bool canBuy, string memory reason) = escrow.canPurchase(SIGNAL_ID, NOTIONAL);
         assertTrue(canBuy, "Active signal should be purchasable");
         assertEq(bytes(reason).length, 0, "No reason for purchasable signal");
@@ -961,6 +963,10 @@ contract EscrowIntegrationTest is Test {
 
         vm.prank(idiot);
         escrow.purchase(SIGNAL_ID, notional1, ODDS);
+
+        // Deposit additional collateral for the remaining capacity check
+        uint256 collateral2 = (3000e6 * SLA_MULTIPLIER_BPS) / 10_000;
+        _depositGeniusCollateral(collateral2);
 
         // canPurchase should reflect remaining capacity (3000e6)
         (bool canBuy, ) = escrow.canPurchase(SIGNAL_ID, 3000e6);

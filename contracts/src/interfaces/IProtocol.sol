@@ -20,6 +20,9 @@ interface ICollateral {
     function slash(address genius, uint256 amount, address recipient) external returns (uint256 slashAmount);
     function release(uint256 signalId, address genius, uint256 amount) external;
     function getSignalLock(address genius, uint256 signalId) external view returns (uint256);
+    function getAvailable(address genius) external view returns (uint256);
+    function freezeWithdrawals(address genius) external;
+    function unfreezeWithdrawals(address genius) external;
 }
 
 /// @notice CreditLedger — used by Escrow (balance/burn) and Audit (mint)
@@ -32,6 +35,7 @@ interface ICreditLedger {
 /// @notice Account — used by Escrow, Audit, and OutcomeVoting
 interface IAccount {
     function recordPurchase(address genius, address idiot, uint256 purchaseId) external;
+    function recordOutcome(address genius, address idiot, uint256 purchaseId, Outcome outcome) external;
     function getCurrentCycle(address genius, address idiot) external view returns (uint256);
     function isAuditReady(address genius, address idiot) external view returns (bool);
     function getAccountState(address genius, address idiot) external view returns (AccountState memory);

@@ -22,6 +22,11 @@ contract Deploy is Script {
     /// @dev Base mainnet USDC (Circle's official deployment)
     address constant BASE_MAINNET_USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
 
+    /// @dev Base Sepolia testnet chain ID
+    uint256 constant BASE_SEPOLIA_CHAIN_ID = 84532;
+    /// @dev Hardhat/Foundry local chain ID
+    uint256 constant LOCAL_CHAIN_ID = 31337;
+
     struct Contracts {
         DjinnAccount acct;
         CreditLedger cl;
@@ -63,8 +68,8 @@ contract Deploy is Script {
         _transferOwnership(c);
         _verify(c, pauserAddr);
 
-        // Mint test USDC to deployer (testnet only)
-        if (block.chainid != 8453) {
+        // Mint test USDC to deployer (explicit testnet allowlist only)
+        if (block.chainid == BASE_SEPOLIA_CHAIN_ID || block.chainid == LOCAL_CHAIN_ID) {
             MockUSDC(c.usdc).mint(deployer, 1_000_000 * 1e6);
             console.log("Minted 1,000,000 USDC to deployer");
         }
@@ -73,11 +78,15 @@ contract Deploy is Script {
         _logSummary(c, multisig, pauserAddr);
     }
 
-    function _deployUsdc(address deployer) internal returns (address) {
+    function _deployUsdc(address) internal returns (address) {
         if (block.chainid == 8453) {
             console.log("Using real USDC:", BASE_MAINNET_USDC);
             return BASE_MAINNET_USDC;
         }
+        require(
+            block.chainid == BASE_SEPOLIA_CHAIN_ID || block.chainid == LOCAL_CHAIN_ID,
+            "Deploy: unsupported chain ID"
+        );
         MockUSDC usdc_ = new MockUSDC();
         console.log("MockUSDC:", address(usdc_));
         return address(usdc_);

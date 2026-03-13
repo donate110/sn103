@@ -287,11 +287,10 @@ contract AccountTest is Test {
         acct.recordPurchase(genius, address(0), 1);
     }
 
-    function test_recordPurchase_selfPurchaseAllowed() public {
+    function test_recordPurchase_selfPurchaseRejected() public {
+        vm.expectRevert(abi.encodeWithSelector(DjinnAccount.GeniusEqualsIdiot.selector, genius));
         vm.prank(authorizedCaller);
         acct.recordPurchase(genius, genius, 1);
-        AccountState memory state = acct.getAccountState(genius, genius);
-        assertEq(state.signalCount, 1);
     }
 
     // ─── Tests: View functions
