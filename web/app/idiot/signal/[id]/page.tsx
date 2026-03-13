@@ -329,6 +329,11 @@ export default function PurchaseSignal() {
         setStep("idle");
         return;
       }
+      if (notionalNum < 1) {
+        setStepError("Minimum notional is $1.00");
+        setStep("idle");
+        return;
+      }
       if (!bestOdds || bestOdds < 1.01) {
         setStepError("Could not determine market odds. Try again.");
         setStep("idle");
@@ -785,7 +790,7 @@ export default function PurchaseSignal() {
                     </div>
                   )}
                   {(() => {
-                    const minVal = signal.minNotional > 0n ? Number(signal.minNotional) / 1e6 : 0.01;
+                    const minVal = signal.minNotional > 0n ? Number(signal.minNotional) / 1e6 : 1;
                     const remaining = signal.maxNotional > 0n ? Number(signal.maxNotional - notionalFilled) / 1e6 : 0;
                     const maxVal = signal.maxNotional > 0n ? remaining : undefined;
                     const hasRange = maxVal !== undefined && maxVal > minVal;

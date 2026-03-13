@@ -654,14 +654,9 @@ async function purchaseSignalById(
     return false;
   }
 
-  const minBtn = page.getByRole("button", { name: /^min/i });
-  if (await minBtn.isVisible().catch(() => false)) {
-    await minBtn.click();
-    logLine("INFO", "  Clicked Min button for notional");
-  } else {
-    await notionalInput.fill("10");
-    logLine("INFO", "  Set notional to 10 USDC");
-  }
+  // Always use $10 notional (Min button can be below contract MIN_NOTIONAL of $1)
+  await notionalInput.fill("10");
+  logLine("INFO", "  Set notional to $10 USDC");
   await page.waitForTimeout(1_000);
 
   // Click purchase
@@ -995,15 +990,9 @@ async function purchaseFirstAvailableSignal(
     return false;
   }
 
-  // Try clicking "Min" quick-select first, otherwise type 10
-  const minBtn = page.getByRole("button", { name: /^min/i });
-  if (await minBtn.isVisible().catch(() => false)) {
-    await minBtn.click();
-    logLine("INFO", "  Clicked Min button for notional");
-  } else {
-    await notionalInput.fill("10");
-    logLine("INFO", "  Set notional to 10 USDC");
-  }
+  // Always use $10 notional (Min button can be below contract MIN_NOTIONAL of $1)
+  await notionalInput.fill("10");
+  logLine("INFO", "  Set notional to $10 USDC");
 
   await page.waitForTimeout(1_000);
 
