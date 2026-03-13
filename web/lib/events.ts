@@ -43,8 +43,8 @@ export async function resolveDeployBlock(provider: ethers.Provider): Promise<num
 // Keep a synchronous alias for call sites that already have the value
 const DEPLOY_BLOCK = RAW_DEPLOY_BLOCK;
 
-/** Cache TTL in milliseconds (30 seconds). */
-const CACHE_TTL_MS = 30_000;
+/** Cache TTL in milliseconds (60 seconds). */
+const CACHE_TTL_MS = 60_000;
 
 /** Maximum number of cache keys before evicting oldest entry. */
 const MAX_CACHE_KEYS = 100;
@@ -164,8 +164,20 @@ export async function queryFilterChunked(
   const allEvents: (ethers.EventLog | ethers.Log)[] = [];
   for (let start = fromBlock; start <= toBlock; start += BLOCK_CHUNK_SIZE) {
     const end = Math.min(start + BLOCK_CHUNK_SIZE - 1, toBlock);
-    const chunk = await contract.queryFilter(filter, start, end);
-    allEvents.push(...chunk);
+    let chunk: (ethers.EventLog | ethers.Log)[] | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        chunk = await contract.queryFilter(filter, start, end);
+        break;
+      } catch {
+        if (attempt < 2) {
+          // Exponential backoff: 1s, 2s
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        }
+        // On final attempt, skip this chunk rather than crashing entire query
+      }
+    }
+    if (chunk) allEvents.push(...chunk);
   }
   return allEvents;
 }
@@ -244,21 +256,30 @@ export async function getActiveSignals(
   const now = BigInt(Math.floor(Date.now() / 1000));
   const notExpired = all.filter((s) => s.expiresAt > now);
 
-  // Always check on-chain status (cheap view calls) to avoid stale data.
-  // Retry once on failure to avoid dropping valid signals on transient RPC errors.
+  // Check on-chain status with retries to avoid dropping valid signals on transient RPC errors.
   const enriched = await Promise.all(
     notExpired.map(async (s) => {
       const id = BigInt(s.signalId);
-      let active: boolean;
-      try {
-        active = await contract.isActive(id);
-      } catch {
-        try { active = await contract.isActive(id); } catch { active = false; }
+      let active = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          active = await contract.isActive(id);
+          break;
+        } catch {
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        }
       }
       if (!active) return null;
-      const signalData = await contract.getSignal(id).catch(() => null);
-      if (signalData && signalData.minNotional != null) {
-        s.minNotional = BigInt(signalData.minNotional);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const signalData = await contract.getSignal(id);
+          if (signalData && signalData.minNotional != null) {
+            s.minNotional = BigInt(signalData.minNotional);
+          }
+          break;
+        } catch {
+          if (attempt < 1) await new Promise((r) => setTimeout(r, 500));
+        }
       }
       return s;
     }),
@@ -317,21 +338,30 @@ export async function getSignalsByGenius(
   const now = BigInt(Math.floor(Date.now() / 1000));
   const notExpired = all.filter((s) => s.expiresAt > now);
 
-  // Check on-chain status and fetch minNotional (for exclusive badge).
-  // Retry once on failure to avoid dropping valid signals on transient RPC errors.
+  // Check on-chain status with retries to avoid dropping valid signals on transient RPC errors.
   const enriched = await Promise.all(
     notExpired.map(async (s) => {
       const id = BigInt(s.signalId);
-      let active: boolean;
-      try {
-        active = await contract.isActive(id);
-      } catch {
-        try { active = await contract.isActive(id); } catch { active = false; }
+      let active = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          active = await contract.isActive(id);
+          break;
+        } catch {
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        }
       }
       if (!active) return null;
-      const signalData = await contract.getSignal(id).catch(() => null);
-      if (signalData && signalData.minNotional != null) {
-        s.minNotional = BigInt(signalData.minNotional);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const signalData = await contract.getSignal(id);
+          if (signalData && signalData.minNotional != null) {
+            s.minNotional = BigInt(signalData.minNotional);
+          }
+          break;
+        } catch {
+          if (attempt < 1) await new Promise((r) => setTimeout(r, 500));
+        }
       }
       return s;
     }),

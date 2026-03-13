@@ -7,6 +7,7 @@ import {
   createWalletClient,
   parseUnits,
   formatUnits,
+  maxUint256,
   type Hex,
 } from "viem";
 import { baseSepolia } from "viem/chains";
@@ -42,6 +43,14 @@ const GENIUS_BASE_KEY = (process.env.E2E_GENIUS_KEY ||
 // The .env may have a stale address; this default matches on-chain state.
 const USDC_ADDRESS = (process.env.E2E_USDC_ADDRESS ||
   "0x7B8c194C848914c361Cf34F2D2dD9EAE74a9C9c6") as Hex;
+
+// Collateral contract (for verifying genius collateral on-chain)
+const COLLATERAL_ADDRESS = (process.env.NEXT_PUBLIC_COLLATERAL_ADDRESS ||
+  "0x16C36aCe7aB4525Ed1D0F12a8E6c38f5be29cb16") as Hex;
+
+// Escrow contract (for verifying idiot escrow balance on-chain)
+const ESCROW_ADDRESS = (process.env.NEXT_PUBLIC_ESCROW_ADDRESS ||
+  "0x50A1Bf4eacED9b9da4B1A5BA3001aA0979E91A21") as Hex;
 
 const transport = http(RPC_URL);
 const publicClient = createPublicClient({ chain: baseSepolia, transport });
@@ -367,24 +376,33 @@ async function createSignalOnGame(
 
   // Advance through Review Lines
   const reviewHeading = page.getByText("Review Lines");
-  if (!(await reviewHeading.isVisible({ timeout: 10_000 }).catch(() => false))) {
+  try {
+    await reviewHeading.waitFor({ state: "visible", timeout: 10_000 });
+  } catch {
     return { success: false, sport, game: gameName, error: "did not advance to Review step" };
   }
 
   const nextBtn = page.getByRole("button", { name: /next.*configure|continue/i });
-  if (await nextBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
+  try {
+    await nextBtn.waitFor({ state: "visible", timeout: 5_000 });
     await nextBtn.click();
     await page.waitForTimeout(1_000);
+  } catch {
+    // May auto-advance or have different button name
   }
 
   // Configure step
   const configHeading = page.getByText("Configure Signal");
-  if (!(await configHeading.isVisible({ timeout: 10_000 }).catch(() => false))) {
+  try {
+    await configHeading.waitFor({ state: "visible", timeout: 10_000 });
+  } catch {
     return { success: false, sport, game: gameName, error: "did not reach Configure step" };
   }
 
   const submitBtn = page.getByRole("button", { name: /create signal|set up encryption/i });
-  if (!(await submitBtn.isVisible({ timeout: 10_000 }).catch(() => false))) {
+  try {
+    await submitBtn.waitFor({ state: "visible", timeout: 10_000 });
+  } catch {
     return { success: false, sport, game: gameName, error: "submit button not visible" };
   }
 
@@ -495,10 +513,11 @@ async function navigateToFreshSignalPage(
 
   // Click the target sport (must match a UI button exactly)
   const sportBtn = page.getByRole("button", { name: new RegExp(`^${sport}$`, "i") });
-  if (await sportBtn.isVisible({ timeout: 10_000 }).catch(() => false)) {
+  try {
+    await sportBtn.waitFor({ state: "visible", timeout: 10_000 });
     await sportBtn.click();
     await page.waitForTimeout(5_000);
-  } else {
+  } catch {
     logLine("WARN", `Sport button "${sport}" not found in UI, skipping`);
     throw new Error(`Sport button "${sport}" not found`);
   }
@@ -645,23 +664,33 @@ async function purchaseSignalById(
 
   // Click purchase
   const purchaseBtn = page.getByRole("button", { name: /purchase signal/i });
-  if (!(await purchaseBtn.isVisible({ timeout: 5_000 }).catch(() => false))) {
+  let clickedBtn = false;
+  try {
+    await purchaseBtn.waitFor({ state: "visible", timeout: 8_000 });
+    if (!(await purchaseBtn.isDisabled())) {
+      await purchaseBtn.click();
+      clickedBtn = true;
+    } else {
+      logLine("WARN", "  Purchase button disabled");
+      return false;
+    }
+  } catch {
+    // Fallback: try any purchase/buy button
     const fallbackBtn = page.getByRole("button", { name: /purchase|buy/i }).first();
-    if (!(await fallbackBtn.isVisible({ timeout: 3_000 }).catch(() => false))) {
+    try {
+      await fallbackBtn.waitFor({ state: "visible", timeout: 3_000 });
+      if (!(await fallbackBtn.isDisabled())) {
+        await fallbackBtn.click();
+        clickedBtn = true;
+      }
+    } catch {
       logLine("WARN", "  Purchase button not visible");
       return false;
     }
-    if (await fallbackBtn.isDisabled()) {
-      logLine("WARN", "  Purchase button disabled");
-      return false;
-    }
-    await fallbackBtn.click();
-  } else {
-    if (await purchaseBtn.isDisabled()) {
-      logLine("WARN", "  Purchase button disabled");
-      return false;
-    }
-    await purchaseBtn.click();
+  }
+  if (!clickedBtn) {
+    logLine("WARN", "  Could not click purchase button");
+    return false;
   }
 
   logLine("INFO", "  Purchase clicked, waiting for result (up to 180s)...");
@@ -890,7 +919,9 @@ async function purchaseFirstAvailableSignal(
 
   // Verify we're actually on a purchasable signal page
   const notionalCheck = page.locator("#notional");
-  if (!(await notionalCheck.isVisible({ timeout: 3_000 }).catch(() => false))) {
+  try {
+    await notionalCheck.waitFor({ state: "visible", timeout: 5_000 });
+  } catch {
     logLine("WARN", "  No purchasable signal found after retries");
     return false;
   }
@@ -976,24 +1007,33 @@ async function purchaseFirstAvailableSignal(
 
   // Click "Purchase Signal" button
   const purchaseBtn = page.getByRole("button", { name: /purchase signal/i });
-  if (!(await purchaseBtn.isVisible({ timeout: 5_000 }).catch(() => false))) {
-    // Fallback to any purchase/buy button
-    const fallbackBtn = page.getByRole("button", { name: /purchase|buy/i }).first();
-    if (!(await fallbackBtn.isVisible({ timeout: 3_000 }).catch(() => false))) {
-      logLine("WARN", "  Purchase button not visible");
-      return false;
-    }
-    if (await fallbackBtn.isDisabled()) {
-      logLine("WARN", "  Purchase button disabled (signal may be unavailable)");
-      return false;
-    }
-    await fallbackBtn.click();
-  } else {
-    if (await purchaseBtn.isDisabled()) {
+  let clickedBtn = false;
+  try {
+    await purchaseBtn.waitFor({ state: "visible", timeout: 8_000 });
+    if (!(await purchaseBtn.isDisabled())) {
+      await purchaseBtn.click();
+      clickedBtn = true;
+    } else {
       logLine("WARN", "  Purchase button disabled");
       return false;
     }
-    await purchaseBtn.click();
+  } catch {
+    // Fallback: try any purchase/buy button
+    const fallbackBtn = page.getByRole("button", { name: /purchase|buy/i }).first();
+    try {
+      await fallbackBtn.waitFor({ state: "visible", timeout: 3_000 });
+      if (!(await fallbackBtn.isDisabled())) {
+        await fallbackBtn.click();
+        clickedBtn = true;
+      }
+    } catch {
+      logLine("WARN", "  Purchase button not visible");
+      return false;
+    }
+  }
+  if (!clickedBtn) {
+    logLine("WARN", "  Could not click purchase button");
+    return false;
   }
 
   logLine("INFO", "  Purchase clicked, waiting for result (up to 180s)...");
@@ -1059,31 +1099,138 @@ async function ensureGeniusCollateral(
   page: Page,
   account: ReturnType<typeof privateKeyToAccount>,
 ) {
+  const MIN_COLLATERAL = parseUnits("500", 6); // $500 minimum
+
+  // First check on-chain if genius already has sufficient collateral
+  try {
+    const available = await publicClient.readContract({
+      address: COLLATERAL_ADDRESS,
+      abi: [{ name: "getAvailable", type: "function", inputs: [{ name: "", type: "address" }], outputs: [{ name: "", type: "uint256" }], stateMutability: "view" }],
+      functionName: "getAvailable",
+      args: [account.address],
+    });
+    if (available >= MIN_COLLATERAL) {
+      logLine("INFO", `  Genius ${account.address.slice(0, 8)} already has $${formatUnits(available, 6)} collateral, skipping`);
+      return;
+    }
+    logLine("INFO", `  Genius ${account.address.slice(0, 8)} has $${formatUnits(available, 6)} available collateral, depositing more...`);
+  } catch (err) {
+    logLine("WARN", `  Could not check on-chain collateral: ${err}`);
+  }
+
+  // Try UI deposit first
   await page.goto(`${BASE_URL}/genius`);
   await bypassBetaGate(page);
   await page.reload();
   await page.waitForLoadState("domcontentloaded");
   await connectWallet(page);
 
+  // Wait for genius dashboard to load
   const dashHeading = page.getByRole("heading", { name: /genius dashboard/i });
-  if (!(await dashHeading.isVisible({ timeout: 15_000 }).catch(() => false))) {
+  try {
+    await dashHeading.waitFor({ state: "visible", timeout: 15_000 });
+  } catch {
+    logLine("WARN", "  Genius dashboard heading not visible, trying direct deposit");
+    await depositCollateralDirect(account, "1000");
     return;
   }
 
-  // Try to deposit collateral
+  // Check if genius already has collateral by looking for the deposit form
   const depositInput = page.locator("#depositCollateral");
-  if (await depositInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await depositInput.fill("1000");
-    const depositBtn = page.getByRole("button", { name: /^deposit$/i });
-    if (await depositBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await depositBtn.click();
-      // Wait for completion
-      const success = page
-        .getByText(/deposited.*usdc/i)
-        .or(page.getByRole("button", { name: /^deposit$/i }));
-      await expect(success.first()).toBeVisible({ timeout: 60_000 }).catch(() => {});
-      logLine("OK", "  Genius collateral deposited");
+  try {
+    await depositInput.waitFor({ state: "visible", timeout: 8_000 });
+  } catch {
+    logLine("INFO", "  Collateral deposit input not found (may already have collateral)");
+    return;
+  }
+
+  await depositInput.fill("1000");
+  const depositBtn = page.getByRole("button", { name: /^deposit$/i });
+  try {
+    await depositBtn.waitFor({ state: "visible", timeout: 3_000 });
+  } catch {
+    logLine("WARN", "  Deposit button not found, trying direct deposit");
+    await depositCollateralDirect(account, "1000");
+    return;
+  }
+
+  // Step 1: click deposit (may trigger USDC approval first)
+  await depositBtn.click();
+  logLine("INFO", "  Clicked collateral deposit (step 1: approve)");
+
+  // Check for USDC approval prompt, then click deposit again
+  const approvalMsg = page.getByText(/approved.*click deposit again/i);
+  try {
+    await approvalMsg.waitFor({ state: "visible", timeout: 30_000 });
+    logLine("INFO", "  USDC approved for collateral, clicking deposit again...");
+    await depositBtn.click();
+  } catch {
+    logLine("INFO", "  No approval prompt (allowance may already exist)");
+  }
+
+  // Wait for actual deposit confirmation
+  const deposited = page.getByText(/deposited.*usdc.*collateral/i);
+  try {
+    await deposited.waitFor({ state: "visible", timeout: 60_000 });
+    logLine("OK", "  Genius collateral deposited via UI");
+  } catch {
+    logLine("WARN", "  UI deposit timed out, trying direct deposit as fallback");
+    await depositCollateralDirect(account, "1000");
+  }
+
+  // Verify on-chain
+  try {
+    const available = await publicClient.readContract({
+      address: COLLATERAL_ADDRESS,
+      abi: [{ name: "getAvailable", type: "function", inputs: [{ name: "", type: "address" }], outputs: [{ name: "", type: "uint256" }], stateMutability: "view" }],
+      functionName: "getAvailable",
+      args: [account.address],
+    });
+    logLine("INFO", `  On-chain collateral: $${formatUnits(available, 6)} available`);
+    if (available < MIN_COLLATERAL) {
+      logLine("WARN", `  Collateral still below minimum ($${formatUnits(MIN_COLLATERAL, 6)}), trying direct deposit`);
+      await depositCollateralDirect(account, "1000");
     }
+  } catch {
+    logLine("WARN", "  Could not verify on-chain collateral");
+  }
+  await page.waitForTimeout(2_000);
+}
+
+/** Direct on-chain collateral deposit as fallback when UI fails */
+async function depositCollateralDirect(
+  account: ReturnType<typeof privateKeyToAccount>,
+  amountUsdc: string,
+) {
+  const walletCl = createWalletClient({
+    account,
+    chain: baseSepolia,
+    transport: http(RPC_URL),
+  });
+  const amount = parseUnits(amountUsdc, 6);
+
+  try {
+    // Approve USDC for Collateral contract
+    const approveTx = await walletCl.writeContract({
+      address: USDC_ADDRESS,
+      abi: [{ name: "approve", type: "function", inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ name: "", type: "bool" }], stateMutability: "nonpayable" }],
+      functionName: "approve",
+      args: [COLLATERAL_ADDRESS, maxUint256],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: approveTx });
+    logLine("INFO", `  Direct USDC approval tx: ${approveTx}`);
+
+    // Deposit into Collateral
+    const depositTx = await walletCl.writeContract({
+      address: COLLATERAL_ADDRESS,
+      abi: [{ name: "deposit", type: "function", inputs: [{ name: "amount", type: "uint256" }], outputs: [], stateMutability: "nonpayable" }],
+      functionName: "deposit",
+      args: [amount],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: depositTx });
+    logLine("OK", `  Direct collateral deposit tx: ${depositTx} ($${amountUsdc})`);
+  } catch (err) {
+    logLine("ERR", `  Direct collateral deposit failed: ${err}`);
   }
 }
 
@@ -1093,6 +1240,26 @@ async function ensureIdiotEscrow(
   page: Page,
   idiotAcc: ReturnType<typeof privateKeyToAccount>,
 ) {
+  const MIN_ESCROW = parseUnits("100", 6); // $100 minimum
+
+  // Check on-chain first
+  try {
+    const bal = await publicClient.readContract({
+      address: ESCROW_ADDRESS,
+      abi: [{ name: "getBalance", type: "function", inputs: [{ name: "", type: "address" }], outputs: [{ name: "", type: "uint256" }], stateMutability: "view" }],
+      functionName: "getBalance",
+      args: [idiotAcc.address],
+    });
+    if (bal >= MIN_ESCROW) {
+      logLine("INFO", `  Idiot ${idiotAcc.address.slice(0, 8)} already has $${formatUnits(bal, 6)} in escrow, skipping`);
+      return;
+    }
+    logLine("INFO", `  Idiot ${idiotAcc.address.slice(0, 8)} has $${formatUnits(bal, 6)} in escrow, depositing more...`);
+  } catch (err) {
+    logLine("WARN", `  Could not check on-chain escrow: ${err}`);
+  }
+
+  // Try UI deposit
   await page.goto(`${BASE_URL}/idiot`);
   await bypassBetaGate(page);
   await page.reload();
@@ -1102,33 +1269,100 @@ async function ensureIdiotEscrow(
   await page.waitForTimeout(3_000);
 
   const depositInput = page.locator("#depositEscrow, input[placeholder='Amount']").first();
-  if (await depositInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await depositInput.fill("500");
-    const depositBtn = page.getByRole("button", { name: /^deposit$/i });
-    if (await depositBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await depositBtn.click();
-      logLine("INFO", "  Clicked deposit for idiot escrow (step 1: approve)");
+  try {
+    await depositInput.waitFor({ state: "visible", timeout: 8_000 });
+  } catch {
+    logLine("WARN", "  Deposit input not visible, trying direct deposit");
+    await depositEscrowDirect(idiotAcc, "500");
+    return;
+  }
 
-      // Wait for USDC approval then click deposit again
-      const approvalMsg = page.getByText(/approved.*click deposit again/i);
-      try {
-        await approvalMsg.waitFor({ state: "visible", timeout: 30_000 });
-        logLine("INFO", "  USDC approved, clicking deposit again...");
-        await depositBtn.click();
-      } catch {
-        logLine("INFO", "  No approval prompt (allowance may already exist)");
-      }
+  await depositInput.fill("500");
+  const depositBtn = page.getByRole("button", { name: /^deposit$/i });
+  try {
+    await depositBtn.waitFor({ state: "visible", timeout: 3_000 });
+  } catch {
+    logLine("WARN", "  Deposit button not found, trying direct deposit");
+    await depositEscrowDirect(idiotAcc, "500");
+    return;
+  }
 
-      // Wait for actual deposit confirmation
-      const deposited = page.getByText(/^deposited \$/i);
-      try {
-        await deposited.waitFor({ state: "visible", timeout: 60_000 });
-        logLine("OK", "  Idiot escrow deposited");
-      } catch {
-        logLine("WARN", "  Idiot escrow deposit may not have completed");
-      }
-      await page.waitForTimeout(3_000);
+  await depositBtn.click();
+  logLine("INFO", "  Clicked deposit for idiot escrow (step 1: approve)");
+
+  // Wait for USDC approval then click deposit again
+  const approvalMsg = page.getByText(/approved.*click deposit again/i);
+  try {
+    await approvalMsg.waitFor({ state: "visible", timeout: 30_000 });
+    logLine("INFO", "  USDC approved, clicking deposit again...");
+    await depositBtn.click();
+  } catch {
+    logLine("INFO", "  No approval prompt (allowance may already exist)");
+  }
+
+  // Wait for actual deposit confirmation
+  const deposited = page.getByText(/^deposited \$/i);
+  try {
+    await deposited.waitFor({ state: "visible", timeout: 60_000 });
+    logLine("OK", "  Idiot escrow deposited via UI");
+  } catch {
+    logLine("WARN", "  UI escrow deposit timed out, trying direct deposit");
+    await depositEscrowDirect(idiotAcc, "500");
+  }
+
+  // Verify on-chain
+  try {
+    const bal = await publicClient.readContract({
+      address: ESCROW_ADDRESS,
+      abi: [{ name: "getBalance", type: "function", inputs: [{ name: "", type: "address" }], outputs: [{ name: "", type: "uint256" }], stateMutability: "view" }],
+      functionName: "getBalance",
+      args: [idiotAcc.address],
+    });
+    logLine("INFO", `  On-chain escrow balance: $${formatUnits(bal, 6)}`);
+    if (bal < MIN_ESCROW) {
+      logLine("WARN", `  Escrow still below minimum, trying direct deposit`);
+      await depositEscrowDirect(idiotAcc, "500");
     }
+  } catch {
+    logLine("WARN", "  Could not verify on-chain escrow");
+  }
+  await page.waitForTimeout(2_000);
+}
+
+/** Direct on-chain escrow deposit as fallback when UI fails */
+async function depositEscrowDirect(
+  account: ReturnType<typeof privateKeyToAccount>,
+  amountUsdc: string,
+) {
+  const walletCl = createWalletClient({
+    account,
+    chain: baseSepolia,
+    transport: http(RPC_URL),
+  });
+  const amount = parseUnits(amountUsdc, 6);
+
+  try {
+    // Approve USDC for Escrow contract
+    const approveTx = await walletCl.writeContract({
+      address: USDC_ADDRESS,
+      abi: [{ name: "approve", type: "function", inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ name: "", type: "bool" }], stateMutability: "nonpayable" }],
+      functionName: "approve",
+      args: [ESCROW_ADDRESS, maxUint256],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: approveTx });
+    logLine("INFO", `  Direct USDC approval for escrow tx: ${approveTx}`);
+
+    // Deposit into Escrow
+    const depositTx = await walletCl.writeContract({
+      address: ESCROW_ADDRESS,
+      abi: [{ name: "deposit", type: "function", inputs: [{ name: "amount", type: "uint256" }], outputs: [], stateMutability: "nonpayable" }],
+      functionName: "deposit",
+      args: [amount],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: depositTx });
+    logLine("OK", `  Direct escrow deposit tx: ${depositTx} ($${amountUsdc})`);
+  } catch (err) {
+    logLine("ERR", `  Direct escrow deposit failed: ${err}`);
   }
 }
 

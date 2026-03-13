@@ -73,6 +73,17 @@ export const ESCROW_ABI = [
   "event Withdrawn(address indexed user, uint256 amount)",
   "event SignalPurchased(uint256 indexed signalId, address indexed buyer, uint256 purchaseId, uint256 notional, uint256 feePaid, uint256 creditUsed, uint256 usdcPaid)",
   "event OutcomeUpdated(uint256 indexed purchaseId, uint8 outcome)",
+  "error ZeroAmount()",
+  "error InsufficientBalance(uint256 available, uint256 required)",
+  "error SignalNotActive(uint256 signalId)",
+  "error SignalExpired(uint256 signalId)",
+  "error AlreadyPurchased(uint256 signalId, address buyer)",
+  "error OddsOutOfRange(uint256 odds)",
+  "error NotionalTooSmall(uint256 notional, uint256 minimum)",
+  "error NotionalTooLarge(uint256 notional, uint256 maximum)",
+  "error NotionalExceedsSignalMax(uint256 notional, uint256 remaining)",
+  "error ContractNotSet(string name)",
+  "error InsufficientFreeCollateral(uint256 available, uint256 required)",
 ] as const;
 
 export const COLLATERAL_ABI = [
