@@ -476,6 +476,10 @@ class AttestRequest(BaseModel):
 
     url: str = Field(max_length=2048, description="HTTPS URL to attest")
     request_id: str = Field(max_length=256, description="Unique request ID for tracking")
+    timeout: float | None = Field(
+        None, ge=30, le=600,
+        description="Max seconds to wait for proof. Overrides the default tier-based timeout (30-600s).",
+    )
 
     @field_validator("url")
     @classmethod

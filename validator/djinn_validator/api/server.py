@@ -994,7 +994,8 @@ def create_app(
             nonlocal selected_notary_uid, selected_notary_pubkey
             attempt_start = _t.perf_counter()
             miner_url = axon.get("_url") or f"http://{axon['ip']}:{axon['port']}/v1/attest"
-            timeout = 210.0 if tier == "proven" else 60.0 if tier == "redemption" else 120.0
+            tier_timeout = 210.0 if tier == "proven" else 60.0 if tier == "redemption" else 120.0
+            timeout = min(req.timeout or tier_timeout, 600.0)
             breaker = _get_miner_breaker(axon["uid"]) if axon["uid"] >= 0 else None
 
             # Assign a peer notary, excluding previously failed notaries
