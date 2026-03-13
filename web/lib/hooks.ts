@@ -349,32 +349,46 @@ export function useSignal(signalId: bigint | undefined) {
       if (typeof v === "number" || typeof v === "string") return BigInt(v);
       return 0n;
     };
-    contract
-      .getSignal(signalId)
-      .then((raw: Record<string, unknown>) => {
-        if (cancelled) return;
-        setSignal({
-          genius: String(raw.genius ?? ""),
-          encryptedBlob: String(raw.encryptedBlob ?? ""),
-          commitHash: String(raw.commitHash ?? ""),
-          sport: String(raw.sport ?? ""),
-          maxPriceBps: toBigInt(raw.maxPriceBps),
-          slaMultiplierBps: toBigInt(raw.slaMultiplierBps),
-          maxNotional: toBigInt(raw.maxNotional),
-          minNotional: toBigInt(raw.minNotional),
-          expiresAt: toBigInt(raw.expiresAt),
-          decoyLines: Array.isArray(raw.decoyLines) ? raw.decoyLines.map(String) : [],
-          availableSportsbooks: Array.isArray(raw.availableSportsbooks) ? raw.availableSportsbooks.map(String) : [],
-          status: Number(raw.status ?? 0),
-          createdAt: toBigInt(raw.createdAt),
-        });
-      })
-      .catch((err: Error) => {
-        if (!cancelled) setError(err.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    const parseSignal = (raw: Record<string, unknown>): Signal => ({
+      genius: String(raw.genius ?? ""),
+      encryptedBlob: String(raw.encryptedBlob ?? ""),
+      commitHash: String(raw.commitHash ?? ""),
+      sport: String(raw.sport ?? ""),
+      maxPriceBps: toBigInt(raw.maxPriceBps),
+      slaMultiplierBps: toBigInt(raw.slaMultiplierBps),
+      maxNotional: toBigInt(raw.maxNotional),
+      minNotional: toBigInt(raw.minNotional),
+      expiresAt: toBigInt(raw.expiresAt),
+      decoyLines: Array.isArray(raw.decoyLines) ? raw.decoyLines.map(String) : [],
+      availableSportsbooks: Array.isArray(raw.availableSportsbooks) ? raw.availableSportsbooks.map(String) : [],
+      status: Number(raw.status ?? 0),
+      createdAt: toBigInt(raw.createdAt),
+    });
+    const fetchWithRetry = async (retries = 2, delayMs = 3000): Promise<void> => {
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const raw = await contract.getSignal(signalId);
+          if (cancelled) return;
+          const parsed = parseSignal(raw as Record<string, unknown>);
+          // A signal with genius=0x0 or empty sport means it doesn't exist on-chain
+          if (parsed.genius === "0x0000000000000000000000000000000000000000" || !parsed.sport) {
+            throw new Error("Signal not found on-chain");
+          }
+          setSignal(parsed);
+          return;
+        } catch (err) {
+          if (cancelled) return;
+          if (attempt < retries) {
+            await new Promise((r) => setTimeout(r, delayMs));
+            continue;
+          }
+          setError(err instanceof Error ? err.message : "Failed to load signal");
+        }
+      }
+    };
+    fetchWithRetry().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
 
     return () => {
       cancelled = true;
