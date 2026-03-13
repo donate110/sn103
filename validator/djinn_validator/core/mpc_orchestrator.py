@@ -438,13 +438,13 @@ class MPCOrchestrator:
         tasks = [asyncio.create_task(_lookup_share_x(p)) for p in peers]
         if tasks:
             done, pending = await asyncio.wait(tasks, timeout=GATHER_TIMEOUT)
-            for t in pending:
-                t.cancel()
+            for ptask in pending:
+                ptask.cancel()
             if pending:
                 log.warning("peer_share_x_lookup_timeout", n_timed_out=len(pending), n_completed=len(done))
-            for t in done:
+            for dtask in done:
                 try:
-                    res = t.result()
+                    res = dtask.result()
                     if isinstance(res, tuple) and res is not None:
                         peer_x_map[res[0]] = res[1]
                 except Exception:
