@@ -715,27 +715,42 @@ async function purchaseFirstAvailableSignal(
     }
   }
 
-  // Wait for signal cards to actually load (async blockchain query).
-  // The heading renders before data loads, so we need to wait for cards.
+  // Wait for signal cards to load (async blockchain query).
+  // Race: either cards appear or "No signals found" text appears (query finished but empty).
+  // The RPC scan + isActive() checks can take 20-40s on Base Sepolia.
   const signalCards = page.locator("a[href*='/idiot/signal/']");
-  try {
-    await signalCards.first().waitFor({ state: "visible", timeout: 15_000 });
-  } catch {
-    // Cards may genuinely be empty, or still loading. Try one reload.
+  const noSignalsText = page.getByText(/no signals found/i);
+
+  const waitForBrowseResult = async (timeoutMs: number): Promise<"cards" | "empty" | "loading"> => {
+    try {
+      const result = await Promise.race([
+        signalCards.first().waitFor({ state: "visible", timeout: timeoutMs }).then(() => "cards" as const),
+        noSignalsText.waitFor({ state: "visible", timeout: timeoutMs }).then(() => "empty" as const),
+        new Promise<"loading">((r) => setTimeout(() => r("loading"), timeoutMs)),
+      ]);
+      return result;
+    } catch {
+      return "loading";
+    }
+  };
+
+  let browseResult = await waitForBrowseResult(30_000);
+  if (browseResult === "loading") {
+    // Still loading after 30s; reload to retry (cache clears on page change)
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
-    try {
-      await signalCards.first().waitFor({ state: "visible", timeout: 15_000 });
-    } catch {
-      logLine("INFO", "  No signals available to purchase (waited 30s)");
-      return false;
-    }
+    browseResult = await waitForBrowseResult(30_000);
+  }
+
+  if (browseResult !== "cards") {
+    logLine("INFO", `  No signals available to purchase (browse=${browseResult})`);
+    return false;
   }
 
   let cardCount = await signalCards.count();
   if (cardCount === 0) {
-    logLine("INFO", "  No signals available to purchase");
+    logLine("INFO", "  No signals available to purchase (count=0 after visible)");
     return false;
   }
 
