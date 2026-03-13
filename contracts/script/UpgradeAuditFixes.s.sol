@@ -18,23 +18,45 @@ import {TrackRecord} from "../src/TrackRecord.sol";
 ///         Step 1 (this script): Deploy impls + schedule batch. Takes effect after 72h.
 ///         Step 2 (ExecuteUpgrade.s.sol): Execute the batch after the delay.
 ///
-///         The batch atomically: pause Collateral/Escrow, upgrade all 5 proxies, unpause.
+///         The batch atomically: pause Collateral/Escrow/Audit, upgrade all 5 proxies, unpause.
 ///         Also deploys a fresh TrackRecord proxy (not previously deployed).
 contract UpgradeAuditFixes is Script {
-    // ---- Real UUPS proxy addresses (Base Sepolia, deployed 2026-03-02) ----
-    address constant ACCOUNT_PROXY = 0x5DDa635bbfC9c0c108457873006Dfcecd94f39ec;
-    address constant ESCROW_PROXY = 0x50A1Bf4eacED9b9da4B1A5BA3001aA0979E91A21;
-    address constant COLLATERAL_PROXY = 0x16C36aCe7aB4525Ed1D0F12a8E6c38f5be29cb16;
-    address constant AUDIT_PROXY = 0x46F6DE92b4C37876435c5564E675B0DB885F1155;
-    address constant OUTCOME_VOTING_PROXY = 0x28b5738ff35E207E90b2974cbfae2BdC556acAf6;
-
-    // ---- TimelockController ----
-    TimelockController constant TIMELOCK = TimelockController(payable(0x391a42fF273c1023095b30244c6F928898E06230));
-
     // ---- Salt for this upgrade batch (prevents collisions with other scheduled ops) ----
     bytes32 constant UPGRADE_SALT = keccak256("audit-fixes-2026-03-13");
 
+    // CF-16: Proxy/timelock addresses are packed into a struct to avoid stack-too-deep
+    struct Proxies {
+        address account;
+        address escrow;
+        address collateral;
+        address audit;
+        address outcomeVoting;
+        TimelockController timelock;
+    }
+
+    function _loadProxies() internal view returns (Proxies memory p) {
+        p.account = vm.envAddress("ACCOUNT_PROXY");
+        p.escrow = vm.envAddress("ESCROW_PROXY");
+        p.collateral = vm.envAddress("COLLATERAL_PROXY");
+        p.audit = vm.envAddress("AUDIT_PROXY");
+        p.outcomeVoting = vm.envAddress("OUTCOME_VOTING_PROXY");
+        p.timelock = TimelockController(payable(vm.envAddress("TIMELOCK_ADDRESS")));
+    }
+
+    struct Impls {
+        address account;
+        address audit;
+        address collateral;
+        address escrow;
+        address voting;
+        address trackRecord;
+        address trackRecordProxy;
+    }
+
     function run() external {
+        // CF-16: Read proxy addresses from environment for reusability across chains
+        Proxies memory px = _loadProxies();
+
         uint256 deployerKey = vm.envUint("DEPLOYER_KEY");
         address deployer = vm.addr(deployerKey);
 
@@ -44,128 +66,112 @@ contract UpgradeAuditFixes is Script {
 
         vm.startBroadcast(deployerKey);
 
-        // ================================================================
-        // 1. Deploy new implementation contracts
-        // ================================================================
+        Impls memory im;
+        im.account = address(new DjinnAccount());
+        console.log("Account impl:", im.account);
 
-        DjinnAccount accountImpl = new DjinnAccount();
-        console.log("Account impl:", address(accountImpl));
+        im.audit = address(new Audit());
+        console.log("Audit impl:", im.audit);
 
-        Audit auditImpl = new Audit();
-        console.log("Audit impl:", address(auditImpl));
+        im.collateral = address(new Collateral());
+        console.log("Collateral impl:", im.collateral);
 
-        Collateral collateralImpl = new Collateral();
-        console.log("Collateral impl:", address(collateralImpl));
+        im.escrow = address(new Escrow());
+        console.log("Escrow impl:", im.escrow);
 
-        Escrow escrowImpl = new Escrow();
-        console.log("Escrow impl:", address(escrowImpl));
+        im.voting = address(new OutcomeVoting());
+        console.log("OutcomeVoting impl:", im.voting);
 
-        OutcomeVoting votingImpl = new OutcomeVoting();
-        console.log("OutcomeVoting impl:", address(votingImpl));
+        _scheduleBatch(px, im);
 
-        // ================================================================
-        // 2. Build the batch: pause, upgrade x5, unpause (9 operations)
-        // ================================================================
+        im.trackRecord = address(new TrackRecord());
+        im.trackRecordProxy = address(
+            new ERC1967Proxy(
+                im.trackRecord,
+                abi.encodeCall(TrackRecord.initialize, (deployer))
+            )
+        );
+        console.log("TrackRecord proxy (NEW):", im.trackRecordProxy);
 
-        uint256 opCount = 9;
+        vm.stopBroadcast();
+
+        _logSummary(px, px.timelock.getMinDelay(), im);
+    }
+
+    function _scheduleBatch(Proxies memory px, Impls memory im) internal {
+        uint256 opCount = 11;
         address[] memory targets = new address[](opCount);
         uint256[] memory values = new uint256[](opCount);
         bytes[] memory payloads = new bytes[](opCount);
 
         // Op 0: Collateral.pause()
-        targets[0] = COLLATERAL_PROXY;
+        targets[0] = px.collateral;
         payloads[0] = abi.encodeCall(Collateral.pause, ());
 
         // Op 1: Escrow.pause()
-        targets[1] = ESCROW_PROXY;
+        targets[1] = px.escrow;
         payloads[1] = abi.encodeCall(Escrow.pause, ());
 
-        // Op 2: Account.upgradeToAndCall(newImpl, "")
-        targets[2] = ACCOUNT_PROXY;
-        payloads[2] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (address(accountImpl), ""));
+        // Op 2: Audit.pause() (CF-01: required before upgrade, _authorizeUpgrade is whenPaused)
+        targets[2] = px.audit;
+        payloads[2] = abi.encodeCall(Audit.pause, ());
 
-        // Op 3: Audit.upgradeToAndCall(newImpl, "")
-        targets[3] = AUDIT_PROXY;
-        payloads[3] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (address(auditImpl), ""));
+        // Op 3-7: Upgrade all 5 proxies
+        targets[3] = px.account;
+        payloads[3] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.account, ""));
 
-        // Op 4: Collateral.upgradeToAndCall(newImpl, "")
-        targets[4] = COLLATERAL_PROXY;
-        payloads[4] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (address(collateralImpl), ""));
+        targets[4] = px.audit;
+        payloads[4] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.audit, ""));
 
-        // Op 5: Escrow.upgradeToAndCall(newImpl, "")
-        targets[5] = ESCROW_PROXY;
-        payloads[5] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (address(escrowImpl), ""));
+        targets[5] = px.collateral;
+        payloads[5] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.collateral, ""));
 
-        // Op 6: OutcomeVoting.upgradeToAndCall(newImpl, "")
-        targets[6] = OUTCOME_VOTING_PROXY;
-        payloads[6] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (address(votingImpl), ""));
+        targets[6] = px.escrow;
+        payloads[6] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.escrow, ""));
 
-        // Op 7: Collateral.unpause()
-        targets[7] = COLLATERAL_PROXY;
-        payloads[7] = abi.encodeCall(Collateral.unpause, ());
+        targets[7] = px.outcomeVoting;
+        payloads[7] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.voting, ""));
 
-        // Op 8: Escrow.unpause()
-        targets[8] = ESCROW_PROXY;
-        payloads[8] = abi.encodeCall(Escrow.unpause, ());
+        // Op 8-10: Unpause
+        targets[8] = px.collateral;
+        payloads[8] = abi.encodeCall(Collateral.unpause, ());
 
-        // ================================================================
-        // 3. Schedule the batch through the TimelockController
-        // ================================================================
+        targets[9] = px.escrow;
+        payloads[9] = abi.encodeCall(Escrow.unpause, ());
 
-        uint256 delay = TIMELOCK.getMinDelay();
+        targets[10] = px.audit;
+        payloads[10] = abi.encodeCall(Audit.unpause, ());
+
+        uint256 delay = px.timelock.getMinDelay();
         console.log("Timelock delay (seconds):", delay);
 
-        TIMELOCK.scheduleBatch(
-            targets,
-            values,
-            payloads,
-            bytes32(0), // no predecessor
-            UPGRADE_SALT,
-            delay
-        );
+        px.timelock.scheduleBatch(targets, values, payloads, bytes32(0), UPGRADE_SALT, delay);
         console.log("Batch scheduled. Executable after delay.");
 
-        // Compute and log the batch operation ID for the execute script
-        bytes32 batchId = TIMELOCK.hashOperationBatch(targets, values, payloads, bytes32(0), UPGRADE_SALT);
+        bytes32 batchId = px.timelock.hashOperationBatch(targets, values, payloads, bytes32(0), UPGRADE_SALT);
         console.log("Batch operation ID:");
         console.logBytes32(batchId);
+    }
 
-        // ================================================================
-        // 4. Deploy fresh TrackRecord proxy (no existing proxy)
-        // ================================================================
-
-        TrackRecord trImpl = new TrackRecord();
-        address trProxy = address(
-            new ERC1967Proxy(
-                address(trImpl),
-                abi.encodeCall(TrackRecord.initialize, (deployer))
-            )
-        );
-        console.log("TrackRecord proxy (NEW):", trProxy);
-
-        vm.stopBroadcast();
-
-        // ================================================================
-        // Summary
-        // ================================================================
+    function _logSummary(Proxies memory px, uint256 delay, Impls memory im) internal pure {
         console.log("");
         console.log("=== SCHEDULE COMPLETE ===");
         console.log("Upgrades will be executable after", delay, "seconds");
         console.log("");
         console.log("Proxy addresses (UNCHANGED after upgrade):");
-        console.log("  Account:", ACCOUNT_PROXY);
-        console.log("  Audit:", AUDIT_PROXY);
-        console.log("  Collateral:", COLLATERAL_PROXY);
-        console.log("  Escrow:", ESCROW_PROXY);
-        console.log("  OutcomeVoting:", OUTCOME_VOTING_PROXY);
-        console.log("  TrackRecord (NEW):", trProxy);
+        console.log("  Account:", px.account);
+        console.log("  Audit:", px.audit);
+        console.log("  Collateral:", px.collateral);
+        console.log("  Escrow:", px.escrow);
+        console.log("  OutcomeVoting:", px.outcomeVoting);
+        console.log("  TrackRecord (NEW):", im.trackRecordProxy);
         console.log("");
         console.log("New implementations:");
-        console.log("  Account:", address(accountImpl));
-        console.log("  Audit:", address(auditImpl));
-        console.log("  Collateral:", address(collateralImpl));
-        console.log("  Escrow:", address(escrowImpl));
-        console.log("  OutcomeVoting:", address(votingImpl));
-        console.log("  TrackRecord:", address(trImpl));
+        console.log("  Account:", im.account);
+        console.log("  Audit:", im.audit);
+        console.log("  Collateral:", im.collateral);
+        console.log("  Escrow:", im.escrow);
+        console.log("  OutcomeVoting:", im.voting);
+        console.log("  TrackRecord:", im.trackRecord);
     }
 }

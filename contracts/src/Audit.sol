@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {Purchase, Outcome, Signal, AccountState} from "./interfaces/IDjinn.sol";
@@ -23,7 +23,7 @@ struct AuditResult {
 ///         Computes the Quality Score per the whitepaper formula, distributes damages
 ///         across Tranche A (USDC refund) and Tranche B (Credits), collects a 0.5%
 ///         protocol fee on total notional, and releases remaining collateral locks.
-contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardTransient, UUPSUpgradeable {
+contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
     // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------
@@ -99,6 +99,9 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
 
     /// @notice Emitted when protocol fee slash returns less than intended
     event ProtocolFeeShortfall(address indexed genius, uint256 intended, uint256 actual);
+
+    /// @notice Emitted during forceSettle for off-chain monitoring
+    event ForceSettlement(address indexed genius, address indexed idiot, uint256 cycle, int256 qualityScore);
 
     // -------------------------------------------------------------------------
     // Errors
@@ -228,6 +231,14 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
             revert NoPurchasesInCycle(genius, idiot, state.currentCycle);
         }
 
+        // Verify all outcomes are finalized before computing score
+        for (uint256 i; i < purchaseIds.length; ++i) {
+            Outcome outcome = account.getOutcome(genius, idiot, purchaseIds[i]);
+            if (outcome == Outcome.Pending) {
+                revert OutcomesNotFinalized(genius, idiot);
+            }
+        }
+
         score = 0;
 
         for (uint256 i; i < purchaseIds.length; ++i) {
@@ -341,7 +352,7 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     /// @param genius The Genius address
     /// @param idiot The Idiot address
     /// @param qualityScore The voted aggregate quality score (USDC, 6 decimals, can be negative)
-    function settleByVote(address genius, address idiot, int256 qualityScore)
+    function settleByVote(address genius, address idiot, int256 qualityScore, uint256 totalNotional)
         external
         whenNotPaused
         nonReentrant
@@ -363,7 +374,7 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
             revert AlreadySettled(genius, idiot, cycle);
         }
 
-        _settleVoted(genius, idiot, cycle, qualityScore, false);
+        _settleVoted(genius, idiot, cycle, qualityScore, false, totalNotional);
     }
 
     /// @notice Settle an early exit using a validator-voted quality score.
@@ -372,7 +383,7 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     /// @param genius The Genius address
     /// @param idiot The Idiot address
     /// @param qualityScore The voted aggregate quality score (USDC, 6 decimals, can be negative)
-    function earlyExitByVote(address genius, address idiot, int256 qualityScore)
+    function earlyExitByVote(address genius, address idiot, int256 qualityScore, uint256 totalNotional)
         external
         whenNotPaused
         nonReentrant
@@ -393,7 +404,7 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
             revert AlreadySettled(genius, idiot, cycle);
         }
 
-        _settleVoted(genius, idiot, cycle, qualityScore, true);
+        _settleVoted(genius, idiot, cycle, qualityScore, true, totalNotional);
     }
 
     // -------------------------------------------------------------------------
@@ -441,8 +452,17 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
             totalUsdcFeesPaid += p.usdcPaid;
         }
 
+        // CF-04: Bound quality score to actual cycle notional to prevent arbitrary values.
+        // Even via timelock, the owner cannot set damages exceeding the cycle's notional.
+        if (qualityScore > int256(totalNotional) || qualityScore < -int256(totalNotional)) {
+            revert QualityScoreOutOfBounds(qualityScore, int256(totalNotional));
+        }
+
         // Use full settlement (Tranche A USDC) when audit-ready, early exit otherwise
         bool isEarlyExit = !account.isAuditReady(genius, idiot);
+
+        emit ForceSettlement(genius, idiot, cycle, qualityScore);
+
         _settleCommon(genius, idiot, cycle, qualityScore, isEarlyExit, totalNotional, totalUsdcFeesPaid, purchaseIds);
     }
 
@@ -483,7 +503,6 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     function _distributeDamages(
         address genius,
         address idiot,
-        uint256,
         uint256 totalDamages,
         uint256 totalUsdcFeesPaid
     ) internal returns (uint256 trancheA, uint256 trancheB) {
@@ -544,22 +563,23 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
         _settleCommon(genius, idiot, cycle, score, isEarlyExit, totalNotional, totalUsdcFeesPaid, purchaseIds);
     }
 
-    /// @dev Voted settlement: aggregates all purchases without void filtering
-    ///      (individual outcomes are never written on-chain in the voted path).
-    function _settleVoted(address genius, address idiot, uint256 cycle, int256 score, bool isEarlyExit) internal {
+    /// @dev Voted settlement: uses validator-attested totalNotional (excludes void outcomes)
+    ///      instead of aggregating on-chain, since individual outcomes are never written
+    ///      on-chain in the voted path (privacy preservation).
+    function _settleVoted(address genius, address idiot, uint256 cycle, int256 score, bool isEarlyExit, uint256 votedNotional) internal {
         AccountState memory state = account.getAccountState(genius, idiot);
         uint256[] memory purchaseIds = state.purchaseIds;
         if (purchaseIds.length == 0) {
             revert NoPurchasesInCycle(genius, idiot, cycle);
         }
-        uint256 totalNotional;
+        // Use validator-attested totalNotional (excludes voids) for fee calculation.
+        // Still need totalUsdcFeesPaid from on-chain records for damage cap computation.
         uint256 totalUsdcFeesPaid;
         for (uint256 i; i < purchaseIds.length; ++i) {
             Purchase memory p = escrow.getPurchase(purchaseIds[i]);
-            totalNotional += p.notional;
             totalUsdcFeesPaid += p.usdcPaid;
         }
-        _settleCommon(genius, idiot, cycle, score, isEarlyExit, totalNotional, totalUsdcFeesPaid, purchaseIds);
+        _settleCommon(genius, idiot, cycle, score, isEarlyExit, votedNotional, totalUsdcFeesPaid, purchaseIds);
     }
 
     /// @dev Core settlement logic shared by all settlement paths.
@@ -596,7 +616,7 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
             }
         } else if (score < 0) {
             // Standard settlement with negative score
-            (trancheA, trancheB) = _distributeDamages(genius, idiot, cycle, uint256(-score), totalUsdcFeesPaid);
+            (trancheA, trancheB) = _distributeDamages(genius, idiot, uint256(-score), totalUsdcFeesPaid);
         }
         // If score >= 0 and not early exit: Genius keeps all fees, no damages
 
@@ -700,4 +720,7 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
 
     /// @dev Owner can authorize upgrades only when paused
     function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
+
+    /// @dev Reserved storage gap for future upgrades.
+    uint256[41] private __gap;
 }

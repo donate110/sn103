@@ -47,24 +47,44 @@ contract RedeployEscrow is Script {
         // Set pauser
         esc_.setPauser(pauserAddr);
 
-        // Update Audit to point to new Escrow
-        _call(aud, abi.encodeWithSignature("setEscrow(address)", ne));
+        // Update Audit to point to new Escrow (only if deployer is still owner)
+        if (_isOwner(aud, deployer)) {
+            _call(aud, abi.encodeWithSignature("setEscrow(address)", ne));
+        } else {
+            console.log("SKIP: Audit owned by timelock. Schedule setEscrow via timelock.");
+        }
 
         // Collateral: swap authorization
-        _call(coll, abi.encodeWithSignature("setAuthorized(address,bool)", oldEscrow, false));
-        _call(coll, abi.encodeWithSignature("setAuthorized(address,bool)", ne, true));
+        if (_isOwner(coll, deployer)) {
+            _call(coll, abi.encodeWithSignature("setAuthorized(address,bool)", oldEscrow, false));
+            _call(coll, abi.encodeWithSignature("setAuthorized(address,bool)", ne, true));
+        } else {
+            console.log("SKIP: Collateral owned by timelock. Schedule auth swap via timelock.");
+        }
 
         // CreditLedger: swap authorization
-        _call(cl, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", oldEscrow, false));
-        _call(cl, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", ne, true));
+        if (_isOwner(cl, deployer)) {
+            _call(cl, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", oldEscrow, false));
+            _call(cl, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", ne, true));
+        } else {
+            console.log("SKIP: CreditLedger owned by timelock. Schedule auth swap via timelock.");
+        }
 
         // Account: swap authorization
-        _call(acct, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", oldEscrow, false));
-        _call(acct, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", ne, true));
+        if (_isOwner(acct, deployer)) {
+            _call(acct, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", oldEscrow, false));
+            _call(acct, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", ne, true));
+        } else {
+            console.log("SKIP: Account owned by timelock. Schedule auth swap via timelock.");
+        }
 
         // SignalCommitment: swap authorization
-        _call(sc, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", oldEscrow, false));
-        _call(sc, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", ne, true));
+        if (_isOwner(sc, deployer)) {
+            _call(sc, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", oldEscrow, false));
+            _call(sc, abi.encodeWithSignature("setAuthorizedCaller(address,bool)", ne, true));
+        } else {
+            console.log("SKIP: SignalCommitment owned by timelock. Schedule auth swap via timelock.");
+        }
 
         // Transfer ownership to timelock (CRITICAL — do not skip)
         esc_.transferOwnership(timelock);
@@ -89,7 +109,16 @@ contract RedeployEscrow is Script {
     }
 
     function _call(address target, bytes memory data) internal {
-        (bool ok,) = target.call(data);
-        require(ok, "Call failed");
+        require(target.code.length > 0, "Target is not a contract");
+        (bool ok, bytes memory ret) = target.call(data);
+        if (!ok) {
+            assembly { revert(add(ret, 32), mload(ret)) }
+        }
+    }
+
+    function _isOwner(address target, address expectedOwner) internal view returns (bool) {
+        (bool ok, bytes memory ret) = target.staticcall(abi.encodeWithSignature("owner()"));
+        if (!ok || ret.length < 32) return false;
+        return abi.decode(ret, (address)) == expectedOwner;
     }
 }

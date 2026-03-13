@@ -140,4 +140,7 @@ contract CreditLedger is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @dev Only the owner (TimelockController) can authorize upgrades.
     ///      CreditLedger tracks virtual balances — no USDC held directly.
     function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    /// @dev Reserved storage gap for future upgrades.
+    uint256[48] private __gap;
 }

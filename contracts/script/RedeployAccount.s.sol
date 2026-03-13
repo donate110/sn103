@@ -36,13 +36,19 @@ contract RedeployAccount is Script {
         na_.setAuthorizedCaller(escrow, true);
         na_.setAuthorizedCaller(audit, true);
 
-        // Update Escrow to point to new Account (requires timelock on Escrow)
-        // NOTE: If Escrow is already owned by timelock, this call must go through
-        // the timelock. Log it for phase-2 manual execution.
-        _call(escrow, abi.encodeWithSignature("setAccount(address)", na));
+        // Update Escrow to point to new Account
+        if (_isOwner(escrow, deployer)) {
+            _call(escrow, abi.encodeWithSignature("setAccount(address)", na));
+        } else {
+            console.log("SKIP: Escrow owned by timelock. Schedule setAccount via timelock.");
+        }
 
         // Update Audit to point to new Account
-        _call(audit, abi.encodeWithSignature("setAccount(address)", na));
+        if (_isOwner(audit, deployer)) {
+            _call(audit, abi.encodeWithSignature("setAccount(address)", na));
+        } else {
+            console.log("SKIP: Audit owned by timelock. Schedule setAccount via timelock.");
+        }
 
         // Transfer ownership to timelock (CRITICAL — do not skip)
         na_.transferOwnership(timelock);
@@ -63,7 +69,16 @@ contract RedeployAccount is Script {
     }
 
     function _call(address target, bytes memory data) internal {
-        (bool ok,) = target.call(data);
-        require(ok, "Call failed");
+        require(target.code.length > 0, "Target is not a contract");
+        (bool ok, bytes memory ret) = target.call(data);
+        if (!ok) {
+            assembly { revert(add(ret, 32), mload(ret)) }
+        }
+    }
+
+    function _isOwner(address target, address expectedOwner) internal view returns (bool) {
+        (bool ok, bytes memory ret) = target.staticcall(abi.encodeWithSignature("owner()"));
+        if (!ok || ret.length < 32) return false;
+        return abi.decode(ret, (address)) == expectedOwner;
     }
 }

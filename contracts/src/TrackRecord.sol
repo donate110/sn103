@@ -185,9 +185,7 @@ contract TrackRecord is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         }
 
         // Store the record — read public signals directly to avoid stack depth
-        unchecked {
-            recordId = recordCount++;
-        }
+        recordId = recordCount++;
         VerifiedRecord storage rec = records[recordId];
         rec.genius = msg.sender;
         rec.signalCount = _pubSignals[100];
@@ -265,4 +263,7 @@ contract TrackRecord is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @dev Only the owner (TimelockController) can authorize upgrades.
     ///      TrackRecord holds no USDC — no balance guard needed.
     function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    /// @dev Reserved storage gap for future upgrades.
+    uint256[44] private __gap;
 }

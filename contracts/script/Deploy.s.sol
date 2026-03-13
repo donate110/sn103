@@ -57,6 +57,13 @@ contract Deploy is Script {
         console.log("Protocol Treasury:", treasury);
         console.log("Chain ID:", block.chainid);
 
+        // CF-15: On mainnet, require explicit configuration of privileged roles
+        if (block.chainid == 8453) {
+            require(treasury != deployer, "Deploy: PROTOCOL_TREASURY must be set for mainnet");
+            require(multisig != deployer, "Deploy: MULTISIG_ADDRESS must be set for mainnet");
+            require(pauserAddr != deployer, "Deploy: PAUSER_ADDRESS must be set for mainnet");
+        }
+
         vm.startBroadcast(deployerKey);
 
         Contracts memory c;
@@ -181,7 +188,12 @@ contract Deploy is Script {
         address[] memory proposers = new address[](1);
         proposers[0] = multisig;
         address[] memory executors = new address[](1);
-        executors[0] = address(0); // anyone can execute after delay
+        // CF-17: executor = address(0) means ANYONE can execute scheduled operations
+        // after the timelock delay. This is the standard OpenZeppelin pattern and is
+        // acceptable for the current design. If future operations involve value transfers,
+        // monitor for MEV-targeted execution. Consider restricting to the multisig if
+        // MEV becomes a concern.
+        executors[0] = address(0);
         TimelockController timelock = new TimelockController(
             259200, // 72 hours in seconds
             proposers,

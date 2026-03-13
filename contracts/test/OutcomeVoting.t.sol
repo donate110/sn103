@@ -40,6 +40,8 @@ contract OutcomeVotingTest is Test {
     uint256 constant SLA_MULTIPLIER_BPS = 15_000;
     uint256 constant NOTIONAL = 1000e6;
     uint256 constant ODDS = 1_910_000;
+    uint256 constant TOTAL_NOTIONAL_10 = 10 * NOTIONAL; // 10_000e6
+    uint256 constant TOTAL_NOTIONAL_5 = 5 * NOTIONAL;   // 5_000e6
 
     function setUp() public {
         owner = address(this);
@@ -223,10 +225,10 @@ contract OutcomeVotingTest is Test {
 
         int256 score = 5000e6;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         assertTrue(voting.hasVoted(_cycleKey(0), validator1));
-        assertEq(voting.getVoteCount(genius, idiot, 0, score), 1);
+        assertEq(voting.getVoteCount(genius, idiot, 0, score, TOTAL_NOTIONAL_10), 1);
     }
 
     function test_submitVote_nonValidatorReverts() public {
@@ -234,19 +236,19 @@ contract OutcomeVotingTest is Test {
 
         vm.expectRevert(abi.encodeWithSelector(OutcomeVoting.NotValidator.selector, address(0xDEAD)));
         vm.prank(address(0xDEAD));
-        voting.submitVote(genius, idiot, 5000e6);
+        voting.submitVote(genius, idiot, 5000e6, TOTAL_NOTIONAL_10);
     }
 
     function test_submitVote_doubleVoteReverts() public {
         _create10SignalsNoOutcomes();
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 5000e6);
+        voting.submitVote(genius, idiot, 5000e6, TOTAL_NOTIONAL_10);
 
         bytes32 cycleKey = _cycleKey(0);
         vm.expectRevert(abi.encodeWithSelector(OutcomeVoting.AlreadyVoted.selector, validator1, cycleKey));
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 5000e6);
+        voting.submitVote(genius, idiot, 5000e6, TOTAL_NOTIONAL_10);
     }
 
     // ─── Voting: Quorum Triggers Settlement ──────────────────
@@ -257,13 +259,13 @@ contract OutcomeVotingTest is Test {
         int256 score = 5000e6; // Positive → genius keeps fees
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         // Not finalized yet (1/3, need 2/3)
         assertFalse(voting.isCycleFinalized(genius, idiot, 0));
 
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         // Finalized! (2/3 quorum)
         assertTrue(voting.isCycleFinalized(genius, idiot, 0));
@@ -276,8 +278,7 @@ contract OutcomeVotingTest is Test {
         assertEq(result.trancheB, 0, "Positive score: no tranche B");
 
         // Protocol fee paid
-        uint256 totalNotional = 10 * NOTIONAL;
-        uint256 expectedFee = (totalNotional * 50) / 10_000;
+        uint256 expectedFee = (TOTAL_NOTIONAL_10 * 50) / 10_000;
         assertEq(result.protocolFee, expectedFee);
         assertEq(usdc.balanceOf(treasury), expectedFee);
 
@@ -296,10 +297,10 @@ contract OutcomeVotingTest is Test {
         uint256 idiotUsdcBefore = usdc.balanceOf(idiot);
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         assertTrue(voting.isCycleFinalized(genius, idiot, 0));
 
@@ -325,13 +326,13 @@ contract OutcomeVotingTest is Test {
 
         // All 3 vote different scores → no quorum
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 1000e6);
+        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
 
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, 2000e6);
+        voting.submitVote(genius, idiot, 2000e6, TOTAL_NOTIONAL_10);
 
         vm.prank(validator3);
-        voting.submitVote(genius, idiot, 3000e6);
+        voting.submitVote(genius, idiot, 3000e6, TOTAL_NOTIONAL_10);
 
         assertFalse(voting.isCycleFinalized(genius, idiot, 0));
     }
@@ -347,26 +348,26 @@ contract OutcomeVotingTest is Test {
 
         // 2 agree
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         // 1 disagrees
         vm.prank(validator3);
-        voting.submitVote(genius, idiot, 999e6);
+        voting.submitVote(genius, idiot, 999e6, TOTAL_NOTIONAL_10);
 
         assertFalse(voting.isCycleFinalized(genius, idiot, 0));
 
         // 3 agree (need 4)
         vm.prank(validator4);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         assertFalse(voting.isCycleFinalized(genius, idiot, 0));
 
         // 4 agree → quorum reached (but validator5 voted differently)
         // Wait, validator5 hasn't voted yet. Let's have v5 agree.
         vm.prank(validator5);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         // Now 4/5 agree → finalized
         assertTrue(voting.isCycleFinalized(genius, idiot, 0));
@@ -384,9 +385,9 @@ contract OutcomeVotingTest is Test {
 
         int256 score = 5000e6;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         // All locks released
         for (uint256 i = 1; i <= 10; i++) {
@@ -410,9 +411,9 @@ contract OutcomeVotingTest is Test {
         uint256 idiotUsdcBefore = usdc.balanceOf(idiot);
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
 
         assertTrue(voting.isCycleFinalized(genius, idiot, 0));
 
@@ -437,9 +438,9 @@ contract OutcomeVotingTest is Test {
         int256 score = 2000e6;
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.trancheA, 0);
@@ -481,12 +482,12 @@ contract OutcomeVotingTest is Test {
 
     function test_settleByVote_onlyOutcomeVoting() public {
         vm.expectRevert(abi.encodeWithSelector(Audit.CallerNotOutcomeVoting.selector, address(this)));
-        audit.settleByVote(genius, idiot, 1000e6);
+        audit.settleByVote(genius, idiot, 1000e6, 10_000e6);
     }
 
     function test_earlyExitByVote_onlyOutcomeVoting() public {
         vm.expectRevert(abi.encodeWithSelector(Audit.CallerNotOutcomeVoting.selector, address(this)));
-        audit.earlyExitByVote(genius, idiot, 1000e6);
+        audit.earlyExitByVote(genius, idiot, 1000e6, 5_000e6);
     }
 
     // ─── Cannot Re-settle After Voted Settlement ─────────────
@@ -496,9 +497,9 @@ contract OutcomeVotingTest is Test {
 
         int256 score = 5000e6;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         // Try to settle again via traditional trigger
         vm.expectRevert(abi.encodeWithSelector(Audit.NotAuditReady.selector, genius, idiot));
@@ -510,9 +511,9 @@ contract OutcomeVotingTest is Test {
 
         int256 score = 5000e6;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         // Cycle 0 is finalized and cycle advanced to 1
         assertTrue(voting.isCycleFinalized(genius, idiot, 0));
@@ -520,10 +521,11 @@ contract OutcomeVotingTest is Test {
 
         // Validator3's vote goes to cycle 1 (new cycle), not cycle 0
         vm.prank(validator3);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         // Vote is recorded on cycle 1, not cycle 0
-        assertEq(voting.getVoteCount(genius, idiot, 1, score), 1);
+        // Note: no purchases in cycle 1, so totalNotional is arbitrary for the hash
+        assertEq(voting.getVoteCount(genius, idiot, 1, score, TOTAL_NOTIONAL_10), 1);
         assertTrue(voting.hasVoted(_cycleKey(1), validator3));
     }
 
@@ -539,9 +541,9 @@ contract OutcomeVotingTest is Test {
 
         int256 score0 = 3000e6;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score0);
+        voting.submitVote(genius, idiot, score0, TOTAL_NOTIONAL_10);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score0);
+        voting.submitVote(genius, idiot, score0, TOTAL_NOTIONAL_10);
 
         assertEq(account.getCurrentCycle(genius, idiot), 1);
 
@@ -552,9 +554,9 @@ contract OutcomeVotingTest is Test {
 
         int256 score1 = -2000e6;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score1);
+        voting.submitVote(genius, idiot, score1, TOTAL_NOTIONAL_10);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score1);
+        voting.submitVote(genius, idiot, score1, TOTAL_NOTIONAL_10);
 
         assertEq(account.getCurrentCycle(genius, idiot), 2);
 
@@ -571,9 +573,9 @@ contract OutcomeVotingTest is Test {
 
         int256 score = 0;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.qualityScore, 0);
@@ -590,12 +592,12 @@ contract OutcomeVotingTest is Test {
 
         vm.expectRevert();
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 1000e6);
+        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
 
         voting.unpause();
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 1000e6);
+        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
         assertTrue(voting.hasVoted(_cycleKey(0), validator1));
     }
 
@@ -621,12 +623,12 @@ contract OutcomeVotingTest is Test {
 
         // First vote succeeds (no quorum yet)
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, extremeScore);
+        voting.submitVote(genius, idiot, extremeScore, TOTAL_NOTIONAL_10);
 
         // Second vote reaches quorum → triggers settleByVote → reverts with bounds check
         vm.prank(validator2);
         vm.expectRevert();
-        voting.submitVote(genius, idiot, extremeScore);
+        voting.submitVote(genius, idiot, extremeScore, TOTAL_NOTIONAL_10);
 
         // Cycle should NOT be finalized (settlement reverted)
         assertFalse(voting.isCycleFinalized(genius, idiot, 0));
@@ -638,11 +640,11 @@ contract OutcomeVotingTest is Test {
         int256 extremeScore = -(audit.MAX_QUALITY_SCORE() + 1);
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, extremeScore);
+        voting.submitVote(genius, idiot, extremeScore, TOTAL_NOTIONAL_10);
 
         vm.prank(validator2);
         vm.expectRevert();
-        voting.submitVote(genius, idiot, extremeScore);
+        voting.submitVote(genius, idiot, extremeScore, TOTAL_NOTIONAL_10);
 
         assertFalse(voting.isCycleFinalized(genius, idiot, 0));
     }
@@ -654,9 +656,9 @@ contract OutcomeVotingTest is Test {
         int256 maxScore = audit.MAX_QUALITY_SCORE();
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, maxScore);
+        voting.submitVote(genius, idiot, maxScore, TOTAL_NOTIONAL_10);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, maxScore);
+        voting.submitVote(genius, idiot, maxScore, TOTAL_NOTIONAL_10);
 
         assertTrue(voting.isCycleFinalized(genius, idiot, 0));
     }
@@ -670,7 +672,7 @@ contract OutcomeVotingTest is Test {
         assertEq(voting.cycleValidatorSnapshot(cycleKey), 0, "No snapshot before voting");
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 1000e6);
+        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
 
         assertEq(voting.cycleValidatorSnapshot(cycleKey), 3, "Snapshot should be 3 after first vote");
     }
@@ -680,7 +682,7 @@ contract OutcomeVotingTest is Test {
 
         // First vote snapshots at 3 validators and syncNonce
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 1000e6);
+        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
 
         bytes32 cycleKey = _cycleKey(0);
         assertEq(voting.cycleValidatorSnapshot(cycleKey), 3, "Snapshot should be 3 after first vote");
@@ -691,7 +693,7 @@ contract OutcomeVotingTest is Test {
 
         // Next vote resets the snapshot and re-snapshots with 5 validators
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, 1000e6);
+        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
 
         assertEq(voting.cycleValidatorSnapshot(cycleKey), 5, "Snapshot should be 5 after reset");
     }
@@ -705,7 +707,7 @@ contract OutcomeVotingTest is Test {
 
         // First vote snapshots at 5 and syncNonce
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 2000e6);
+        voting.submitVote(genius, idiot, 2000e6, TOTAL_NOTIONAL_10);
 
         bytes32 cycleKey = _cycleKey(0);
         assertEq(voting.cycleValidatorSnapshot(cycleKey), 5, "Snapshot should be 5 after first vote");
@@ -716,7 +718,7 @@ contract OutcomeVotingTest is Test {
 
         // Next vote resets the snapshot and re-snapshots with 3 validators
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, 2000e6);
+        voting.submitVote(genius, idiot, 2000e6, TOTAL_NOTIONAL_10);
 
         assertEq(voting.cycleValidatorSnapshot(cycleKey), 3, "Snapshot should be 3 after reset");
     }
@@ -729,7 +731,7 @@ contract OutcomeVotingTest is Test {
         _create10SignalsNoOutcomes();
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 1000e6);
+        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
 
         // 3 validators snapshotted, threshold = ceil(3*2/3) = 2
         assertEq(voting.cycleQuorumThreshold(genius, idiot, 0), 2);
@@ -745,12 +747,12 @@ contract OutcomeVotingTest is Test {
         int256 score = 1000e6;
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
 
         // Second vote reaches quorum → triggers settleByVote → reverts NotAuditReady
         vm.prank(validator2);
         vm.expectRevert();
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
 
         // Not finalized because settlement reverted
         assertFalse(voting.isCycleFinalized(genius, idiot, 0));
@@ -767,9 +769,9 @@ contract OutcomeVotingTest is Test {
         int256 score = -1000e6;
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
 
         // Early exit should succeed even with fewer than 10 signals
         assertTrue(voting.isCycleFinalized(genius, idiot, 0));
@@ -821,9 +823,9 @@ contract OutcomeVotingTest is Test {
         // Vote to settle genius-idiot pair with a positive score (no damages)
         int256 score = 1000e6;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score);
+        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
 
         // After settling idiot's cycle, only idiot's portion of signal 1 lock should be released
         uint256 remainingLock = collateral.getSignalLock(genius, 1);

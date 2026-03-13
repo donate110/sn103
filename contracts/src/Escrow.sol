@@ -5,7 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {Outcome, Purchase, Signal, SignalStatus} from "./interfaces/IDjinn.sol";
@@ -16,7 +16,7 @@ import {ISignalCommitment, ICollateral, ICreditLedger, IAccount, IAudit} from ".
 ///         Buyers deposit USDC ahead of time for instant purchases. Fees are split between
 ///         escrowed USDC and Djinn Credits (credits used first). A fee pool tracks collections
 ///         per genius-idiot-cycle for audit-time refunds.
-contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardTransient, UUPSUpgradeable {
+contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
     using SafeERC20 for IERC20;
 
     // -------------------------------------------------------------------------
@@ -524,4 +524,7 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
 
     /// @dev Owner can authorize upgrades only when paused (active USDC may be held)
     function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
+
+    /// @dev Reserved storage gap for future upgrades.
+    uint256[35] private __gap;
 }

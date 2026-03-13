@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IAudit, IAccount} from "./interfaces/IProtocol.sol";
@@ -24,7 +24,7 @@ import {IAudit, IAccount} from "./interfaces/IProtocol.sol";
 ///      retains addValidator/removeValidator for bootstrap and emergencies.
 ///      Votes are per (genius, idiot, cycle) tuple. Each validator can vote
 ///      once per cycle. Finalization is automatic when quorum is reached.
-contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardTransient, UUPSUpgradeable {
+contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
     // ─── Constants ──────────────────────────────────────────────
 
     /// @notice Quorum requirement: 2/3 of validators must agree
@@ -354,10 +354,13 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     /// @param genius The Genius address
     /// @param idiot The Idiot address
     /// @param qualityScore The USDC-denominated quality score (6 decimals, can be negative)
+    /// @param totalNotional The non-void notional for the cycle (USDC, 6 decimals).
+    ///        Validators exclude void outcomes when computing this value.
     function submitVote(
         address genius,
         address idiot,
-        int256 qualityScore
+        int256 qualityScore,
+        uint256 totalNotional
     ) external whenNotPaused nonReentrant {
         if (!isValidator[msg.sender]) revert NotValidator(msg.sender);
         if (address(audit) == address(0)) revert ContractNotSet("Audit");
@@ -387,8 +390,8 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
         hasVoted[cycleKey][msg.sender] = true;
         votedScore[cycleKey][msg.sender] = qualityScore;
 
-        // Count matching votes
-        bytes32 scoreHash = keccak256(abi.encode(qualityScore));
+        // Hash both values so quorum requires agreement on score AND notional
+        bytes32 scoreHash = keccak256(abi.encode(qualityScore, totalNotional));
         uint256 newCount = voteCounts[cycleKey][scoreHash] + 1;
         voteCounts[cycleKey][scoreHash] = newCount;
 
@@ -409,9 +412,9 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
             bool isEarlyExit = earlyExitRequested[cycleKey] && !account.isAuditReady(genius, idiot);
 
             if (isEarlyExit) {
-                audit.earlyExitByVote(genius, idiot, qualityScore);
+                audit.earlyExitByVote(genius, idiot, qualityScore, totalNotional);
             } else {
-                audit.settleByVote(genius, idiot, qualityScore);
+                audit.settleByVote(genius, idiot, qualityScore, totalNotional);
             }
         }
     }
@@ -467,15 +470,17 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     /// @param idiot The Idiot address
     /// @param cycle The audit cycle number
     /// @param qualityScore The score to count votes for
+    /// @param totalNotional The non-void notional to count votes for
     /// @return count Number of validators who voted for this score
     function getVoteCount(
         address genius,
         address idiot,
         uint256 cycle,
-        int256 qualityScore
+        int256 qualityScore,
+        uint256 totalNotional
     ) external view returns (uint256 count) {
         bytes32 cycleKey = _cycleKey(genius, idiot, cycle);
-        bytes32 scoreHash = keccak256(abi.encode(qualityScore));
+        bytes32 scoreHash = keccak256(abi.encode(qualityScore, totalNotional));
         return voteCounts[cycleKey][scoreHash];
     }
 
@@ -519,4 +524,7 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     /// @dev Only the owner (TimelockController) can authorize upgrades.
     ///      OutcomeVoting holds no USDC — no balance guard needed.
     function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    /// @dev Reserved storage gap for future upgrades.
+    uint256[33] private __gap;
 }

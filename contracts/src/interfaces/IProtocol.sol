@@ -55,8 +55,8 @@ interface IEscrow {
 interface IAudit {
     function auditResults(address genius, address idiot, uint256 cycle) external view
         returns (int256 qualityScore, uint256 trancheA, uint256 trancheB, uint256 protocolFee, uint256 timestamp);
-    function settleByVote(address genius, address idiot, int256 qualityScore) external;
-    function earlyExitByVote(address genius, address idiot, int256 qualityScore) external;
+    function settleByVote(address genius, address idiot, int256 qualityScore, uint256 totalNotional) external;
+    function earlyExitByVote(address genius, address idiot, int256 qualityScore, uint256 totalNotional) external;
 }
 
 /// @notice ZKVerifier — used by TrackRecord

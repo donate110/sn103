@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {AccountState, Outcome} from "./interfaces/IDjinn.sol";
@@ -12,11 +13,15 @@ import {AccountState, Outcome} from "./interfaces/IDjinn.sol";
 ///         This contract records signal counts, purchase IDs, outcomes, and cycle progression.
 /// @dev The (genius, idiot) pair is the primary key. Each pair progresses through independent
 ///      audit cycles of 10 signals each.
-contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
+contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable {
     // ─── Constants
     // ──────────────────────────────────────────────────────
 
-    /// @notice Number of signals required before an audit can be triggered
+    /// @notice Number of signals required before an audit can be triggered.
+    /// @dev INVARIANT: Must remain <= 20 to ensure settlement gas costs stay within block
+    ///      limits. _resetCycle iterates over all purchaseIds in the cycle, and the ZK
+    ///      circuit supports a maximum of 20 public signal slots. Increasing beyond 20
+    ///      would require a circuit recompilation and gas analysis.
     uint256 public constant SIGNALS_PER_CYCLE = 10;
 
     // ─── Storage
@@ -44,6 +49,9 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @dev Tracks whether a pair is currently counted in activePairCount (prevents double-decrement)
     mapping(bytes32 => bool) private _pairIsActive;
 
+    /// @notice Address authorized to pause this contract in emergencies
+    address public pauser;
+
     // ─── Events
     // ─────────────────────────────────────────────────────────
 
@@ -61,6 +69,9 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
     /// @notice Emitted when an authorized caller is added or removed
     event AuthorizedCallerSet(address indexed caller, bool authorized);
+
+    /// @notice Emitted when the pauser address is updated
+    event PauserUpdated(address indexed newPauser);
 
     // ─── Errors
     // ─────────────────────────────────────────────────────────
@@ -95,6 +106,9 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @notice Address must not be zero
     error ZeroAddress();
 
+    /// @notice Caller is not the pauser or the owner
+    error NotPauserOrOwner(address caller);
+
     // ─── Modifiers
     // ──────────────────────────────────────────────────────
 
@@ -118,6 +132,7 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @param initialOwner Address that will own this contract and manage authorized callers
     function initialize(address initialOwner) public initializer {
         __Ownable_init(initialOwner);
+        __Pausable_init();
     }
 
     // ─── External Functions
@@ -152,9 +167,7 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         }
 
         _purchaseRecorded[key][purchaseId] = true;
-        unchecked {
-            acct.signalCount++;
-        }
+        acct.signalCount++;
         acct.purchaseIds.push(purchaseId);
 
         emit PurchaseRecorded(genius, idiot, purchaseId, acct.signalCount);
@@ -307,7 +320,7 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
             unchecked { ++i; }
         }
 
-        unchecked { acct.currentCycle++; }
+        acct.currentCycle++;
         acct.signalCount = 0;
         acct.outcomeBalance = 0;
         delete acct.purchaseIds;
@@ -326,7 +339,31 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         if (genius == idiot) revert GeniusEqualsIdiot(genius);
     }
 
-    /// @dev Only the owner (TimelockController) can authorize upgrades.
+    // ─── Emergency Pause
+    // ──────────────────────────────────────────────────────
+
+    /// @notice Set the emergency pauser address
+    /// @param _pauser New pauser address (address(0) to disable)
+    function setPauser(address _pauser) external onlyOwner {
+        pauser = _pauser;
+        emit PauserUpdated(_pauser);
+    }
+
+    /// @notice Pause the contract
+    function pause() external {
+        if (msg.sender != pauser && msg.sender != owner()) revert NotPauserOrOwner(msg.sender);
+        _pause();
+    }
+
+    /// @notice Unpause the contract
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    /// @dev Owner can authorize upgrades only when paused.
     ///      Account holds no USDC — no balance guard needed.
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
+
+    /// @dev Reserved storage gap for future upgrades.
+    uint256[43] private __gap;
 }
