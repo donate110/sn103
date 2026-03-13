@@ -24,7 +24,6 @@ from djinn_miner.core.tlsn_bootstrap import ensure_binary
 
 log = structlog.get_logger()
 
-NOTARY_BINARY = ensure_binary("djinn-tlsn-notary")
 NOTARY_PORT = int(os.getenv("NOTARY_PORT", "7047"))
 NOTARY_KEY_PATH = os.getenv("NOTARY_KEY_PATH", os.path.expanduser("~/.local/share/djinn/notary-key.bin"))
 NOTARY_ENABLED = os.getenv("NOTARY_ENABLED", "true").lower() in ("true", "1", "yes")
@@ -97,12 +96,15 @@ class NotarySidecar:
             log.debug("notary_sidecar_disabled")
             return False
 
-        binary = shutil.which(NOTARY_BINARY)
+        # Re-resolve on every start so the watchdog picks up upgraded binaries
+        # without requiring a process restart.
+        resolved = ensure_binary("djinn-tlsn-notary")
+        binary = shutil.which(resolved)
         if not binary:
-            if os.path.isfile(NOTARY_BINARY) and os.access(NOTARY_BINARY, os.X_OK):
-                binary = NOTARY_BINARY
+            if os.path.isfile(resolved) and os.access(resolved, os.X_OK):
+                binary = resolved
             else:
-                log.warning("notary_binary_not_found", binary=NOTARY_BINARY)
+                log.warning("notary_binary_not_found", binary=resolved)
                 return False
 
         # Ensure key directory exists
