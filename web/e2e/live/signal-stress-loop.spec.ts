@@ -583,7 +583,7 @@ async function purchaseSignalById(
     const bal = balMatch ? parseFloat(balMatch[1].replace(/,/g, "")) : 0;
     if (bal < 10) {
       logLine("INFO", "  Escrow balance low, depositing 500 USDC...");
-      const depositInput = page.locator("#depositEscrow").first();
+      const depositInput = page.locator("#depositEscrow, input[placeholder='Amount']").first();
       try {
         await depositInput.waitFor({ state: "visible", timeout: 5_000 });
       } catch {
@@ -904,7 +904,7 @@ async function purchaseFirstAvailableSignal(
     const bal = balMatch ? parseFloat(balMatch[1].replace(/,/g, "")) : 0;
     if (bal < 10) {
       logLine("INFO", "  Escrow balance low, depositing 500 USDC...");
-      const depositInput = page.locator("#depositEscrow").first();
+      const depositInput = page.locator("#depositEscrow, input[placeholder='Amount']").first();
       try {
         await depositInput.waitFor({ state: "visible", timeout: 5_000 });
       } catch {
@@ -1099,7 +1099,7 @@ async function ensureIdiotEscrow(
 
   await page.waitForTimeout(3_000);
 
-  const depositInput = page.locator("#depositEscrow");
+  const depositInput = page.locator("#depositEscrow, input[placeholder='Amount']").first();
   if (await depositInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
     await depositInput.fill("500");
     const depositBtn = page.getByRole("button", { name: /^deposit$/i });
