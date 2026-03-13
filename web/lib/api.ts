@@ -405,7 +405,30 @@ export async function resilientCheckLines(
   const mergedArray = req.lines.map((l) =>
     mergedResults.get(l.index) ?? { index: l.index, available: false, bookmakers: [] },
   );
-  const mergedIndices = mergedArray.filter((r) => r.available).map((r) => r.index);
+  let mergedIndices = mergedArray.filter((r) => r.available).map((r) => r.index);
+
+  // Fallback: when all miners report 0 available lines (common when miners
+  // have exhausted their Odds API quotas), check against the platform's own
+  // API key via the server-side /api/check-lines endpoint.
+  if (mergedIndices.length === 0 && responses.length > 0) {
+    console.log("[resilientCheckLines] all miners returned 0 available, trying platform fallback");
+    try {
+      const fallbackResp = await fetch("/api/check-lines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lines: req.lines }),
+      });
+      if (fallbackResp.ok) {
+        const fallback: CheckResponse = await fallbackResp.json();
+        if (fallback.available_indices.length > 0) {
+          console.log("[resilientCheckLines] platform fallback found", fallback.available_indices.length, "available lines");
+          return fallback;
+        }
+      }
+    } catch (e) {
+      console.log("[resilientCheckLines] platform fallback failed:", String(e).slice(0, 200));
+    }
+  }
 
   return {
     results: mergedArray,
