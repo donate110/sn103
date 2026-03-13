@@ -282,8 +282,8 @@ export default function PurchaseSignal() {
       console.log("[purchase] MPC results:", availabilityResults.map((r, i) => {
         if (r.status === "fulfilled") {
           const v = r.value;
-          const reason = (v as Record<string, unknown>).mpc_failure_reason || "";
-          const parts = (v as Record<string, unknown>).mpc_participants || "";
+          const reason = (v as unknown as Record<string, unknown>).mpc_failure_reason || "";
+          const parts = (v as unknown as Record<string, unknown>).mpc_participants || "";
           return `v${i}:${v.available ? "AVAIL" : "UNAVAIL"} (${v.status}/${v.message}) participants=${parts} reason=${reason}`;
         }
         return `v${i}:REJECTED (${r.reason?.message?.slice(0, 80) || "unknown"})`;
