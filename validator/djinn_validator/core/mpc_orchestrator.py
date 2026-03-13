@@ -164,6 +164,14 @@ class MPCOrchestrator:
         except Exception as e:
             log.debug("request_id_propagation_failed", error=str(e))
 
+        # Pre-serialize JSON body so the bytes we sign match the bytes sent.
+        # Previously we signed json.dumps(kwargs["json"]) but httpx's json=
+        # parameter may serialize differently, causing signature mismatch (401).
+        if "json" in kwargs:
+            serialized = json.dumps(kwargs.pop("json"), separators=(",", ":")).encode()
+            kwargs["content"] = serialized
+            headers["Content-Type"] = "application/json"
+
         # Sign requests with validator hotkey for peer authentication
         if self._neuron is not None and hasattr(self._neuron, "wallet") and self._neuron.wallet is not None:
             try:
@@ -173,8 +181,8 @@ class MPCOrchestrator:
                 parsed = urlparse(url)
                 endpoint = parsed.path
                 body = b""
-                if "json" in kwargs:
-                    body = json.dumps(kwargs["json"]).encode()
+                if "content" in kwargs:
+                    body = kwargs["content"] if isinstance(kwargs["content"], bytes) else str(kwargs["content"]).encode()
                 elif "data" in kwargs:
                     body = kwargs["data"] if isinstance(kwargs["data"], bytes) else str(kwargs["data"]).encode()
                 auth_headers = create_signed_headers(endpoint, body, self._neuron.wallet)
@@ -432,23 +440,39 @@ class MPCOrchestrator:
                 log.debug("peer_share_x_lookup_failed", peer_uid=peer["uid"], error=str(e))
             return None
 
-        # Use asyncio.wait so slow/unreachable peers don't block results
-        # from fast peers. Previously, asyncio.wait_for wrapped the entire
-        # gather, meaning one hanging peer would discard ALL results.
+        # Terminate early once we have enough peers (t-1 needed since we are one).
+        # This avoids waiting 30s for unreachable validators when 2 fast ones respond.
+        needed_peers = t - 1  # we (coordinator) count as one participant
         tasks = [asyncio.create_task(_lookup_share_x(p)) for p in peers]
         if tasks:
-            done, pending = await asyncio.wait(tasks, timeout=GATHER_TIMEOUT)
+            deadline = asyncio.get_event_loop().time() + GATHER_TIMEOUT
+            pending = set(tasks)
+            while pending:
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    break
+                done_batch, pending = await asyncio.wait(
+                    pending, timeout=remaining, return_when=asyncio.FIRST_COMPLETED,
+                )
+                for dtask in done_batch:
+                    try:
+                        res = dtask.result()
+                        if isinstance(res, tuple) and res is not None:
+                            peer_x_map[res[0]] = res[1]
+                    except Exception:
+                        pass
+                if len(peer_x_map) >= needed_peers:
+                    break
+            # Cancel any still-running lookups
             for ptask in pending:
                 ptask.cancel()
             if pending:
-                log.warning("peer_share_x_lookup_timeout", n_timed_out=len(pending), n_completed=len(done))
-            for dtask in done:
-                try:
-                    res = dtask.result()
-                    if isinstance(res, tuple) and res is not None:
-                        peer_x_map[res[0]] = res[1]
-                except Exception:
-                    pass
+                log.info(
+                    "peer_share_x_early_termination",
+                    found=len(peer_x_map),
+                    needed=needed_peers,
+                    cancelled=len(pending),
+                )
 
         # Only keep peers that hold a share for this signal
         peers = [p for p in peers if p["uid"] in peer_x_map]
