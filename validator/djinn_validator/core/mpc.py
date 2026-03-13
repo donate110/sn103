@@ -48,6 +48,7 @@ class MPCResult:
 
     available: bool
     participating_validators: int
+    failure_reason: str | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -395,7 +395,7 @@ class MPCOrchestrator:
         t = threshold if threshold is not None else self._threshold
 
         if n_gates == 0:
-            return MPCResult(available=False, participating_validators=1)
+            return MPCResult(available=False, participating_validators=1, failure_reason="no_available_indices")
 
         # Collect actual Shamir share x-coordinates from peers in parallel.
         # The share_x values are assigned at signal creation time (1, 2, 3, ...)
@@ -472,12 +472,21 @@ class MPCOrchestrator:
             from djinn_validator.api.metrics import MPC_ERRORS
 
             MPC_ERRORS.labels(reason="insufficient_peers").inc()
+            breaker_info = {uid: self._get_peer_breaker(uid).allow_request() for uid in list(self._peer_breakers.keys())[:10]}
             log.warning(
                 "insufficient_mpc_participants",
                 available=len(participant_xs),
                 threshold=t,
+                my_x=my_x,
+                peer_x_map=peer_x_map,
+                n_peers_checked=len(peers) if 'peers' in dir() else 0,
+                breaker_sample=breaker_info,
             )
-            return None
+            return MPCResult(
+                available=False,
+                participating_validators=len(participant_xs),
+                failure_reason=f"insufficient_peers:{len(participant_xs)}/{t}",
+            )
 
         # Generate random mask r (nonzero)
         r = secrets.randbelow(p - 1) + 1
@@ -677,9 +686,14 @@ class MPCOrchestrator:
                 "mpc_insufficient_accepted",
                 accepted=len(accepted_peers) + 1,
                 threshold=t,
+                init_results=[str(type(r).__name__) if r is None or isinstance(r, BaseException) else r.get("uid", "?") for r in results],
             )
             self._mark_session_failed(session)
-            return None
+            return MPCResult(
+                available=False,
+                participating_validators=len(accepted_peers) + 1,
+                failure_reason=f"init_failed:{len(accepted_peers)+1}/{t}",
+            )
 
         log.info(
             "mpc_distributed_session",
@@ -791,7 +805,11 @@ class MPCOrchestrator:
                     threshold=t,
                 )
                 self._mark_session_failed(session)
-                return None
+                return MPCResult(
+                    available=False,
+                    participating_validators=len(d_vals),
+                    failure_reason=f"gate_{gate_idx}_insufficient:{len(d_vals)}/{t}",
+                )
 
             # Reconstruct publicly opened d and e
             prev_d = reconstruct_at_zero(d_vals, p)
@@ -897,7 +915,11 @@ class MPCOrchestrator:
         if len(z_vals) < t:
             log.warning("mpc_finalize_insufficient", collected=len(z_vals), threshold=t)
             self._mark_session_failed(session)
-            return None
+            return MPCResult(
+                available=False,
+                participating_validators=len(z_vals),
+                failure_reason=f"finalize_insufficient:{len(z_vals)}/{t}",
+            )
 
         # Reconstruct the final result: r * P(s) — zero iff s ∈ available set
         result_value = reconstruct_at_zero(z_vals, p)

@@ -96,6 +96,7 @@ class PurchaseResponse(BaseModel):
     share_x: int | None = None  # Shamir share x-coordinate
     message: str = ""
     mpc_participants: int | None = None  # Number of validators in MPC (diagnostic)
+    mpc_failure_reason: str | None = None  # Diagnostic: why MPC returned unavailable
 
 
 class OutcomeRequest(BaseModel):

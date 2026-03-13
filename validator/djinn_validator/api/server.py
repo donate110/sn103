@@ -559,6 +559,7 @@ def create_app(
                     available=False,
                     message="Signal not available at this sportsbook",
                     mpc_participants=mpc_result.participating_validators,
+                    mpc_failure_reason=mpc_result.failure_reason,
                 )
 
             # Check for payment replay (TOCTOU prevention)
@@ -2013,6 +2014,68 @@ def create_app(
             share_x=record.share.x,
             shamir_threshold=record.shamir_threshold,
         )
+
+    @app.get("/v1/signal/{signal_id}/mpc_diagnostic")
+    async def mpc_diagnostic(signal_id: str) -> dict:
+        """Diagnostic endpoint: check MPC readiness for a signal.
+
+        Returns peer discovery info, circuit breaker state, and whether
+        the MPC protocol can run. Does NOT run the actual MPC.
+        """
+        _validate_signal_id_path(signal_id)
+        record = share_store.get(signal_id)
+        if record is None:
+            return {"error": "Signal not found", "signal_id": signal_id}
+
+        has_index_share = bool(record.encrypted_index_share and len(record.encrypted_index_share) > 0)
+        my_x = record.share.x
+        threshold = record.shamir_threshold
+
+        # Peer discovery
+        peers = _orchestrator._get_peer_validators()
+        peer_summary = [{"uid": p["uid"], "ip": p["ip"], "port": p["port"]} for p in peers[:20]]
+
+        # Circuit breaker state
+        breaker_state = {}
+        for uid, breaker in list(_orchestrator._peer_breakers.items())[:20]:
+            breaker_state[uid] = {
+                "allow_request": breaker.allow_request(),
+                "failure_count": breaker._failure_count,
+                "state": breaker._state.name if hasattr(breaker._state, "name") else str(breaker._state),
+            }
+
+        # Version cache
+        version_cache = dict(list(_orchestrator._peer_versions.items())[:20])
+
+        # Try share_x lookup on known good peers
+        share_x_results = {}
+        import httpx
+        for peer in peers[:5]:
+            try:
+                resp = await _orchestrator._http.get(
+                    f"{peer['url']}/v1/signal/{signal_id}/share_info",
+                    timeout=5.0,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    share_x_results[peer["uid"]] = {"share_x": data.get("share_x"), "status": 200}
+                else:
+                    share_x_results[peer["uid"]] = {"status": resp.status_code}
+            except Exception as e:
+                share_x_results[peer["uid"]] = {"error": str(e)[:200]}
+
+        return {
+            "signal_id": signal_id[:40],
+            "my_x": my_x,
+            "threshold": threshold,
+            "has_index_share": has_index_share,
+            "my_uid": neuron.uid if neuron else None,
+            "peers_discovered": len(peers),
+            "peer_sample": peer_summary,
+            "breaker_state": breaker_state,
+            "version_cache": version_cache,
+            "share_x_lookup": share_x_results,
+        }
 
     # ------------------------------------------------------------------
     # OT network endpoints (distributed triple generation)
