@@ -5,8 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {StorageSlot} from "@openzeppelin/contracts/utils/StorageSlot.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {Outcome, Purchase, Signal, SignalStatus} from "./interfaces/IDjinn.sol";
@@ -17,7 +16,7 @@ import {ISignalCommitment, ICollateral, ICreditLedger, IAccount, IAudit} from ".
 ///         Buyers deposit USDC ahead of time for instant purchases. Fees are split between
 ///         escrowed USDC and Djinn Credits (credits used first). A fee pool tracks collections
 ///         per genius-idiot-cycle for audit-time refunds.
-contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
+contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardTransient, UUPSUpgradeable {
     using SafeERC20 for IERC20;
 
     // -------------------------------------------------------------------------
@@ -86,9 +85,6 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         uint256 usdcPaid
     );
 
-    /// @notice Emitted when the Audit contract triggers a refund to an Idiot
-    event Refunded(address indexed genius, address indexed idiot, uint256 cycle, uint256 amount);
-
     /// @notice Emitted when a Genius claims earned fees from a settled cycle
     event FeesClaimed(address indexed genius, address indexed idiot, uint256 cycle, uint256 amount);
 
@@ -152,12 +148,6 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     // Modifiers
     // -------------------------------------------------------------------------
 
-    /// @dev Reverts if the Audit contract address has not been configured
-    modifier onlyAudit() {
-        if (msg.sender != auditContract) revert Unauthorized();
-        _;
-    }
-
     // -------------------------------------------------------------------------
     // Constructor
     // -------------------------------------------------------------------------
@@ -174,7 +164,6 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         if (_usdc == address(0)) revert ZeroAddress();
         __Ownable_init(_owner);
         __Pausable_init();
-        StorageSlot.getUint256Slot(_reentrancyGuardStorageSlot()).value = 1;
         usdc = IERC20(_usdc);
     }
 
@@ -223,6 +212,11 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     }
 
     /// @notice Authorize or deauthorize a caller for setOutcome
+    /// @dev DESIGN NOTE (CF-12): This mapping is intentionally NOT populated in Deploy.s.sol.
+    ///      Authorized callers for setOutcome are external services (oracle adapters, validator
+    ///      bridges) whose addresses are not known at deploy time. They are configured
+    ///      post-deployment via TimelockController governance proposals. The voted settlement
+    ///      path (OutcomeVoting -> Audit) does not use setOutcome and works immediately.
     /// @param caller The address to authorize or deauthorize
     /// @param _authorized Whether the address should be authorized
     function setAuthorizedCaller(address caller, bool _authorized) external onlyOwner {
@@ -287,6 +281,18 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     /// @notice Purchase a signal. Credits offset the fee first; remainder is paid from
     ///         the buyer's escrowed USDC balance. Locks Genius collateral and records the
     ///         purchase across all protocol contracts.
+    ///
+    /// @dev DESIGN NOTE (CF-07): Odds are buyer-chosen, not genius-specified. This is
+    ///      intentional per the whitepaper's unbundling model: the buyer executes at their
+    ///      own sportsbook where the available odds may differ from the genius's quoted
+    ///      line. The Quality Score formula (Section 6) is asymmetric by design: favorable
+    ///      outcomes credit +notional*(odds-1) reflecting actual value delivered, while
+    ///      unfavorable outcomes debit -notional*SLA% as a fixed penalty independent of
+    ///      odds. Self-purchase prevention (genius != buyer), bounded odds range
+    ///      (1.01x-1000x), one-purchase-per-idiot-per-signal, and collateral requirements
+    ///      all limit manipulation. The SLA multiplier, set by the genius, controls downside
+    ///      exposure regardless of buyer-chosen odds.
+    ///
     /// @param signalId On-chain signal identifier
     /// @param notional Reference amount chosen by the buyer (6-decimal USDC scale)
     /// @param odds Decimal odds scaled by 1e6 (e.g. 1_910_000 = 1.91x = -110 American)
@@ -367,7 +373,8 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
             creditLedger.burn(msg.sender, creditUsed);
         }
 
-        uint256 lockAmount = (notional * sig.slaMultiplierBps) / 10_000;
+        uint256 protocolFeeLock = (notional * 50) / 10_000; // 0.5% protocol fee
+        uint256 lockAmount = (notional * sig.slaMultiplierBps) / 10_000 + protocolFeeLock;
         collateral.lock(signalId, sig.genius, lockAmount);
 
         account.recordPurchase(sig.genius, msg.sender, purchaseId);
@@ -375,27 +382,6 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         emit SignalPurchased(signalId, msg.sender, purchaseId, notional, fee, creditUsed, usdcPaid);
     }
 
-    // -------------------------------------------------------------------------
-    // Audit-initiated refund
-    // -------------------------------------------------------------------------
-
-    /// @notice Refund USDC to an Idiot from the fee pool. Only callable by the Audit contract.
-    /// @param genius Genius address whose fee pool is debited
-    /// @param idiot  Idiot address who receives the refund
-    /// @param cycle  The audit cycle for the fee pool lookup
-    /// @param amount USDC amount to refund
-    function refund(address genius, address idiot, uint256 cycle, uint256 amount) external onlyAudit nonReentrant {
-        if (amount == 0) revert ZeroAmount();
-        uint256 poolBalance = feePool[genius][idiot][cycle];
-        if (poolBalance < amount) revert InsufficientBalance(poolBalance, amount);
-
-        feePool[genius][idiot][cycle] = poolBalance - amount;
-        balances[idiot] += amount;
-
-        emit Refunded(genius, idiot, cycle, amount);
-    }
-
-    // -------------------------------------------------------------------------
     // -------------------------------------------------------------------------
     // Genius fee claim
     // -------------------------------------------------------------------------

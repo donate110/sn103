@@ -145,7 +145,7 @@ contract OutcomeVotingTest is Test {
     function _createAndPurchaseSignal(uint256 signalId) internal returns (uint256 purchaseId) {
         _createSignal(signalId);
 
-        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         uint256 fee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
         uint256 protocolFeeShare = (NOTIONAL * 50) / 10_000;
         _depositGeniusCollateral(lockAmount + fee + protocolFeeShare);
@@ -189,11 +189,14 @@ contract OutcomeVotingTest is Test {
     }
 
     function test_removeValidator() public {
+        // Must have > MIN_VALIDATORS to remove; add extra validators first
+        voting.addValidator(validator4);
         voting.removeValidator(validator2);
-        assertEq(voting.validatorCount(), 2);
+        assertEq(voting.validatorCount(), 3);
         assertFalse(voting.isValidator(validator2));
         assertTrue(voting.isValidator(validator1));
         assertTrue(voting.isValidator(validator3));
+        assertTrue(voting.isValidator(validator4));
     }
 
     function test_removeValidator_revertsNotRegistered() public {
@@ -672,32 +675,28 @@ contract OutcomeVotingTest is Test {
         assertEq(voting.cycleValidatorSnapshot(cycleKey), 3, "Snapshot should be 3 after first vote");
     }
 
-    function test_quorumSnapshot_addingValidatorMidVoteRejectsNewVotes() public {
+    function test_quorumSnapshot_addingValidatorMidVoteResetsSnapshot() public {
         _create10SignalsNoOutcomes();
 
         // First vote snapshots at 3 validators and syncNonce
         vm.prank(validator1);
         voting.submitVote(genius, idiot, 1000e6);
 
+        bytes32 cycleKey = _cycleKey(0);
+        assertEq(voting.cycleValidatorSnapshot(cycleKey), 3, "Snapshot should be 3 after first vote");
+
         // Add 2 more validators after first vote (changes syncNonce)
         voting.addValidator(validator4);
         voting.addValidator(validator5);
 
-        // Subsequent votes should revert because validator set changed
-        bytes32 cycleKey = _cycleKey(0);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                OutcomeVoting.ValidatorSetChanged.selector,
-                cycleKey,
-                voting.cycleSyncNonce(cycleKey),
-                voting.syncNonce()
-            )
-        );
+        // Next vote resets the snapshot and re-snapshots with 5 validators
         vm.prank(validator2);
         voting.submitVote(genius, idiot, 1000e6);
+
+        assertEq(voting.cycleValidatorSnapshot(cycleKey), 5, "Snapshot should be 5 after reset");
     }
 
-    function test_quorumSnapshot_removingValidatorMidVoteRejectsNewVotes() public {
+    function test_quorumSnapshot_removingValidatorMidVoteResetsSnapshot() public {
         // Start with 5 validators
         voting.addValidator(validator4);
         voting.addValidator(validator5);
@@ -708,22 +707,18 @@ contract OutcomeVotingTest is Test {
         vm.prank(validator1);
         voting.submitVote(genius, idiot, 2000e6);
 
-        // Remove 2 validators (changes syncNonce)
+        bytes32 cycleKey = _cycleKey(0);
+        assertEq(voting.cycleValidatorSnapshot(cycleKey), 5, "Snapshot should be 5 after first vote");
+
+        // Remove 2 validators (changes syncNonce, leaves MIN_VALIDATORS=3)
         voting.removeValidator(validator4);
         voting.removeValidator(validator5);
 
-        // Subsequent votes should revert because validator set changed
-        bytes32 cycleKey = _cycleKey(0);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                OutcomeVoting.ValidatorSetChanged.selector,
-                cycleKey,
-                voting.cycleSyncNonce(cycleKey),
-                voting.syncNonce()
-            )
-        );
+        // Next vote resets the snapshot and re-snapshots with 3 validators
         vm.prank(validator2);
         voting.submitVote(genius, idiot, 2000e6);
+
+        assertEq(voting.cycleValidatorSnapshot(cycleKey), 3, "Snapshot should be 3 after reset");
     }
 
     function test_cycleQuorumThreshold_returnsZeroBeforeVotes() public {
@@ -794,7 +789,7 @@ contract OutcomeVotingTest is Test {
         _createSignal(1);
 
         // Deposit enough genius collateral for two purchases + fees
-        uint256 lockPerPurchase = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 lockPerPurchase = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         uint256 fee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
         uint256 protocolFee = (NOTIONAL * 50) / 10_000;
         uint256 totalNeeded = (lockPerPurchase + fee + protocolFee) * 2;

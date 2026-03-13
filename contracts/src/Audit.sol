@@ -3,8 +3,7 @@ pragma solidity ^0.8.28;
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {StorageSlot} from "@openzeppelin/contracts/utils/StorageSlot.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {Purchase, Outcome, Signal, AccountState} from "./interfaces/IDjinn.sol";
@@ -24,7 +23,7 @@ struct AuditResult {
 ///         Computes the Quality Score per the whitepaper formula, distributes damages
 ///         across Tranche A (USDC refund) and Tranche B (Credits), collects a 0.5%
 ///         protocol fee on total notional, and releases remaining collateral locks.
-contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
+contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardTransient, UUPSUpgradeable {
     // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------
@@ -127,13 +126,16 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     }
 
     /// @notice Initializes the Audit contract (replaces constructor for proxy pattern)
+    /// @dev DESIGN NOTE (CF-10): __UUPSUpgradeable_init() is not called because it does
+    ///      not exist in OpenZeppelin v5.5.0. The UUPSUpgradeable contract in OZ v5 has no
+    ///      initializer function and requires no initialization. All UUPS proxy behavior is
+    ///      handled by the constructor (_disableInitializers) and _authorizeUpgrade override.
+    ///      This applies to all contracts in the protocol: Account, Collateral, Escrow,
+    ///      OutcomeVoting, SignalCommitment, and TrackRecord.
     /// @param _owner Address that will own this contract
     function initialize(address _owner) public initializer {
         __Ownable_init(_owner);
         __Pausable_init();
-        // Pre-warm ReentrancyGuard storage for proxy (OZ v5 is @custom:stateless but
-        // first nonReentrant call pays cold SSTORE 0->2 without this)
-        StorageSlot.getUint256Slot(_reentrancyGuardStorageSlot()).value = 1;
     }
 
     // -------------------------------------------------------------------------
@@ -381,6 +383,11 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
         }
         _validateDependencies();
 
+        // Defense-in-depth: ensure this is actually an early exit (< 10 signals)
+        if (account.isAuditReady(genius, idiot)) {
+            revert AuditAlreadyReady(genius, idiot);
+        }
+
         uint256 cycle = account.getCurrentCycle(genius, idiot);
         if (auditResults[genius][idiot][cycle].timestamp != 0) {
             revert AlreadySettled(genius, idiot, cycle);
@@ -422,12 +429,15 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
             revert NoPurchasesInCycle(genius, idiot, cycle);
         }
 
-        // Aggregate without void filtering (outcomes may be incomplete)
+        // Aggregate purchases, filtering void outcomes when outcome data is available
         uint256 totalNotional;
         uint256 totalUsdcFeesPaid;
         for (uint256 i; i < purchaseIds.length; ++i) {
             Purchase memory p = escrow.getPurchase(purchaseIds[i]);
-            totalNotional += p.notional;
+            Outcome outcome = account.getOutcome(genius, idiot, purchaseIds[i]);
+            if (outcome != Outcome.Void) {
+                totalNotional += p.notional;
+            }
             totalUsdcFeesPaid += p.usdcPaid;
         }
 
@@ -506,7 +516,7 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     }
 
     /// @dev Releases signal collateral locks for purchases in the cycle.
-    ///      Only releases the portion locked for THIS purchase (notional * slaMultiplierBps / 10000),
+    ///      Releases the SLA lock + protocol fee lock for THIS purchase,
     ///      not the full signalLock, since multiple Idiots may share the same signal lock.
     /// @param genius The Genius address
     /// @param purchaseIds Array of purchase IDs in the cycle
@@ -514,7 +524,9 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
         for (uint256 i; i < purchaseIds.length; ++i) {
             Purchase memory p = escrow.getPurchase(purchaseIds[i]);
             Signal memory sig = signalCommitment.getSignal(p.signalId);
-            uint256 expectedLock = (p.notional * sig.slaMultiplierBps) / BPS_DENOMINATOR;
+            uint256 slaLock = (p.notional * sig.slaMultiplierBps) / BPS_DENOMINATOR;
+            uint256 protocolFeeLock = (p.notional * PROTOCOL_FEE_BPS) / BPS_DENOMINATOR;
+            uint256 expectedLock = slaLock + protocolFeeLock;
             // Cap at actual remaining lock to avoid revert if partially slashed
             uint256 actualLock = collateral.getSignalLock(genius, p.signalId);
             uint256 releaseAmount = expectedLock < actualLock ? expectedLock : actualLock;
@@ -563,6 +575,9 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
         uint256 totalUsdcFeesPaid,
         uint256[] memory purchaseIds
     ) internal {
+        // Freeze genius withdrawals during settlement to prevent front-running
+        collateral.freezeWithdrawals(genius);
+
         // Protocol fee: 0.5% of total notional
         uint256 protocolFee = (totalNotional * PROTOCOL_FEE_BPS) / BPS_DENOMINATOR;
 
@@ -586,7 +601,13 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
         // If score >= 0 and not early exit: Genius keeps all fees, no damages
 
         // Protocol fee: slash from genius collateral to treasury.
-        // Charged on ALL settlements including early exits to prevent fee dodging.
+        // DESIGN NOTE (CF-15): The protocol fee is charged on ALL settlements including
+        // early exits. Per whitepaper Section 7: "The protocol charges a fee of 0.5% of
+        // total notional at each audit." This covers real operational costs (gas, ZK
+        // verification, infrastructure). Without this, a malicious idiot could grief the
+        // protocol by forcing repeated single-purchase early exits to generate work without
+        // revenue. The fee is included in the collateral lock calculation at purchase time
+        // (see Escrow.purchase protocolFeeLock) so the genius is always covered.
         if (protocolFee > 0) {
             uint256 intendedFee = protocolFee;
             protocolFee = collateral.slash(genius, protocolFee, protocolTreasury);
@@ -603,6 +624,9 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
             protocolFee: protocolFee,
             timestamp: block.timestamp
         });
+
+        // Unfreeze genius withdrawals after settlement is complete
+        collateral.unfreezeWithdrawals(genius);
 
         // Mark account as settled, start new cycle
         account.settleAudit(genius, idiot);
@@ -674,11 +698,6 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
         _unpause();
     }
 
-    /// @dev Owner can authorize upgrades only when all active audit pairs are settled
-    function _authorizeUpgrade(address) internal override onlyOwner {
-        require(
-            address(account) == address(0) || account.activePairCount() == 0,
-            "Audit: active pairs must be settled"
-        );
-    }
+    /// @dev Owner can authorize upgrades only when paused
+    function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
 }

@@ -12,6 +12,15 @@ import {Signal, SignalStatus} from "./interfaces/IDjinn.sol";
 ///         A Genius commits an encrypted signal with 10 decoy lines (9 decoys + 1 real).
 ///         The real signal content remains hidden inside the AES-256-GCM encrypted blob.
 /// @dev Signal IDs are externally generated and must be globally unique.
+///
+///      DESIGN NOTE (CF-14): Signal IDs are generated client-side rather than using an
+///      on-chain auto-incrementing counter. This is intentional: sequential on-chain IDs
+///      would leak signal ordering and reveal genius activity patterns, breaking the privacy
+///      model. Client-generated IDs use sufficient entropy (UUID v4 mapped to uint256) to
+///      make collisions negligible (p < 2^-122). The SignalAlreadyExists check provides an
+///      on-chain safety net if a collision ever occurs. Front-running with the same ID would
+///      require knowing the ID before the genius's transaction lands, which is impractical
+///      with random 256-bit IDs.
 contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable {
     // ─── Types
     // ──────────────────────────────────────────────────────────

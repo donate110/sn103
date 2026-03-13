@@ -136,7 +136,7 @@ contract FuzzFinancialMathTest is Test {
             uint256 sigId = i + 1;
             _createSignal(sigId, DEFAULT_MAX_PRICE_BPS, sla);
 
-            uint256 lockAmount = (notional * sla) / 10_000;
+            uint256 lockAmount = (notional * sla) / 10_000 + (notional * 50) / 10_000;
             _depositGeniusCollateral(lockAmount);
 
             uint256 fee = (notional * DEFAULT_MAX_PRICE_BPS) / 10_000;
@@ -354,18 +354,20 @@ contract FuzzFinancialMathTest is Test {
         }
     }
 
-    /// @notice Collateral lock amount is exactly notional * slaMultiplierBps / 10_000
+    /// @notice Collateral lock amount is exactly notional * (slaMultiplierBps + protocolFeeBps) / 10_000
     function testFuzz_lockAmountExact(uint256 notionalSeed, uint256 slaSeed) public pure {
         uint256 notional = bound(notionalSeed, 1e6, 1e15);
         uint256 sla = bound(slaSeed, 10_000, 30_000);
 
-        uint256 lockAmount = (notional * sla) / 10_000;
+        uint256 slaLock = (notional * sla) / 10_000;
+        uint256 protocolFeeLock = (notional * 50) / 10_000;
+        uint256 lockAmount = slaLock + protocolFeeLock;
 
-        // Lock must be >= notional when sla >= 10_000 (100%)
-        assertGe(lockAmount, notional, "Lock must be >= notional for sla >= 100%");
+        // SLA lock must be >= notional when sla >= 10_000 (100%)
+        assertGe(slaLock, notional, "SLA lock must be >= notional for sla >= 100%");
 
-        // Lock must be <= 3 * notional when sla <= 30_000 (300%)
-        assertLe(lockAmount, 3 * notional, "Lock must be <= 3x notional for sla <= 300%");
+        // Total lock includes protocol fee (0.5%), so it exceeds sla-only lock
+        assertGt(lockAmount, slaLock, "Total lock must include protocol fee");
     }
 
     /// @notice Fee + lock never overflow uint256 for valid parameter ranges
@@ -379,7 +381,7 @@ contract FuzzFinancialMathTest is Test {
         uint256 sla = bound(slaSeed, 10_000, 30_000);
 
         uint256 fee = (notional * maxPriceBps) / 10_000;
-        uint256 lockAmount = (notional * sla) / 10_000;
+        uint256 lockAmount = (notional * sla) / 10_000 + (notional * 50) / 10_000;
 
         // Sum should not overflow
         uint256 total = fee + lockAmount;
@@ -432,7 +434,7 @@ contract FuzzFinancialMathTest is Test {
             uint256 sigId = i + 1;
             _createSignal(sigId, DEFAULT_MAX_PRICE_BPS, sla);
 
-            uint256 lockAmount = (notional * sla) / 10_000;
+            uint256 lockAmount = (notional * sla) / 10_000 + (notional * 50) / 10_000;
             _depositGeniusCollateral(lockAmount);
 
             uint256 fee = (notional * DEFAULT_MAX_PRICE_BPS) / 10_000;
@@ -692,7 +694,7 @@ contract FuzzFinancialMathTest is Test {
 
         _createSignal(1, maxPriceBps, sla);
 
-        uint256 lockAmount = (notional * sla) / 10_000;
+        uint256 lockAmount = (notional * sla) / 10_000 + (notional * 50) / 10_000;
         _depositGeniusCollateral(lockAmount);
 
         uint256 expectedFee = (notional * maxPriceBps) / 10_000;
@@ -716,7 +718,7 @@ contract FuzzFinancialMathTest is Test {
 
         _createSignal(1, DEFAULT_MAX_PRICE_BPS, DEFAULT_SLA);
 
-        uint256 lockAmount = (notional * DEFAULT_SLA) / 10_000;
+        uint256 lockAmount = (notional * DEFAULT_SLA) / 10_000 + (notional * 50) / 10_000;
         _depositGeniusCollateral(lockAmount);
 
         uint256 fee = (notional * DEFAULT_MAX_PRICE_BPS) / 10_000;

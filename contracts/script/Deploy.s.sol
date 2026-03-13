@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {MockUSDC} from "../test/MockUSDC.sol";
+import {MockUSDC} from "../test/MockUSDC.sol"; // Used only on testnet chains (guarded by chain ID check)
 import {Account as DjinnAccount} from "../src/Account.sol";
 import {CreditLedger} from "../src/CreditLedger.sol";
 import {SignalCommitment} from "../src/SignalCommitment.sol";

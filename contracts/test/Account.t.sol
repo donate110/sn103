@@ -85,7 +85,7 @@ contract AccountTest is Test {
         assertEq(uint8(acct.getOutcome(genius, idiot, 1)), uint8(Outcome.Favorable));
 
         AccountState memory state = acct.getAccountState(genius, idiot);
-        assertEq(state.qualityScore, 1);
+        assertEq(state.outcomeBalance, 1);
     }
 
     function test_recordOutcome_unfavorable() public {
@@ -97,7 +97,7 @@ contract AccountTest is Test {
         assertEq(uint8(acct.getOutcome(genius, idiot, 1)), uint8(Outcome.Unfavorable));
 
         AccountState memory state = acct.getAccountState(genius, idiot);
-        assertEq(state.qualityScore, -1);
+        assertEq(state.outcomeBalance, -1);
     }
 
     function test_recordOutcome_void() public {
@@ -110,7 +110,7 @@ contract AccountTest is Test {
 
         // Void does not affect quality score
         AccountState memory state = acct.getAccountState(genius, idiot);
-        assertEq(state.qualityScore, 0);
+        assertEq(state.outcomeBalance, 0);
     }
 
     function test_recordOutcome_emitsEvent() public {
@@ -123,7 +123,7 @@ contract AccountTest is Test {
         acct.recordOutcome(genius, idiot, 1, Outcome.Favorable);
     }
 
-    function test_recordOutcome_multipleOutcomes_qualityScoreAccumulates() public {
+    function test_recordOutcome_multipleOutcomes_outcomeBalanceAccumulates() public {
         // 3 favorable, 2 unfavorable, 1 void => quality = 3 - 2 = 1
         for (uint256 i = 1; i <= 6; i++) {
             _recordPurchase(i);
@@ -143,7 +143,7 @@ contract AccountTest is Test {
         acct.recordOutcome(genius, idiot, 6, Outcome.Void);
 
         AccountState memory state = acct.getAccountState(genius, idiot);
-        assertEq(state.qualityScore, 1);
+        assertEq(state.outcomeBalance, 1);
     }
 
     function test_recordOutcome_revertOnPending() public {
@@ -300,7 +300,7 @@ contract AccountTest is Test {
         AccountState memory state = acct.getAccountState(genius, idiot);
         assertEq(state.currentCycle, 0);
         assertEq(state.signalCount, 0);
-        assertEq(state.qualityScore, 0);
+        assertEq(state.outcomeBalance, 0);
         assertEq(state.purchaseIds.length, 0);
         assertFalse(state.settled);
     }

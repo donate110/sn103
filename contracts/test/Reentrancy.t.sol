@@ -136,7 +136,7 @@ contract ReentrancyTest is Test {
         _createSignal(SIGNAL_ID_2);
 
         // Deposit collateral for genius
-        uint256 collateralNeeded = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateralNeeded = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         usdc.mint(genius, collateralNeeded * 2);
         vm.startPrank(genius);
         usdc.approve(address(collateral), collateralNeeded * 2);
@@ -177,7 +177,7 @@ contract ReentrancyTest is Test {
     function test_purchase_normalFlow() public {
         _createSignal(SIGNAL_ID_1);
 
-        uint256 collateralNeeded = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateralNeeded = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         usdc.mint(genius, collateralNeeded);
         vm.startPrank(genius);
         usdc.approve(address(collateral), collateralNeeded);
@@ -213,37 +213,16 @@ contract ReentrancyTest is Test {
         assertEq(usdc.balanceOf(idiot), 200e6);
     }
 
-    /// @notice Verify refund still works normally with nonReentrant
-    function test_refund_normalFlow() public {
-        // Create a signal and purchase to populate fee pool
-        _createSignal(SIGNAL_ID_1);
-
-        uint256 collateralNeeded = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
-        usdc.mint(genius, collateralNeeded);
-        vm.startPrank(genius);
-        usdc.approve(address(collateral), collateralNeeded);
-        collateral.deposit(collateralNeeded);
-        vm.stopPrank();
-
-        uint256 fee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
-        usdc.mint(idiot, fee);
+    /// @notice Verify deposit/withdraw still works normally with nonReentrant
+    function test_depositWithdraw_normalFlow() public {
+        usdc.mint(idiot, 500e6);
         vm.startPrank(idiot);
-        usdc.approve(address(escrow), fee);
-        escrow.deposit(fee);
+        usdc.approve(address(escrow), 500e6);
+        escrow.deposit(500e6);
+        escrow.withdraw(200e6);
         vm.stopPrank();
 
-        vm.prank(idiot);
-        escrow.purchase(SIGNAL_ID_1, NOTIONAL, ODDS);
-
-        // Now refund (owner is set as auditContract)
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        uint256 feePoolBal = escrow.feePool(genius, idiot, cycle);
-        assertTrue(feePoolBal > 0, "Fee pool should have USDC");
-
-        uint256 idiotBalBefore = escrow.getBalance(idiot);
-        escrow.refund(genius, idiot, cycle, feePoolBal);
-
-        assertEq(escrow.getBalance(idiot), idiotBalBefore + feePoolBal, "Idiot should receive refund");
-        assertEq(escrow.feePool(genius, idiot, cycle), 0, "Fee pool should be drained");
+        assertEq(escrow.getBalance(idiot), 300e6);
+        assertEq(usdc.balanceOf(idiot), 200e6);
     }
 }

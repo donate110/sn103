@@ -131,7 +131,7 @@ contract EdgeCaseIntegrationTest is Test {
     }
 
     function _purchaseSignal(uint256 signalId) internal returns (uint256 purchaseId) {
-        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         uint256 fee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
         uint256 protocolFee = (NOTIONAL * 50) / 10_000;
         _depositCollateral(lockAmount + fee + protocolFee);
@@ -215,7 +215,7 @@ contract EdgeCaseIntegrationTest is Test {
     function test_expiredSignal_purchaseReverts() public {
         uint256 sigId = _createSignal();
 
-        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         uint256 fee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
         uint256 protocolFee = (NOTIONAL * 50) / 10_000;
         _depositCollateral(lockAmount + fee + protocolFee);
@@ -242,7 +242,7 @@ contract EdgeCaseIntegrationTest is Test {
         assertEq(uint8(sig.status), uint8(SignalStatus.Cancelled));
 
         // Cannot purchase a cancelled signal
-        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         uint256 fee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
         _depositCollateral(lockAmount);
         _depositEscrow(fee);
@@ -271,7 +271,7 @@ contract EdgeCaseIntegrationTest is Test {
     function test_collateralExhaustion_purchaseRevertsWhenInsufficient() public {
         uint256 sigId = _createSignal();
 
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         uint256 fee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
 
         // Deposit less collateral than required
@@ -473,7 +473,7 @@ contract EdgeCaseIntegrationTest is Test {
 
         for (uint256 i; i < 10; i++) {
             uint256 sigId = _createSignal();
-            uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+            uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
             uint256 protocolFee = (NOTIONAL * 50) / 10_000;
             _depositCollateral(lockAmount + feePerSignal + protocolFee);
 
@@ -528,7 +528,7 @@ contract EdgeCaseIntegrationTest is Test {
         // 11th signal should fail on account recording (but purchase might go through
         // depending on whether the limit is enforced at Account level)
         uint256 sigId11 = _createSignal();
-        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         uint256 fee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
         uint256 protocolFee = (NOTIONAL * 50) / 10_000;
         _depositCollateral(lockAmount + fee + protocolFee);

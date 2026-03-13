@@ -49,7 +49,6 @@ interface IAccount {
 interface IEscrow {
     function getPurchase(uint256 purchaseId) external view returns (Purchase memory);
     function feePool(address genius, address idiot, uint256 cycle) external view returns (uint256);
-    function refund(address genius, address idiot, uint256 cycle, uint256 amount) external;
 }
 
 /// @notice Audit — used by Escrow (fee claim check) and OutcomeVoting (voted settlement)

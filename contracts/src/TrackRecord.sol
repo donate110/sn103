@@ -127,6 +127,16 @@ contract TrackRecord is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     }
 
     /// @notice Submit a verified track record proof on-chain
+    ///
+    /// @dev DESIGN NOTE (CF-08): The ZK public signals bind to committed signal hashes
+    ///      (Poseidon of preimage+index), not to the submitter's wallet address. Adding
+    ///      the genius address as a public signal would require a circuit redesign (the
+    ///      Groth16 circuit is compiled with a fixed number of public inputs). Identity
+    ///      binding is enforced through the commit-reveal pattern instead: only the address
+    ///      that called commitProof() can submit within the COMMIT_EXPIRY_BLOCKS window,
+    ///      and the proofHash deduplication prevents reuse. A circuit-level identity binding
+    ///      is planned for the next circuit version.
+    ///
     /// @dev Public signals layout (106 elements):
     ///      [0..19]   commitHash   — Poseidon hashes of (preimage, index) for each signal
     ///      [20..39]  outcome      — 1=Favorable, 2=Unfavorable, 3=Void

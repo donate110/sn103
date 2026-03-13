@@ -310,3 +310,47 @@ See the whitepaper for design intent.
 **Target state:** Raise SHAMIR_MIN to 3 once all Djinn validators run compatible versions (>= v574). The floor of 3 prevents threshold=1 attacks.
 **Reason:** With only 4 Djinn validators online (and only 2-3 on compatible software), a fixed threshold of 7 made signal creation impossible. The 2/3 majority requirement preserves the security property while adapting to network size.
 **Impact:** Signal creation works with 2-10+ validators. Threshold scales from 2 (bootstrap) to 7 (at 10+), then stays at 7 forever.
+
+## DEV-022: Refund Function Removed; Genius Retains Fee Pool
+
+**Date:** 2026-03-13
+**Whitepaper Section:** Section 7 — Economics, Section 6 — Settlement
+**Whitepaper Says:** Implies fee refunds flow from the fee pool to idiots on negative scores.
+**What we did:** Removed the dead `refund()` function from Escrow. Tranche A damages (USDC refunds to idiots) come from genius collateral slashing (see DEV-013), not from the fee pool. The genius retains the full fee pool via `claimFees()` regardless of settlement outcome. Damages and fees are separate economic pools.
+**Why:** The refund function was never called by Audit settlement logic. Tranche A uses `collateral.slash(genius, amount, idiot)` to send USDC directly from collateral to the idiot. The fee pool represents the genius's earned revenue for providing the information service. Damages are a separate penalty backed by collateral. This separation is cleaner: the genius's revenue is their revenue; collateral is the performance bond.
+**Impact:** Economic. Genius keeps fee pool even after negative audits. Idiot protection is unchanged (Tranche A comes from collateral, capped at fees paid).
+
+## DEV-023: Protocol Fee Included in Collateral Lock
+
+**Date:** 2026-03-13
+**Whitepaper Section:** Section 7 — Collateral
+**Whitepaper Says:** "Required collateral = Σ (notional × SLA%) across all active signals and all buyers."
+**What we did:** Collateral lock at purchase time now includes both the SLA lock and the 0.5% protocol fee: `lockAmount = notional * slaMultiplierBps / 10000 + notional * 50 / 10000`. This ensures the genius always has sufficient collateral for the protocol fee at settlement.
+**Why:** Audit finding CF-03 identified that without pre-locking the protocol fee, a genius with minimal free collateral could have insufficient funds at settlement time, resulting in a ProtocolFeeShortfall event with no actual fee collected.
+**Impact:** Genius needs slightly more collateral per purchase (~0.5% more). Eliminates protocol fee shortfall risk.
+
+## DEV-024: Withdrawal Freeze During Settlement
+
+**Date:** 2026-03-13
+**Whitepaper Section:** Section 7 — Collateral
+**Whitepaper Says:** "Excess collateral can be withdrawn at any time."
+**What we did:** Added `freezeWithdrawals()` / `unfreezeWithdrawals()` to Collateral. Audit settlement (`_settleCommon()`) freezes genius withdrawals before releasing locks and slashing, then unfreezes after settlement completes. This prevents front-running of settlement by withdrawing free collateral between lock release and slash.
+**Why:** Audit finding CF-03. Without the freeze, a genius observing a pending settlement transaction could front-run it by withdrawing all free collateral, leaving insufficient funds for Tranche A damages and the protocol fee.
+**Impact:** Genius withdrawals are blocked for the duration of a settlement transaction (single block). Negligible UX impact.
+
+## DEV-025: OutcomeVoting Auto-Reset on Validator Set Change
+
+**Date:** 2026-03-13
+**Whitepaper Section:** Section 10 — Validators
+**Whitepaper Says:** Validator consensus requires 2/3+ agreement.
+**What we did:** Changed OutcomeVoting behavior when the validator set changes mid-vote. Previously (CF-05), any validator set change would permanently revert all subsequent votes for that cycle with `ValidatorSetChanged`. Now, when a vote detects a nonce mismatch, the cycle snapshot is cleared and re-initialized with the current validator set. Existing votes are preserved in storage but the quorum calculation restarts from scratch.
+**Why:** The previous behavior could permanently brick cycles, requiring `forceSettle` through the 72-hour timelock. Auto-reset allows voting to resume with the new validator set without manual intervention.
+**Impact:** Cycles are no longer permanently stuck by validator set changes. A validator set change during voting resets quorum progress, which may delay settlement but does not require emergency intervention.
+
+## DEV-026: Account.qualityScore Renamed to outcomeBalance
+
+**Date:** 2026-03-13
+**Whitepaper Section:** Section 6 — Quality Score
+**What we did:** Renamed the `qualityScore` field in Account.sol's AccountState struct to `outcomeBalance`. This field tracks a simple +1/-1 counter (favorable/unfavorable outcomes) and is unrelated to the USDC-denominated Quality Score computed by `Audit.computeScore()`.
+**Why:** Audit finding CF-13. The name collision with the financial Quality Score could mislead off-chain consumers. "outcomeBalance" clearly indicates this is a directional outcome counter, not a dollar-denominated score.
+**Impact:** Interface change. Subgraph and off-chain consumers reading AccountState must use `outcomeBalance` instead of `qualityScore`.

@@ -137,7 +137,7 @@ contract LifecycleIntegrationTest is Test {
         internal
         returns (uint256 purchaseId)
     {
-        uint256 lockAmount = (notional * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 lockAmount = (notional * SLA_MULTIPLIER_BPS) / 10_000 + (notional * 50) / 10_000;
         uint256 fee = (notional * MAX_PRICE_BPS) / 10_000;
         uint256 protocolFeeShare = (notional * 50) / 10_000;
         _depositCollateral(genius, lockAmount + fee + protocolFeeShare);
@@ -182,7 +182,7 @@ contract LifecycleIntegrationTest is Test {
         assertEq(keyRecovery.getRecoveryBlob(genius1), hex"aabbccdd");
 
         // Step 3: Genius deposits collateral
-        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         uint256 fee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
         uint256 protocolFeeSlash = (NOTIONAL * 50) / 10_000;
         _depositCollateral(genius1, lockAmount + fee + protocolFeeSlash);
@@ -334,7 +334,7 @@ contract LifecycleIntegrationTest is Test {
         // Cycle 1: Use credits to pay for purchases
         // Create a signal and purchase using credits
         uint256 sigId = _createSignal(genius1);
-        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         uint256 fee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
         uint256 protocolFeeShare = (NOTIONAL * 50) / 10_000;
         _depositCollateral(genius1, lockAmount + fee + protocolFeeShare);
@@ -413,7 +413,7 @@ contract LifecycleIntegrationTest is Test {
         // Create and purchase signals
         for (uint256 i; i < 10; i++) {
             uint256 sigId = _createSignal(genius1);
-            uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+            uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
             uint256 fee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
             uint256 protocolFeeShare = (NOTIONAL * 50) / 10_000;
 
@@ -629,7 +629,7 @@ contract LifecycleIntegrationTest is Test {
             totalNotional += notional;
 
             uint256 sigId = _createSignal(genius1);
-            uint256 lockAmount = (notional * SLA_MULTIPLIER_BPS) / 10_000;
+            uint256 lockAmount = (notional * SLA_MULTIPLIER_BPS) / 10_000 + (notional * 50) / 10_000;
             uint256 fee = (notional * MAX_PRICE_BPS) / 10_000;
             uint256 protocolFeeSlash = (notional * 50) / 10_000;
             _depositCollateral(genius1, lockAmount + fee + protocolFeeSlash);

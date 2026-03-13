@@ -3,8 +3,7 @@ pragma solidity ^0.8.28;
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {StorageSlot} from "@openzeppelin/contracts/utils/StorageSlot.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IAudit, IAccount} from "./interfaces/IProtocol.sol";
@@ -25,12 +24,15 @@ import {IAudit, IAccount} from "./interfaces/IProtocol.sol";
 ///      retains addValidator/removeValidator for bootstrap and emergencies.
 ///      Votes are per (genius, idiot, cycle) tuple. Each validator can vote
 ///      once per cycle. Finalization is automatic when quorum is reached.
-contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
+contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardTransient, UUPSUpgradeable {
     // ─── Constants ──────────────────────────────────────────────
 
     /// @notice Quorum requirement: 2/3 of validators must agree
     uint256 public constant QUORUM_NUMERATOR = 2;
     uint256 public constant QUORUM_DENOMINATOR = 3;
+
+    /// @notice Minimum number of validators required
+    uint256 public constant MIN_VALIDATORS = 3;
 
     // ─── State ──────────────────────────────────────────────────
 
@@ -183,8 +185,8 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     /// @notice Validator set changed after first vote was cast for this cycle
     error ValidatorSetChanged(bytes32 cycleKey, uint256 snapshotNonce, uint256 currentNonce);
 
-    /// @notice Voter was not a validator when this cycle's voting began
-    error NotSnapshotValidator(address voter, bytes32 cycleKey);
+    /// @notice Validator count is below the minimum required
+    error BelowMinValidators(uint256 current, uint256 minimum);
 
     // ─── Constructor / Initializer ──────────────────────────────
 
@@ -197,7 +199,6 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     function initialize(address _owner) public initializer {
         __Ownable_init(_owner);
         __Pausable_init();
-        StorageSlot.getUint256Slot(_reentrancyGuardStorageSlot()).value = 1;
     }
 
     // ─── Admin ──────────────────────────────────────────────────
@@ -234,6 +235,7 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     /// @param validator Address to remove
     function removeValidator(address validator) external onlyOwner {
         if (!isValidator[validator]) revert ValidatorNotRegistered(validator);
+        if (validators.length - 1 < MIN_VALIDATORS) revert BelowMinValidators(validators.length - 1, MIN_VALIDATORS);
 
         isValidator[validator] = false;
 
@@ -322,6 +324,8 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
 
     /// @dev Atomically replace the entire validator set and increment nonce
     function _applySync(address[] calldata newValidators) internal {
+        if (newValidators.length < MIN_VALIDATORS) revert BelowMinValidators(newValidators.length, MIN_VALIDATORS);
+
         // Clear old set
         for (uint256 i = 0; i < validators.length; i++) {
             address old = validators[i];
@@ -365,16 +369,18 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
         if (finalized[cycleKey]) revert CycleAlreadyFinalized(cycleKey);
         if (hasVoted[cycleKey][msg.sender]) revert AlreadyVoted(msg.sender, cycleKey);
 
+        // If validator set changed since snapshot, reset the cycle for re-voting
+        if (cycleSyncNonce[cycleKey] != 0 && syncNonce != cycleSyncNonce[cycleKey]) {
+            // Reset snapshot - next block will re-snapshot with current validator set
+            cycleValidatorSnapshot[cycleKey] = 0;
+            cycleSyncNonce[cycleKey] = 0;
+        }
+
         // Snapshot validator count and sync nonce on first vote for this cycle
         if (cycleValidatorSnapshot[cycleKey] == 0) {
             require(validators.length > 0, "OutcomeVoting: empty validator set");
             cycleValidatorSnapshot[cycleKey] = validators.length;
             cycleSyncNonce[cycleKey] = syncNonce;
-        }
-
-        // Reject votes if validator set changed since snapshot (prevents quorum manipulation)
-        if (syncNonce != cycleSyncNonce[cycleKey]) {
-            revert ValidatorSetChanged(cycleKey, cycleSyncNonce[cycleKey], syncNonce);
         }
 
         // Record vote

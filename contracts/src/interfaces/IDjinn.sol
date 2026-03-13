@@ -50,7 +50,7 @@ struct Purchase {
 struct AccountState {
     uint256 currentCycle;
     uint256 signalCount;
-    int256 qualityScore;
+    int256 outcomeBalance;
     uint256[] purchaseIds;
     bool settled;
 }

@@ -319,19 +319,20 @@ contract CollateralTest is Test {
         assertEq(usdc.balanceOf(recipient), 5000e6);
     }
 
-    function test_slash_reducesLockedIfNecessary() public {
+    function test_slash_doesNotReduceLocked() public {
         _depositAs(genius, 5000e6);
 
         // Lock 4k
         vm.prank(authorizedCaller);
         col.lock(1, genius, 4000e6);
 
-        // Slash 3k -> deposits become 2k, locked was 4k but should cap to deposits=2k
+        // Slash 3k -> deposits become 2k, locked stays at 4k (no clamping)
         vm.prank(authorizedCaller);
         col.slash(genius, 3000e6, recipient);
 
         assertEq(col.getDeposit(genius), 2000e6);
-        assertEq(col.getLocked(genius), 2000e6); // capped to deposits
+        assertEq(col.getLocked(genius), 4000e6); // not clamped
+        assertEq(col.getAvailable(genius), 0); // getAvailable handles locked > deposit
         assertEq(usdc.balanceOf(recipient), 3000e6);
     }
 
@@ -453,7 +454,7 @@ contract CollateralTest is Test {
         assertEq(geniusDepositBefore - col.getDeposit(genius), expectedSlash, "Fuzz: deposit reduced by exact slash amount");
     }
 
-    /// @notice Fuzz: slash with locked collateral — locked caps to deposit, available >= 0
+    /// @notice Fuzz: slash with locked collateral -- getAvailable handles locked > deposit gracefully
     function testFuzz_slashWithLocked_invariants(uint256 depositSeed, uint256 lockSeed, uint256 slashSeed) public {
         uint256 depositAmount = bound(depositSeed, 2e6, DEPOSIT_AMOUNT);
         uint256 lockAmount = bound(lockSeed, 1e6, depositAmount);
@@ -467,13 +468,18 @@ contract CollateralTest is Test {
         vm.prank(authorizedCaller);
         col.slash(genius, slashAmount, recipient);
 
-        // Invariant: deposit >= locked always
-        assertGe(col.getDeposit(genius), col.getLocked(genius), "Fuzz: deposit must be >= locked");
-        // Invariant: available = deposit - locked >= 0 (getAvailable handles underflow)
-        assertGe(col.getDeposit(genius), col.getLocked(genius), "Fuzz: available must be >= 0");
+        // Invariant: getAvailable returns 0 when locked > deposit (no underflow)
+        uint256 avail = col.getAvailable(genius);
+        uint256 dep = col.getDeposit(genius);
+        uint256 lck = col.getLocked(genius);
+        if (dep >= lck) {
+            assertEq(avail, dep - lck, "Fuzz: available = deposit - locked when deposit >= locked");
+        } else {
+            assertEq(avail, 0, "Fuzz: available must be 0 when locked > deposit");
+        }
     }
 
-    function testFuzz_depositGeLocked_afterSlash(uint256 depositSeed, uint256 lockSeed, uint256 slashSeed) public {
+    function testFuzz_availableValid_afterSlash(uint256 depositSeed, uint256 lockSeed, uint256 slashSeed) public {
         uint256 depositAmount = bound(depositSeed, 1e6, DEPOSIT_AMOUNT);
         uint256 lockAmount = bound(lockSeed, 1e6, depositAmount);
         uint256 slashAmount = bound(slashSeed, 1e6, depositAmount * 2);
@@ -486,8 +492,15 @@ contract CollateralTest is Test {
         vm.prank(authorizedCaller);
         col.slash(genius, slashAmount, recipient);
 
-        // Invariant: deposit >= locked
-        assertGe(col.getDeposit(genius), col.getLocked(genius), "Fuzz: deposit must be >= locked after slash");
+        // Invariant: getAvailable never underflows
+        uint256 avail = col.getAvailable(genius);
+        uint256 dep = col.getDeposit(genius);
+        uint256 lck = col.getLocked(genius);
+        if (dep >= lck) {
+            assertEq(avail, dep - lck, "Fuzz: available = deposit - locked");
+        } else {
+            assertEq(avail, 0, "Fuzz: available = 0 when locked > deposit");
+        }
     }
 
     function testFuzz_depositGeLocked_afterSlashAndRelease(uint256 depositSeed, uint256 lockSeed, uint256 slashSeed)
@@ -547,25 +560,25 @@ contract CollateralTest is Test {
         assertEq(col.getAvailable(genius), 1500e6);
     }
 
-    function test_slash_exceeding_then_release_handles_zero_locked() public {
+    function test_slash_exceeding_then_release_handles_locked() public {
         _depositAs(genius, 5000e6);
 
         // Lock 4k
         vm.prank(authorizedCaller);
         col.lock(1, genius, 4000e6);
 
-        // Slash all 5k → deposits=0, locked=0
+        // Slash all 5k -> deposits=0, locked stays at 4k (no clamping)
         vm.prank(authorizedCaller);
         col.slash(genius, 5000e6, recipient);
 
         assertEq(col.getDeposit(genius), 0);
-        assertEq(col.getLocked(genius), 0);
+        assertEq(col.getLocked(genius), 4000e6); // not clamped
+        assertEq(col.getAvailable(genius), 0);
 
-        // signalLock still shows 4k, but release handles the discrepancy
-        // release checks signalLock first, then caps locked reduction
+        // signalLock still shows 4k
         assertEq(col.getSignalLock(genius, 1), 4000e6);
 
-        // Release the signal lock — locked is already 0, capped to 0
+        // Release the signal lock
         vm.prank(authorizedCaller);
         col.release(1, genius, 4000e6);
 

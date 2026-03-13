@@ -143,7 +143,7 @@ contract AuditFuzzTest is Test {
             uint256 sigId = i + 1;
             _createSignal(sigId, sla);
 
-            uint256 lockAmount = (notional * sla) / 10_000;
+            uint256 lockAmount = (notional * sla) / 10_000 + (notional * 50) / 10_000;
             _depositGeniusCollateral(lockAmount);
 
             uint256 fee = (notional * MAX_PRICE_BPS) / 10_000;
@@ -191,7 +191,7 @@ contract AuditFuzzTest is Test {
             uint256 sigId = i + 1;
             _createSignal(sigId, sla);
 
-            uint256 lockAmount = (notional * sla) / 10_000;
+            uint256 lockAmount = (notional * sla) / 10_000 + (notional * 50) / 10_000;
             _depositGeniusCollateral(lockAmount);
 
             uint256 fee = (notional * MAX_PRICE_BPS) / 10_000;
@@ -258,7 +258,7 @@ contract AuditFuzzTest is Test {
             uint256 sigId = i + 1;
             _createSignal(sigId, sla);
 
-            uint256 lockAmount = (notional * sla) / 10_000;
+            uint256 lockAmount = (notional * sla) / 10_000 + (notional * 50) / 10_000;
             _depositGeniusCollateral(lockAmount);
 
             // Mint credits for each purchase
@@ -302,11 +302,11 @@ contract AuditFuzzTest is Test {
     // ─── Fuzz: Collateral Requirements
     // ──────────────────────────────────
 
-    /// @notice Fuzz collateral lock: verify lockAmount == notional * sla / 10000
+    /// @notice Fuzz collateral lock: verify lockAmount == notional * sla / 10000 + notional * 50 / 10000
     function testFuzz_collateralLock(uint256 notionalSeed, uint256 slaSeed) public {
         uint256 notional = bound(notionalSeed, 1e6, 1e12);
         uint256 sla = bound(slaSeed, 10_000, 30_000);
-        uint256 expectedLock = (notional * sla) / 10_000;
+        uint256 expectedLock = (notional * sla) / 10_000 + (notional * 50) / 10_000;
 
         _createSignal(1, sla);
         _depositGeniusCollateral(expectedLock);
@@ -320,7 +320,7 @@ contract AuditFuzzTest is Test {
         assertEq(
             collateral.getSignalLock(genius, 1),
             expectedLock,
-            "Fuzz: collateral lock should equal notional * sla / 10000"
+            "Fuzz: collateral lock should equal notional * (sla + 50) / 10000"
         );
         assertEq(collateral.getLocked(genius), expectedLock, "Fuzz: total locked mismatch");
     }
@@ -340,7 +340,7 @@ contract AuditFuzzTest is Test {
             uint256 sigId = i + 1;
             _createSignal(sigId, sla);
 
-            uint256 lockAmount = (notional * sla) / 10_000;
+            uint256 lockAmount = (notional * sla) / 10_000 + (notional * 50) / 10_000;
             _depositGeniusCollateral(lockAmount);
 
             uint256 fee = (notional * MAX_PRICE_BPS) / 10_000;
@@ -431,7 +431,7 @@ contract AuditFuzzTest is Test {
             uint256 sigId = i + 1;
             _createSignal(sigId, sla);
 
-            uint256 lockAmount = (notional * sla) / 10_000;
+            uint256 lockAmount = (notional * sla) / 10_000 + (notional * 50) / 10_000;
             _depositGeniusCollateral(lockAmount);
             totalCollateralDeposited += lockAmount;
 

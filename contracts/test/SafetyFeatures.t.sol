@@ -179,16 +179,14 @@ contract SafetyFeaturesTest is Test {
     // Upgrade gates
     // ═══════════════════════════════════════════════════
 
-    function test_audit_upgradeBlocked_withActivePairs() public {
-        account.setAuthorizedCaller(owner, true);
-        account.recordPurchase(genius, idiot, 1);
-
+    function test_audit_upgradeBlocked_whenNotPaused() public {
         AuditV2 newImpl = new AuditV2();
-        vm.expectRevert("Audit: active pairs must be settled");
+        vm.expectRevert(abi.encodeWithSignature("ExpectedPause()"));
         audit.upgradeToAndCall(address(newImpl), "");
     }
 
-    function test_audit_upgradeAllowed_withZeroPairs() public {
+    function test_audit_upgradeAllowed_whenPaused() public {
+        audit.pause();
         AuditV2 newImpl = new AuditV2();
         audit.upgradeToAndCall(address(newImpl), "");
         assertEq(AuditV2(address(audit)).version(), "v2");
@@ -380,7 +378,13 @@ contract SafetyFeaturesTest is Test {
         executors[0] = address(0);
         TimelockController timelock = new TimelockController(259200, proposers, executors, address(0));
 
+        // Set pauser before transferring ownership so we can pause
+        audit.setPauser(pauser);
         audit.transferOwnership(address(timelock));
+
+        // Pause the audit contract (required for upgrade)
+        vm.prank(pauser);
+        audit.pause();
 
         // Deploy V2
         AuditV2 newImpl = new AuditV2();

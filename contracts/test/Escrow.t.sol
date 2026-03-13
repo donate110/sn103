@@ -179,7 +179,7 @@ contract EscrowIntegrationTest is Test {
 
         // Genius needs enough collateral for: notional * slaMultiplierBps / 10000
         // 1000e6 * 15000 / 10000 = 1500e6
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
 
         // Fee = notional * maxPriceBps / 10000 = 1000e6 * 500 / 10000 = 50e6
@@ -227,7 +227,7 @@ contract EscrowIntegrationTest is Test {
     function test_purchase_with_credits() public {
         _createSignal(SIGNAL_ID);
 
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
 
         uint256 expectedFee = (NOTIONAL * MAX_PRICE_BPS) / 10_000; // 50e6
@@ -263,7 +263,7 @@ contract EscrowIntegrationTest is Test {
     function test_purchase_fully_covered_by_credits() public {
         _createSignal(SIGNAL_ID);
 
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
 
         uint256 expectedFee = (NOTIONAL * MAX_PRICE_BPS) / 10_000; // 50e6
@@ -294,7 +294,7 @@ contract EscrowIntegrationTest is Test {
     function test_purchase_reverts_insufficient_balance() public {
         _createSignal(SIGNAL_ID);
 
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
 
         // Deposit less than needed
@@ -310,7 +310,7 @@ contract EscrowIntegrationTest is Test {
     function test_purchase_reverts_non_active_signal() public {
         _createSignal(SIGNAL_ID);
 
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
 
         // Cancel the signal so it's not Active
@@ -328,7 +328,7 @@ contract EscrowIntegrationTest is Test {
     function test_purchase_reverts_expired_signal() public {
         _createSignal(SIGNAL_ID);
 
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
 
         uint256 expectedFee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
@@ -346,7 +346,7 @@ contract EscrowIntegrationTest is Test {
         _createSignal(SIGNAL_ID);
 
         // Deposit less collateral than needed
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000; // 1500e6
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000; // 1500e6
         uint256 insufficientCollateral = requiredCollateral / 2;
         _depositGeniusCollateral(insufficientCollateral);
 
@@ -365,7 +365,7 @@ contract EscrowIntegrationTest is Test {
     function test_purchase_reverts_zero_notional() public {
         _createSignal(SIGNAL_ID);
 
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
 
         _depositIdiotEscrow(1e6);
@@ -406,7 +406,7 @@ contract EscrowIntegrationTest is Test {
                 })
             );
 
-            uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+            uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
             _depositGeniusCollateral(requiredCollateral);
 
             uint256 expectedFee = (NOTIONAL * priceBps[i]) / 10_000;
@@ -430,7 +430,7 @@ contract EscrowIntegrationTest is Test {
             uint256 sigId = 200 + i;
             _createSignalWithId(sigId);
 
-            uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+            uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
             _depositGeniusCollateral(requiredCollateral);
 
             uint256 expectedFee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
@@ -463,98 +463,13 @@ contract EscrowIntegrationTest is Test {
         );
     }
 
-    // ─── Refund (via Audit)
-    // ──────────────────────────────────────────────
-
-    function test_refund_from_audit() public {
-        // Complete a purchase to build up fee pool
-        _createSignal(SIGNAL_ID);
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
-        _depositGeniusCollateral(requiredCollateral);
-        uint256 expectedFee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
-        _depositIdiotEscrow(expectedFee);
-
-        vm.prank(idiot);
-        escrow.purchase(SIGNAL_ID, NOTIONAL, ODDS);
-
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        uint256 poolBefore = escrow.feePool(genius, idiot, cycle);
-        assertEq(poolBefore, expectedFee, "Pool should contain fee");
-
-        // Owner acts as audit contract, trigger refund
-        uint256 refundAmount = expectedFee / 2;
-        escrow.refund(genius, idiot, cycle, refundAmount);
-
-        assertEq(escrow.feePool(genius, idiot, cycle), poolBefore - refundAmount, "Pool not reduced");
-        assertEq(escrow.getBalance(idiot), refundAmount, "Refund not credited to idiot balance");
-    }
-
-    function test_refund_unauthorized_reverts() public {
-        address random = address(0xDEAD);
-        vm.expectRevert(Escrow.Unauthorized.selector);
-        vm.prank(random);
-        escrow.refund(genius, idiot, 0, 100e6);
-    }
-
-    function test_refund_zero_reverts() public {
-        vm.expectRevert(Escrow.ZeroAmount.selector);
-        escrow.refund(genius, idiot, 0, 0);
-    }
-
-    function test_refund_exceeds_pool_reverts() public {
-        // Build up a fee pool via a purchase
-        _createSignal(SIGNAL_ID);
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
-        _depositGeniusCollateral(requiredCollateral);
-        uint256 expectedFee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
-        _depositIdiotEscrow(expectedFee);
-
-        vm.prank(idiot);
-        escrow.purchase(SIGNAL_ID, NOTIONAL, ODDS);
-
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        uint256 poolBalance = escrow.feePool(genius, idiot, cycle);
-
-        // Try to refund more than pool contains
-        vm.expectRevert(abi.encodeWithSelector(Escrow.InsufficientBalance.selector, poolBalance, poolBalance + 1));
-        escrow.refund(genius, idiot, cycle, poolBalance + 1);
-    }
-
-    function test_refund_successive_drains_pool() public {
-        // Build up a fee pool via a purchase
-        _createSignal(SIGNAL_ID);
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
-        _depositGeniusCollateral(requiredCollateral);
-        uint256 expectedFee = (NOTIONAL * MAX_PRICE_BPS) / 10_000; // 50e6
-        _depositIdiotEscrow(expectedFee);
-
-        vm.prank(idiot);
-        escrow.purchase(SIGNAL_ID, NOTIONAL, ODDS);
-
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-
-        // First refund: half the pool
-        escrow.refund(genius, idiot, cycle, expectedFee / 2);
-        assertEq(escrow.feePool(genius, idiot, cycle), expectedFee / 2, "Pool half-drained");
-        assertEq(escrow.getBalance(idiot), expectedFee / 2, "Idiot got first refund");
-
-        // Second refund: remaining half
-        escrow.refund(genius, idiot, cycle, expectedFee / 2);
-        assertEq(escrow.feePool(genius, idiot, cycle), 0, "Pool fully drained");
-        assertEq(escrow.getBalance(idiot), expectedFee, "Idiot got full refund");
-
-        // Third refund: pool is empty, should revert
-        vm.expectRevert(abi.encodeWithSelector(Escrow.InsufficientBalance.selector, 0, 1));
-        escrow.refund(genius, idiot, cycle, 1);
-    }
-
     // ─── setOutcome Tests
     // ─────────────────────────────────────────────────
 
     function test_setOutcome_success() public {
         // Complete a purchase
         _createSignal(SIGNAL_ID);
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
         uint256 expectedFee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(expectedFee);
@@ -586,7 +501,7 @@ contract EscrowIntegrationTest is Test {
 
     function test_setOutcome_doubleSet_reverts() public {
         _createSignal(SIGNAL_ID);
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
         uint256 expectedFee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(expectedFee);
@@ -613,7 +528,7 @@ contract EscrowIntegrationTest is Test {
     function test_purchase_credits_exactly_cover_fee() public {
         _createSignal(SIGNAL_ID);
 
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
 
         uint256 expectedFee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
@@ -636,7 +551,7 @@ contract EscrowIntegrationTest is Test {
     function test_purchase_minOdds() public {
         _createSignal(SIGNAL_ID);
 
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
         uint256 expectedFee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(expectedFee);
@@ -666,7 +581,7 @@ contract EscrowIntegrationTest is Test {
         _createSignal(SIGNAL_ID); // maxNotional = 10_000e6
 
         uint256 bigNotional = 10_001e6; // exceeds 10_000e6
-        uint256 requiredCollateral = (bigNotional * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (bigNotional * SLA_MULTIPLIER_BPS) / 10_000 + (bigNotional * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
         uint256 expectedFee = (bigNotional * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(expectedFee);
@@ -680,7 +595,7 @@ contract EscrowIntegrationTest is Test {
         _createSignal(SIGNAL_ID); // maxNotional = 10_000e6
 
         uint256 exactMax = 10_000e6;
-        uint256 requiredCollateral = (exactMax * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (exactMax * SLA_MULTIPLIER_BPS) / 10_000 + (exactMax * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
         uint256 expectedFee = (exactMax * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(expectedFee);
@@ -712,7 +627,7 @@ contract EscrowIntegrationTest is Test {
         );
 
         uint256 bigNotional = 100_000e6;
-        uint256 requiredCollateral = (bigNotional * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (bigNotional * SLA_MULTIPLIER_BPS) / 10_000 + (bigNotional * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
         uint256 expectedFee = (bigNotional * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(expectedFee);
@@ -729,7 +644,7 @@ contract EscrowIntegrationTest is Test {
 
     function test_canPurchase_active_signal() public {
         _createSignal(SIGNAL_ID);
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         _depositGeniusCollateral(requiredCollateral);
         (bool canBuy, string memory reason) = escrow.canPurchase(SIGNAL_ID, NOTIONAL);
         assertTrue(canBuy, "Active signal should be purchasable");
@@ -815,7 +730,7 @@ contract EscrowIntegrationTest is Test {
 
         // First buyer: 4000 USDC
         uint256 notional1 = 4000e6;
-        uint256 collateral1 = (notional1 * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateral1 = (notional1 * SLA_MULTIPLIER_BPS) / 10_000 + (notional1 * 50) / 10_000;
         _depositGeniusCollateral(collateral1);
         uint256 fee1 = (notional1 * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(fee1);
@@ -829,7 +744,7 @@ contract EscrowIntegrationTest is Test {
 
         // Second buyer: 3000 USDC
         uint256 notional2 = 3000e6;
-        uint256 collateral2 = (notional2 * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateral2 = (notional2 * SLA_MULTIPLIER_BPS) / 10_000 + (notional2 * 50) / 10_000;
         _depositGeniusCollateral(collateral2);
         uint256 fee2 = (notional2 * MAX_PRICE_BPS) / 10_000;
         usdc.mint(idiot2, fee2);
@@ -858,7 +773,7 @@ contract EscrowIntegrationTest is Test {
 
         // First purchase: 8000 USDC (idiot)
         uint256 notional1 = 8000e6;
-        uint256 collateral1 = (notional1 * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateral1 = (notional1 * SLA_MULTIPLIER_BPS) / 10_000 + (notional1 * 50) / 10_000;
         _depositGeniusCollateral(collateral1);
         uint256 fee1 = (notional1 * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(fee1);
@@ -868,7 +783,7 @@ contract EscrowIntegrationTest is Test {
 
         // Second purchase by different idiot: 3000 USDC (only 2000 remaining)
         uint256 notional2 = 3000e6;
-        uint256 collateral2 = (notional2 * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateral2 = (notional2 * SLA_MULTIPLIER_BPS) / 10_000 + (notional2 * 50) / 10_000;
         _depositGeniusCollateral(collateral2);
         uint256 fee2 = (notional2 * MAX_PRICE_BPS) / 10_000;
         usdc.mint(idiot2, fee2);
@@ -889,7 +804,7 @@ contract EscrowIntegrationTest is Test {
 
         // First purchase: 6000 USDC (idiot)
         uint256 notional1 = 6000e6;
-        uint256 collateral1 = (notional1 * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateral1 = (notional1 * SLA_MULTIPLIER_BPS) / 10_000 + (notional1 * 50) / 10_000;
         _depositGeniusCollateral(collateral1);
         uint256 fee1 = (notional1 * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(fee1);
@@ -899,7 +814,7 @@ contract EscrowIntegrationTest is Test {
 
         // Second purchase: exactly 4000 USDC remaining (idiot2 — different buyer)
         uint256 notional2 = 4000e6;
-        uint256 collateral2 = (notional2 * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateral2 = (notional2 * SLA_MULTIPLIER_BPS) / 10_000 + (notional2 * 50) / 10_000;
         _depositGeniusCollateral(collateral2);
         uint256 fee2 = (notional2 * MAX_PRICE_BPS) / 10_000;
         usdc.mint(idiot2, fee2);
@@ -912,7 +827,7 @@ contract EscrowIntegrationTest is Test {
         assertEq(escrow.signalNotionalFilled(SIGNAL_ID), 10_000e6, "Signal should be fully filled");
 
         // Third purchase should fail: 0 remaining
-        _depositGeniusCollateral((1e6 * SLA_MULTIPLIER_BPS) / 10_000);
+        _depositGeniusCollateral((1e6 * SLA_MULTIPLIER_BPS) / 10_000 + (1e6 * 50) / 10_000);
         uint256 fee3 = (1e6 * MAX_PRICE_BPS) / 10_000;
         usdc.mint(idiot3, fee3);
         vm.startPrank(idiot3);
@@ -928,7 +843,7 @@ contract EscrowIntegrationTest is Test {
 
         // First purchase: 5000 USDC
         uint256 notional1 = 5000e6;
-        uint256 collateral1 = (notional1 * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateral1 = (notional1 * SLA_MULTIPLIER_BPS) / 10_000 + (notional1 * 50) / 10_000;
         _depositGeniusCollateral(collateral1);
         uint256 fee1 = (notional1 * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(fee1);
@@ -943,7 +858,7 @@ contract EscrowIntegrationTest is Test {
         assertEq(uint8(signalCommitment.getSignal(SIGNAL_ID).status), uint8(SignalStatus.Cancelled));
 
         // Second purchase should fail: signal cancelled
-        _depositGeniusCollateral((1000e6 * SLA_MULTIPLIER_BPS) / 10_000);
+        _depositGeniusCollateral((1000e6 * SLA_MULTIPLIER_BPS) / 10_000 + (1000e6 * 50) / 10_000);
         _depositIdiotEscrow((1000e6 * MAX_PRICE_BPS) / 10_000);
 
         vm.expectRevert(abi.encodeWithSelector(Escrow.SignalNotActive.selector, SIGNAL_ID));
@@ -956,7 +871,7 @@ contract EscrowIntegrationTest is Test {
 
         // First purchase: 7000 USDC
         uint256 notional1 = 7000e6;
-        uint256 collateral1 = (notional1 * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateral1 = (notional1 * SLA_MULTIPLIER_BPS) / 10_000 + (notional1 * 50) / 10_000;
         _depositGeniusCollateral(collateral1);
         uint256 fee1 = (notional1 * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(fee1);
@@ -965,7 +880,7 @@ contract EscrowIntegrationTest is Test {
         escrow.purchase(SIGNAL_ID, notional1, ODDS);
 
         // Deposit additional collateral for the remaining capacity check
-        uint256 collateral2 = (3000e6 * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateral2 = (3000e6 * SLA_MULTIPLIER_BPS) / 10_000 + (3000e6 * 50) / 10_000;
         _depositGeniusCollateral(collateral2);
 
         // canPurchase should reflect remaining capacity (3000e6)
@@ -983,7 +898,7 @@ contract EscrowIntegrationTest is Test {
         assertEq(escrow.getSignalNotionalFilled(SIGNAL_ID), 0, "Should start at zero");
 
         uint256 notional1 = 2000e6;
-        uint256 collateral1 = (notional1 * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateral1 = (notional1 * SLA_MULTIPLIER_BPS) / 10_000 + (notional1 * 50) / 10_000;
         _depositGeniusCollateral(collateral1);
         uint256 fee1 = (notional1 * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(fee1);
@@ -1001,14 +916,14 @@ contract EscrowIntegrationTest is Test {
         _createSignal(SIGNAL_ID);
 
         uint256 notional1 = 1000e6;
-        _depositGeniusCollateral((notional1 * SLA_MULTIPLIER_BPS) / 10_000);
+        _depositGeniusCollateral((notional1 * SLA_MULTIPLIER_BPS) / 10_000 + (notional1 * 50) / 10_000);
         _depositIdiotEscrow((notional1 * MAX_PRICE_BPS) / 10_000);
 
         vm.prank(idiot);
         escrow.purchase(SIGNAL_ID, notional1, ODDS);
 
         // Same idiot tries to purchase the same signal again
-        _depositGeniusCollateral((notional1 * SLA_MULTIPLIER_BPS) / 10_000);
+        _depositGeniusCollateral((notional1 * SLA_MULTIPLIER_BPS) / 10_000 + (notional1 * 50) / 10_000);
         _depositIdiotEscrow((notional1 * MAX_PRICE_BPS) / 10_000);
 
         vm.expectRevert(abi.encodeWithSelector(Escrow.AlreadyPurchased.selector, SIGNAL_ID, idiot));
@@ -1022,14 +937,14 @@ contract EscrowIntegrationTest is Test {
 
         // First idiot purchases
         uint256 notional1 = 1000e6;
-        _depositGeniusCollateral((notional1 * SLA_MULTIPLIER_BPS) / 10_000);
+        _depositGeniusCollateral((notional1 * SLA_MULTIPLIER_BPS) / 10_000 + (notional1 * 50) / 10_000);
         _depositIdiotEscrow((notional1 * MAX_PRICE_BPS) / 10_000);
 
         vm.prank(idiot);
         escrow.purchase(SIGNAL_ID, notional1, ODDS);
 
         // Second (different) idiot purchases the same signal — allowed
-        _depositGeniusCollateral((notional1 * SLA_MULTIPLIER_BPS) / 10_000);
+        _depositGeniusCollateral((notional1 * SLA_MULTIPLIER_BPS) / 10_000 + (notional1 * 50) / 10_000);
         uint256 fee2 = (notional1 * MAX_PRICE_BPS) / 10_000;
         usdc.mint(idiot2, fee2);
         vm.startPrank(idiot2);
@@ -1064,7 +979,7 @@ contract EscrowIntegrationTest is Test {
         );
 
         uint256 smallNotional = 50e6; // below min
-        uint256 collateral1 = (smallNotional * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateral1 = (smallNotional * SLA_MULTIPLIER_BPS) / 10_000 + (smallNotional * 50) / 10_000;
         _depositGeniusCollateral(collateral1);
         uint256 fee1 = (smallNotional * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(fee1);
@@ -1094,7 +1009,7 @@ contract EscrowIntegrationTest is Test {
         );
 
         uint256 exactMin = 100e6;
-        uint256 collateral1 = (exactMin * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 collateral1 = (exactMin * SLA_MULTIPLIER_BPS) / 10_000 + (exactMin * 50) / 10_000;
         _depositGeniusCollateral(collateral1);
         uint256 fee1 = (exactMin * MAX_PRICE_BPS) / 10_000;
         _depositIdiotEscrow(fee1);
@@ -1148,8 +1063,6 @@ contract MockAuditForClaims {
         return (0, 0, 0, 0, settledTimestamps[genius][idiot][cycle]);
     }
 
-    // Also implement refund interface so it can act as audit for Escrow
-    function refund(address, address, uint256, uint256) external pure {}
 }
 
 /// @title EscrowFeeClaimTest
@@ -1227,7 +1140,7 @@ contract EscrowFeeClaimTest is Test {
             })
         );
 
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         usdc.mint(genius, requiredCollateral);
         vm.startPrank(genius);
         usdc.approve(address(collateral), requiredCollateral);
@@ -1335,7 +1248,7 @@ contract EscrowFeeClaimTest is Test {
             })
         );
 
-        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000;
+        uint256 requiredCollateral = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
         usdc.mint(genius, requiredCollateral);
         vm.startPrank(genius);
         usdc.approve(address(collateral), requiredCollateral);

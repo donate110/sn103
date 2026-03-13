@@ -183,9 +183,9 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
         // Update quality score: +1 for Favorable, -1 for Unfavorable, 0 for Void
         if (outcome == Outcome.Favorable) {
-            _accounts[key].qualityScore++;
+            _accounts[key].outcomeBalance++;
         } else if (outcome == Outcome.Unfavorable) {
-            _accounts[key].qualityScore--;
+            _accounts[key].outcomeBalance--;
         }
 
         emit OutcomeRecorded(genius, idiot, purchaseId, outcome);
@@ -196,35 +196,9 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @param idiot The Idiot (buyer) address
     function startNewCycle(address genius, address idiot) external onlyAuthorized {
         _validatePair(genius, idiot);
-
         bytes32 key = _accountKey(genius, idiot);
-        AccountState storage acct = _accounts[key];
-
-        // Decrement active pair count (guarded by flag to prevent double-decrement)
-        if (_pairIsActive[key]) {
-            _pairIsActive[key] = false;
-            activePairCount--;
-        }
-
-        // Clear purchase recorded flags and stale outcomes for the current cycle
-        uint256 len = acct.purchaseIds.length;
-        for (uint256 i; i < len;) {
-            delete _outcomes[key][acct.purchaseIds[i]];
-            delete _purchaseRecorded[key][acct.purchaseIds[i]];
-            unchecked {
-                ++i;
-            }
-        }
-
-        unchecked {
-            acct.currentCycle++;
-        }
-        acct.signalCount = 0;
-        acct.qualityScore = 0;
-        delete acct.purchaseIds;
-        acct.settled = false;
-
-        emit NewCycleStarted(genius, idiot, acct.currentCycle);
+        _resetCycle(key);
+        emit NewCycleStarted(genius, idiot, _accounts[key].currentCycle);
     }
 
     /// @notice Set the settled flag for a Genius-Idiot pair
@@ -245,36 +219,9 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @param idiot The Idiot (buyer) address
     function settleAudit(address genius, address idiot) external onlyAuthorized {
         _validatePair(genius, idiot);
-
         bytes32 key = _accountKey(genius, idiot);
-        AccountState storage acct = _accounts[key];
-
-        // Decrement active pair count (guarded by flag to prevent double-decrement)
-        if (_pairIsActive[key]) {
-            _pairIsActive[key] = false;
-            activePairCount--;
-        }
-
-        // Clear purchase recorded flags and stale outcomes for the current cycle
-        uint256 len = acct.purchaseIds.length;
-        for (uint256 i; i < len;) {
-            delete _outcomes[key][acct.purchaseIds[i]];
-            delete _purchaseRecorded[key][acct.purchaseIds[i]];
-            unchecked {
-                ++i;
-            }
-        }
-
-        // Start new cycle (settled state is transient; emit only the new cycle event)
-        unchecked {
-            acct.currentCycle++;
-        }
-        acct.signalCount = 0;
-        acct.qualityScore = 0;
-        delete acct.purchaseIds;
-        acct.settled = false;
-
-        emit NewCycleStarted(genius, idiot, acct.currentCycle);
+        _resetCycle(key);
+        emit NewCycleStarted(genius, idiot, _accounts[key].currentCycle);
     }
 
     /// @notice Authorize or deauthorize a contract to call mutating functions
@@ -341,6 +288,31 @@ contract Account is Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
     // ─── Internal Functions
     // ─────────────────────────────────────────────
+
+    /// @dev Resets cycle state: clears outcomes, purchase records, increments cycle, zeros counters
+    function _resetCycle(bytes32 key) internal {
+        AccountState storage acct = _accounts[key];
+
+        // Decrement active pair count (guarded by flag to prevent double-decrement)
+        if (_pairIsActive[key]) {
+            _pairIsActive[key] = false;
+            activePairCount--;
+        }
+
+        // Clear purchase recorded flags and stale outcomes for the current cycle
+        uint256 len = acct.purchaseIds.length;
+        for (uint256 i; i < len;) {
+            delete _outcomes[key][acct.purchaseIds[i]];
+            delete _purchaseRecorded[key][acct.purchaseIds[i]];
+            unchecked { ++i; }
+        }
+
+        unchecked { acct.currentCycle++; }
+        acct.signalCount = 0;
+        acct.outcomeBalance = 0;
+        delete acct.purchaseIds;
+        acct.settled = false;
+    }
 
     /// @dev Computes the storage key for a Genius-Idiot pair
     function _accountKey(address genius, address idiot) internal pure returns (bytes32 key) {

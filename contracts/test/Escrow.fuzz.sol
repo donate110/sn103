@@ -94,7 +94,7 @@ contract EscrowFuzzTest is Test {
         );
 
         uint256 fee = (notional * maxPriceBps) / 10_000;
-        uint256 lockAmount = (notional * slaMultiplierBps) / 10_000;
+        uint256 lockAmount = (notional * slaMultiplierBps) / 10_000 + (notional * 50) / 10_000;
 
         // Deposit collateral
         usdc.mint(genius, lockAmount);
@@ -167,7 +167,7 @@ contract EscrowFuzzTest is Test {
             })
         );
 
-        uint256 lockAmount = (notional * slaMultiplierBps) / 10_000;
+        uint256 lockAmount = (notional * slaMultiplierBps) / 10_000 + (notional * 50) / 10_000;
 
         // Deposit collateral
         usdc.mint(genius, lockAmount);
@@ -253,7 +253,7 @@ contract EscrowFuzzTest is Test {
         );
 
         uint256 fee = (notional * maxPriceBps) / 10_000;
-        uint256 lockAmount = (notional * slaMultiplierBps) / 10_000;
+        uint256 lockAmount = (notional * slaMultiplierBps) / 10_000 + (notional * 50) / 10_000;
 
         // Deposit collateral
         usdc.mint(genius, lockAmount);

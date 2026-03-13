@@ -53,15 +53,17 @@ contract OutcomeVotingSyncTest is Test {
         voting.addValidator(v1);
         uint256 nonce = voting.syncNonce();
 
-        address[] memory proposed = _sorted2(v1, v2);
+        // Propose a set with at least MIN_VALIDATORS (3)
+        address[] memory proposed = _sorted3(v1, v2, v3);
 
         vm.prank(v1);
         voting.proposeSync(proposed, nonce);
 
-        // Should have applied: v1 and v2 are now validators
+        // Should have applied: v1, v2, v3 are now validators
         assertTrue(voting.isValidator(v1));
         assertTrue(voting.isValidator(v2));
-        assertEq(voting.validatorCount(), 2);
+        assertTrue(voting.isValidator(v3));
+        assertEq(voting.validatorCount(), 3);
         assertEq(voting.syncNonce(), nonce + 1);
     }
 
@@ -73,23 +75,24 @@ contract OutcomeVotingSyncTest is Test {
         voting.addValidator(v3);
         uint256 nonce = voting.syncNonce();
 
-        address[] memory proposed = _sorted2(v4, v5);
+        // Propose a set with at least MIN_VALIDATORS (3)
+        address[] memory proposed = _sorted3(v3, v4, v5);
 
-        // First vote — no quorum yet
+        // First vote - no quorum yet
         vm.prank(v1);
         voting.proposeSync(proposed, nonce);
         assertFalse(voting.isValidator(v4));
         assertEq(voting.syncNonce(), nonce); // unchanged
 
-        // Second vote — quorum reached (2/3)
+        // Second vote - quorum reached (2/3)
         vm.prank(v2);
         voting.proposeSync(proposed, nonce);
+        assertTrue(voting.isValidator(v3));
         assertTrue(voting.isValidator(v4));
         assertTrue(voting.isValidator(v5));
         assertFalse(voting.isValidator(v1));
         assertFalse(voting.isValidator(v2));
-        assertFalse(voting.isValidator(v3));
-        assertEq(voting.validatorCount(), 2);
+        assertEq(voting.validatorCount(), 3);
         assertEq(voting.syncNonce(), nonce + 1);
     }
 
@@ -207,9 +210,13 @@ contract OutcomeVotingSyncTest is Test {
     // ─── removeValidator Increments Nonce ────────────────────
 
     function test_removeValidator_incrementsNonce() public {
+        // Need > MIN_VALIDATORS to be able to remove one
         voting.addValidator(v1);
+        voting.addValidator(v2);
+        voting.addValidator(v3);
+        voting.addValidator(v4);
         uint256 nonceBefore = voting.syncNonce();
-        voting.removeValidator(v1);
+        voting.removeValidator(v4);
         assertEq(voting.syncNonce(), nonceBefore + 1);
     }
 
@@ -293,24 +300,33 @@ contract OutcomeVotingSyncTest is Test {
         voting.addValidator(v1);
         uint256 nonce = voting.syncNonce();
 
-        // v1 proposes {v2}
+        // v1 proposes {v2, v3, v4} (need MIN_VALIDATORS=3)
+        address[] memory firstSet = _sorted3(v2, v3, v4);
         vm.prank(v1);
-        voting.proposeSync(_single(v2), nonce);
+        voting.proposeSync(firstSet, nonce);
 
-        // Now v2 is the only validator, v1 is gone
+        // Now v2, v3, v4 are validators; v1 is gone
         assertTrue(voting.isValidator(v2));
+        assertTrue(voting.isValidator(v3));
+        assertTrue(voting.isValidator(v4));
         assertFalse(voting.isValidator(v1));
 
         uint256 nonce2 = voting.syncNonce();
         assertEq(nonce2, nonce + 1);
 
         // v2 can now propose again
-        address[] memory proposed = _sorted2(v2, v3);
+        address[] memory proposed = _sorted3(v2, v3, v5);
         vm.prank(v2);
+        voting.proposeSync(proposed, nonce2);
+        // 1/3 quorum for 3 validators, need ceil(3*2/3)=2 votes, not reached yet
+        assertFalse(voting.isValidator(v5));
+
+        vm.prank(v3);
         voting.proposeSync(proposed, nonce2);
 
         assertTrue(voting.isValidator(v2));
         assertTrue(voting.isValidator(v3));
+        assertTrue(voting.isValidator(v5));
     }
 
     // ─── Fuzz: Wrong nonce always reverts ────────────────────
