@@ -1996,9 +1996,12 @@ def create_app(
 
     @app.get("/v1/signal/{signal_id}/share_info", response_model=ShareInfoResponse)
     async def share_info(signal_id: str, request: Request) -> ShareInfoResponse:
-        """Return this validator's share x-coordinate for MPC peer discovery."""
+        """Return this validator's share x-coordinate for MPC peer discovery.
+
+        No auth required: share_x is a public evaluation point, not a secret.
+        Peers need this to set up correct Lagrange interpolation coordinates.
+        """
         _validate_signal_id_path(signal_id)
-        await validate_signed_request(request, _get_validator_hotkeys())
 
         record = share_store.get(signal_id)
         if record is None:
