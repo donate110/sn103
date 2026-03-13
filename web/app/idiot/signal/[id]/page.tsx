@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAccount, useWalletClient } from "wagmi";
 import { useSignal, usePurchaseSignal, useSignalNotionalFilled, useEscrowBalance, useDepositEscrow, useWalletUsdcBalance, humanizeError } from "@/lib/hooks";
-import { discoverValidatorClients, getValidatorClient } from "@/lib/api";
+import { discoverValidatorClients, resilientCheckLines } from "@/lib/api";
 import { decrypt, fromHex, bigIntToKey, reconstructSecret } from "@/lib/crypto";
 import type { ShamirShare } from "@/lib/crypto";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
@@ -186,7 +186,6 @@ export default function PurchaseSignal() {
       // Step 1: Check line availability with miner (any sportsbook)
       setStep("checking_lines");
 
-      const validator = getValidatorClient();
       const candidateLines: CandidateLine[] = signal.decoyLines.map(
         (raw, i) =>
           decoyLineToCandidateLine(
@@ -197,14 +196,16 @@ export default function PurchaseSignal() {
           ),
       );
 
+      // Resilient check: retries across multiple validators/miners since
+      // some miners have broken Odds API keys and return 0 available lines.
       let checkResult: CheckResponse | null = null;
       try {
-        const result = await validator.checkLines({ lines: candidateLines });
+        const result = await resilientCheckLines({ lines: candidateLines });
         if (result.available_indices.length > 0) {
           checkResult = result;
         }
       } catch {
-        // Miner check failed
+        // All checks failed
       }
 
       if (!checkResult || checkResult.available_indices.length === 0) {

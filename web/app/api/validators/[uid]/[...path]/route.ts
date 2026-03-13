@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { discoverMetagraph } from "@/lib/bt-metagraph";
 import { getIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
 
-const ALLOWED_PATHS = new Set(["health", "v1/signal", "v1/activity", "v1/attest", "v1/attest/capacity", "v1/admin/attestations", "v1/admin/metrics/timeseries", "v1/telemetry"]);
+const ALLOWED_PATHS = new Set(["health", "v1/signal", "v1/check", "v1/activity", "v1/attest", "v1/attest/capacity", "v1/admin/attestations", "v1/admin/metrics/timeseries", "v1/telemetry"]);
 const PURCHASE_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/purchase$/;
 const REGISTER_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/register$/;
 const STATUS_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/status$/;

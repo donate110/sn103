@@ -310,3 +310,71 @@ export function getValidatorClient(): ValidatorClient {
 export function getMinerClient(): MinerClient {
   return new MinerClient(getMinerUrl());
 }
+
+/**
+ * Resilient line check that retries across multiple validators.
+ *
+ * Each validator proxies to a random miner. Some miners have broken or
+ * missing Odds API keys, returning 0 available lines for valid games.
+ * This function calls checkLines through multiple validators (sequentially
+ * to avoid hammering the network) and returns the first positive result.
+ * Falls back to a single-validator call if discovery fails.
+ */
+export async function resilientCheckLines(
+  req: CheckRequest,
+  maxAttempts: number = 5,
+): Promise<CheckResponse> {
+  // Try the default validator first (fastest path)
+  const primary = getValidatorClient();
+  try {
+    const result = await primary.checkLines(req);
+    if (result.available_indices.length > 0 && !result.api_error) {
+      return result;
+    }
+  } catch {
+    // Fall through to retry
+  }
+
+  // Discover all validators and try through different ones
+  let validators: ValidatorClient[];
+  try {
+    validators = await discoverValidatorClients();
+  } catch {
+    validators = [primary];
+  }
+
+  // Shuffle to spread load
+  for (let i = validators.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [validators[i], validators[j]] = [validators[j], validators[i]];
+  }
+
+  let lastResult: CheckResponse | null = null;
+  for (let attempt = 0; attempt < Math.min(maxAttempts - 1, validators.length); attempt++) {
+    const v = validators[attempt % validators.length];
+    try {
+      const result = await v.checkLines(req);
+      lastResult = result;
+      if (result.available_indices.length > 0 && !result.api_error) {
+        return result;
+      }
+    } catch {
+      // Try next validator
+    }
+  }
+
+  // Return the last result even if no lines were available (caller decides what to do)
+  if (lastResult) return lastResult;
+
+  // All attempts failed completely
+  return {
+    results: req.lines.map((l) => ({
+      index: l.index,
+      available: false,
+      bookmakers: [],
+    })),
+    available_indices: [],
+    response_time_ms: 0,
+    api_error: "All validators/miners unreachable",
+  };
+}
