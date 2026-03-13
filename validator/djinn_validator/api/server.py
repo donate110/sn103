@@ -2010,6 +2010,7 @@ def create_app(
         return ShareInfoResponse(
             signal_id=signal_id,
             share_x=record.share.x,
+            shamir_threshold=record.shamir_threshold,
         )
 
     # ------------------------------------------------------------------

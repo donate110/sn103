@@ -73,6 +73,11 @@ def _is_public_ip(ip_str: str) -> bool:
 # Timeout for gather operations (covers retries + backoff for concurrent peers)
 GATHER_TIMEOUT = PEER_TIMEOUT * 3
 
+# Minimum peer validator version for MPC compatibility.
+# Validators below this version have incompatible MPC implementations
+# (missing x-coordinate fix, unsigned peer requests, broken gate computation).
+_MIN_PEER_VERSION = 617
+
 
 class MPCOrchestrator:
     """Orchestrates MPC sessions for signal availability checks.
@@ -101,6 +106,7 @@ class MPCOrchestrator:
         limits = httpx.Limits(max_keepalive_connections=20, max_connections=100)
         self._http = httpx.AsyncClient(timeout=PEER_TIMEOUT, limits=limits)
         self._peer_breakers: dict[int, CircuitBreaker] = {}
+        self._peer_versions: dict[int, int] = {}  # UID -> parsed version number
 
     async def close(self) -> None:
         """Release the shared HTTP client."""
@@ -202,7 +208,8 @@ class MPCOrchestrator:
     def _get_peer_validators(self) -> list[dict[str, Any]]:
         """Discover peer validator addresses from the metagraph.
 
-        Returns list of {uid, hotkey, ip, port} for each validator.
+        Returns list of {uid, hotkey, ip, port, url} for each validator.
+        Filters to validators with compatible MPC implementations.
         """
         if self._neuron is None or self._neuron.metagraph is None:
             return []
@@ -220,6 +227,11 @@ class MPCOrchestrator:
                 continue
             if not _is_public_ip(axon.ip):
                 log.warning("peer_private_ip_skipped", uid=uid, ip=axon.ip)
+                continue
+
+            # Skip validators known to be incompatible via cached health
+            cached_ver = self._peer_versions.get(uid)
+            if cached_ver is not None and cached_ver < _MIN_PEER_VERSION:
                 continue
 
             peers.append(
@@ -400,6 +412,21 @@ class MPCOrchestrator:
                 )
                 if resp is not None and resp.status_code == 200:
                     data = resp.json()
+                    # Cache peer version from response header for future filtering
+                    ver_str = resp.headers.get("x-api-version", "")
+                    try:
+                        ver = int(ver_str)
+                        self._peer_versions[peer["uid"]] = ver
+                        if ver < _MIN_PEER_VERSION:
+                            log.info(
+                                "peer_version_incompatible",
+                                peer_uid=peer["uid"],
+                                version=ver,
+                                min_required=_MIN_PEER_VERSION,
+                            )
+                            return None
+                    except (ValueError, TypeError):
+                        pass
                     return peer["uid"], data["share_x"]
             except (httpx.HTTPError, KeyError, ValueError, AttributeError) as e:
                 log.debug("peer_share_x_lookup_failed", peer_uid=peer["uid"], error=str(e))

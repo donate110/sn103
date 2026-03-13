@@ -370,6 +370,7 @@ class ShareInfoResponse(BaseModel):
 
     signal_id: str
     share_x: int
+    shamir_threshold: int = 7
 
 
 # ---------------------------------------------------------------------------
