@@ -151,8 +151,8 @@ class TestStoreShare:
         })
         assert resp.status_code == 200
 
-    def test_rejects_low_shamir_threshold(self, client: TestClient) -> None:
-        """Validators reject shares with threshold below protocol minimum (3)."""
+    def test_warns_low_shamir_threshold(self, client: TestClient) -> None:
+        """Validators warn (but don't reject) shares with threshold below protocol minimum."""
         resp = client.post("/v1/signal", json={
             "signal_id": "sig-low-t",
             "genius_address": "0x" + "aa" * 20,
@@ -161,8 +161,8 @@ class TestStoreShare:
             "encrypted_key_share": "deadbeef",
             "shamir_threshold": 1,
         })
-        assert resp.status_code == 400
-        assert "shamir_threshold" in resp.json()["detail"]
+        # Accepted with warning; threshold is stored and enforced at MPC time
+        assert resp.status_code == 200
 
 
 class TestPurchase:

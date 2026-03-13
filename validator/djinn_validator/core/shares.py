@@ -32,6 +32,7 @@ class SignalShareRecord:
     share: Share
     encrypted_key_share: bytes  # Share of the AES key, encrypted to this validator
     encrypted_index_share: bytes = b""  # Share of the real index, for MPC executability check
+    shamir_threshold: int = 7  # Declared Shamir reconstruction threshold from genius
     stored_at: float = field(default_factory=time.time)
     released_to: set[str] = field(default_factory=set)
 
@@ -72,7 +73,7 @@ class ShareStore:
                 time.sleep(delay)
         raise RuntimeError("unreachable")
 
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 5
 
     def _create_tables(self) -> None:
         self._conn.executescript("""
@@ -178,6 +179,17 @@ class ShareStore:
                 pass  # Column already exists
             self._conn.commit()
 
+        if current < 5:
+            # v5: add shamir_threshold column so MPC uses per-signal threshold
+            log.info("schema_migration", from_version=max(current, 4), to_version=5)
+            try:
+                self._conn.execute(
+                    "ALTER TABLE shares ADD COLUMN shamir_threshold INTEGER NOT NULL DEFAULT 7"
+                )
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            self._conn.commit()
+
         self._set_schema_version(self.SCHEMA_VERSION)
         log.info("schema_version_set", version=self.SCHEMA_VERSION)
 
@@ -188,6 +200,7 @@ class ShareStore:
         share: Share,
         encrypted_key_share: bytes,
         encrypted_index_share: bytes = b"",
+        shamir_threshold: int = 7,
     ) -> None:
         """Store a new key share for a signal."""
         if not _SAFE_ID_RE.match(signal_id):
@@ -200,14 +213,16 @@ class ShareStore:
             try:
                 self._conn.execute(
                     "INSERT INTO shares (signal_id, genius_address, share_x, share_y, "
-                    "encrypted_key_share, encrypted_index_share, stored_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "encrypted_key_share, encrypted_index_share, stored_at, shamir_threshold) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (signal_id, genius_address, share.x, str(share.y),
-                     encrypted_key_share, encrypted_index_share, time.time()),
+                     encrypted_key_share, encrypted_index_share, time.time(),
+                     shamir_threshold),
                 )
                 self._conn.commit()
                 log.info("share_stored", signal_id=signal_id, genius=genius_address,
-                         has_index_share=len(encrypted_index_share) > 0)
+                         has_index_share=len(encrypted_index_share) > 0,
+                         shamir_threshold=shamir_threshold)
             except sqlite3.IntegrityError:
                 log.warning("share_already_stored", signal_id=signal_id)
                 raise ValueError(f"Share already stored for signal {signal_id}")
@@ -217,7 +232,7 @@ class ShareStore:
         with self._lock:
             row = self._conn.execute(
                 "SELECT signal_id, genius_address, share_x, share_y, encrypted_key_share, "
-                "encrypted_index_share, stored_at "
+                "encrypted_index_share, stored_at, shamir_threshold "
                 "FROM shares WHERE signal_id = ?",
                 (signal_id,),
             ).fetchone()
@@ -238,6 +253,7 @@ class ShareStore:
             share=Share(x=row[2], y=int(row[3])),
             encrypted_key_share=row[4],
             encrypted_index_share=row[5] or b"",
+            shamir_threshold=row[7] if len(row) > 7 else 7,
             stored_at=row[6],
             released_to=released,
         )
@@ -248,7 +264,7 @@ class ShareStore:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT signal_id, genius_address, share_x, share_y, encrypted_key_share, "
-                "encrypted_index_share, stored_at "
+                "encrypted_index_share, stored_at, shamir_threshold "
                 "FROM shares WHERE signal_id = ? ORDER BY share_x",
                 (signal_id,),
             ).fetchall()
@@ -270,6 +286,7 @@ class ShareStore:
                 share=Share(x=row[2], y=int(row[3])),
                 encrypted_key_share=row[4],
                 encrypted_index_share=row[5] or b"",
+                shamir_threshold=row[7] if len(row) > 7 else 7,
                 stored_at=row[6],
                 released_to=released,
             )

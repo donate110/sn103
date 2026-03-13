@@ -431,6 +431,7 @@ def create_app(
                 share=share,
                 encrypted_key_share=encrypted,
                 encrypted_index_share=encrypted_index,
+                shamir_threshold=req.shamir_threshold,
             )
         except ValueError as e:
             detail = str(e)
@@ -526,6 +527,10 @@ def create_app(
 
             local_index_share = _index_share(record)
             all_local_index_shares = [_index_share(r) for r in all_records]
+            # Use the per-signal threshold declared at creation time, not the
+            # global default. This is critical because signals created during
+            # bootstrap may have threshold=2 while the orchestrator default is 7.
+            signal_threshold = record.shamir_threshold
             try:
                 mpc_result = await asyncio.wait_for(
                     _orchestrator.check_availability(
@@ -533,6 +538,7 @@ def create_app(
                         local_share=local_index_share,
                         available_indices=available_set,
                         local_shares=all_local_index_shares,
+                        threshold_override=signal_threshold,
                     ),
                     timeout=mpc_availability_timeout,
                 )

@@ -252,32 +252,39 @@ class MPCOrchestrator:
         local_share: Share,
         available_indices: set[int],
         local_shares: list[Share] | None = None,
+        threshold_override: int | None = None,
     ) -> MPCResult:
         """Run the MPC availability check.
 
         If enough shares are available locally (e.g. shared DB on testnet),
         uses secure_check_availability directly. Otherwise attempts multi-
         validator MPC, falling back to single-validator prototype.
+
+        Args:
+            threshold_override: Per-signal threshold declared at creation time.
+                Overrides the global default to handle signals created during
+                bootstrap with lower thresholds.
         """
         from djinn_validator.api.metrics import MPC_DURATION, MPC_ERRORS, MPC_SESSIONS
 
         start = time.monotonic()
+        threshold = threshold_override if threshold_override is not None else self._threshold
 
         # If we have enough shares locally, use them directly for a secure check.
         # This handles testnet setups where all shares are co-located in one DB.
         all_local = local_shares or [local_share]
-        if len(all_local) >= self._threshold:
+        if len(all_local) >= threshold:
             log.info(
                 "mpc_local_shares_mode",
                 signal_id=signal_id,
                 local_shares=len(all_local),
-                threshold=self._threshold,
+                threshold=threshold,
             )
             MPC_SESSIONS.labels(mode="local_shares").inc()
             result = secure_check_availability(
                 shares=all_local,
                 available_indices=available_indices,
-                threshold=self._threshold,
+                threshold=threshold,
             )
             MPC_DURATION.labels(mode="local_shares").observe(time.monotonic() - start)
             return result
@@ -309,6 +316,7 @@ class MPCOrchestrator:
             local_share,
             available_indices,
             peers,
+            threshold=threshold,
         )
         if result is not None:
             MPC_DURATION.labels(mode="distributed").observe(time.monotonic() - start)
@@ -332,6 +340,7 @@ class MPCOrchestrator:
         local_share: Share,
         available_indices: set[int],
         peers: list[dict[str, Any]],
+        threshold: int | None = None,
     ) -> MPCResult | None:
         """Run the distributed MPC protocol via HTTP.
 
@@ -352,6 +361,7 @@ class MPCOrchestrator:
         my_x = local_share.x
         sorted_avail = sorted(available_indices)
         n_gates = len(sorted_avail)
+        t = threshold if threshold is not None else self._threshold
 
         if n_gates == 0:
             return MPCResult(available=False, participating_validators=1)
@@ -361,20 +371,20 @@ class MPCOrchestrator:
             log.warning("duplicate_participant_x", raw=raw_xs, unique=list(set(raw_xs)))
         participant_xs = sorted(set(x for x in raw_xs if 1 <= x <= 255))
 
-        if len(participant_xs) < self._threshold:
+        if len(participant_xs) < t:
             from djinn_validator.api.metrics import MPC_ERRORS
 
             MPC_ERRORS.labels(reason="insufficient_peers").inc()
             log.warning(
                 "insufficient_mpc_participants",
                 available=len(participant_xs),
-                threshold=self._threshold,
+                threshold=t,
             )
             return None
 
         # Generate random mask r (nonzero)
         r = secrets.randbelow(p - 1) + 1
-        r_shares = _split_secret_at_points(r, participant_xs, self._threshold, p)
+        r_shares = _split_secret_at_points(r, participant_xs, t, p)
         r_share_map = {s.x: s.y for s in r_shares}
 
         # Attempt distributed OT triple generation if enabled
@@ -407,7 +417,7 @@ class MPCOrchestrator:
             available_indices=sorted_avail,
             coordinator_x=my_x,
             participant_xs=participant_xs,
-            threshold=self._threshold,
+            threshold=t,
             pre_generated_triples=pre_generated_triples,
         )
 
@@ -418,7 +428,7 @@ class MPCOrchestrator:
         auth_secret_map: dict[int, AuthenticatedShare] = {}
         if is_auth:
             alpha = session.mac_alpha
-            r_auth = authenticate_value(r, alpha, participant_xs, self._threshold, p)
+            r_auth = authenticate_value(r, alpha, participant_xs, t, p)
             auth_r_map = {s.x: s for s in r_auth}
             # Authenticated MPC requires pre-authenticated shares created at
             # signal submission time. The coordinator must NOT reconstruct
@@ -484,7 +494,7 @@ class MPCOrchestrator:
                 "available_indices": sorted_avail,
                 "coordinator_x": my_x,
                 "participant_xs": participant_xs,
-                "threshold": self._threshold,
+                "threshold": t,
                 "authenticated": is_auth,
             }
 
@@ -569,11 +579,11 @@ class MPCOrchestrator:
         # This ensures no single validator can reconstruct intermediate values.
         self._coordinator.purge_peer_triple_shares(session.session_id, my_x)
 
-        if len(accepted_peers) + 1 < self._threshold:
+        if len(accepted_peers) + 1 < t:
             log.warning(
                 "mpc_insufficient_accepted",
                 accepted=len(accepted_peers) + 1,
-                threshold=self._threshold,
+                threshold=t,
             )
             self._mark_session_failed(session)
             return None
@@ -682,12 +692,12 @@ class MPCOrchestrator:
             for fp in failed:
                 active_peers.remove(fp)
 
-            if len(d_vals) < self._threshold:
+            if len(d_vals) < t:
                 log.warning(
                     "mpc_gate_insufficient",
                     gate_idx=gate_idx,
                     remaining=len(d_vals),
-                    threshold=self._threshold,
+                    threshold=t,
                 )
                 self._mark_session_failed(session)
                 return None
@@ -789,8 +799,8 @@ class MPCOrchestrator:
                 peer_x, z_i = result
                 z_vals[peer_x] = z_i
 
-        if len(z_vals) < self._threshold:
-            log.warning("mpc_finalize_insufficient", collected=len(z_vals), threshold=self._threshold)
+        if len(z_vals) < t:
+            log.warning("mpc_finalize_insufficient", collected=len(z_vals), threshold=t)
             self._mark_session_failed(session)
             return None
 
