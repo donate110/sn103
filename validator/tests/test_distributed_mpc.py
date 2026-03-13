@@ -343,6 +343,7 @@ class TestMultiValidatorMPC:
 
                 # Monkey-patch httpx.AsyncClient to route to TestClients
                 real_post = httpx.AsyncClient.post
+                real_get = httpx.AsyncClient.get
 
                 async def routed_post(self_client, url, **kwargs):
                     for i, client in enumerate(clients):
@@ -352,7 +353,16 @@ class TestMultiValidatorMPC:
                             return await client.post(path, **kwargs)
                     return await real_post(self_client, url, **kwargs)
 
-                with patch.object(httpx.AsyncClient, "post", routed_post):
+                async def routed_get(self_client, url, **kwargs):
+                    for i, client in enumerate(clients):
+                        base = f"http://validator{i}:8421"
+                        if url.startswith(base):
+                            path = url[len(base):]
+                            return await client.get(path, **kwargs)
+                    return await real_get(self_client, url, **kwargs)
+
+                with patch.object(httpx.AsyncClient, "post", routed_post), \
+                     patch.object(httpx.AsyncClient, "get", routed_get):
                     result = await orchestrator._distributed_mpc(
                         signal_id="sig-dist-1",
                         local_share=coordinator_share,
@@ -411,6 +421,7 @@ class TestMultiValidatorMPC:
                 ]
 
                 real_post = httpx.AsyncClient.post
+                real_get = httpx.AsyncClient.get
 
                 async def routed_post(self_client, url, **kwargs):
                     for i, client in enumerate(clients):
@@ -420,7 +431,16 @@ class TestMultiValidatorMPC:
                             return await client.post(path, **kwargs)
                     return await real_post(self_client, url, **kwargs)
 
-                with patch.object(httpx.AsyncClient, "post", routed_post):
+                async def routed_get(self_client, url, **kwargs):
+                    for i, client in enumerate(clients):
+                        base = f"http://validator{i}:8421"
+                        if url.startswith(base):
+                            path = url[len(base):]
+                            return await client.get(path, **kwargs)
+                    return await real_get(self_client, url, **kwargs)
+
+                with patch.object(httpx.AsyncClient, "post", routed_post), \
+                     patch.object(httpx.AsyncClient, "get", routed_get):
                     result = await orchestrator._distributed_mpc(
                         signal_id="sig-dist-2",
                         local_share=shares[0],
@@ -477,6 +497,7 @@ class TestMultiValidatorMPC:
                     ]
 
                     real_post = httpx.AsyncClient.post
+                    real_get = httpx.AsyncClient.get
 
                     async def routed_post(self_client, url, **kwargs):
                         for i, client in enumerate(clients):
@@ -486,7 +507,16 @@ class TestMultiValidatorMPC:
                                 return await client.post(path, **kwargs)
                         return await real_post(self_client, url, **kwargs)
 
-                    with patch.object(httpx.AsyncClient, "post", routed_post):
+                    async def routed_get(self_client, url, **kwargs):
+                        for i, client in enumerate(clients):
+                            base = f"http://v{i}:8421"
+                            if url.startswith(base):
+                                path = url[len(base):]
+                                return await client.get(path, **kwargs)
+                        return await real_get(self_client, url, **kwargs)
+
+                    with patch.object(httpx.AsyncClient, "post", routed_post), \
+                         patch.object(httpx.AsyncClient, "get", routed_get):
                         result = await orchestrator._distributed_mpc(
                             signal_id=f"sig-idx-{secret}",
                             local_share=shares[0],
@@ -545,6 +575,7 @@ class TestMultiValidatorMPC:
 
                 call_count = 0
                 real_post = httpx.AsyncClient.post
+                real_get = httpx.AsyncClient.get
 
                 async def routed_post_with_failure(self_client, url, **kwargs):
                     nonlocal call_count
@@ -559,7 +590,16 @@ class TestMultiValidatorMPC:
                             return await client.post(path, **kwargs)
                     return await real_post(self_client, url, **kwargs)
 
-                with patch.object(httpx.AsyncClient, "post", routed_post_with_failure):
+                async def routed_get(self_client, url, **kwargs):
+                    for i, client in enumerate(clients):
+                        base = f"http://v{i}:8421"
+                        if url.startswith(base):
+                            path = url[len(base):]
+                            return await client.get(path, **kwargs)
+                    return await real_get(self_client, url, **kwargs)
+
+                with patch.object(httpx.AsyncClient, "post", routed_post_with_failure), \
+                     patch.object(httpx.AsyncClient, "get", routed_get):
                     result = await orchestrator._distributed_mpc(
                         signal_id="sig-fail",
                         local_share=shares[0],
@@ -672,6 +712,7 @@ class TestMultiValidatorMPC:
                 ]
 
                 real_post = httpx.AsyncClient.post
+                real_get = httpx.AsyncClient.get
 
                 async def routed_post(self_client, url, **kwargs):
                     for i, client in enumerate(clients):
@@ -681,7 +722,16 @@ class TestMultiValidatorMPC:
                             return await client.post(path, **kwargs)
                     return await real_post(self_client, url, **kwargs)
 
-                with patch.object(httpx.AsyncClient, "post", routed_post):
+                async def routed_get(self_client, url, **kwargs):
+                    for i, client in enumerate(clients):
+                        base = f"http://v{i}:8421"
+                        if url.startswith(base):
+                            path = url[len(base):]
+                            return await client.get(path, **kwargs)
+                    return await real_get(self_client, url, **kwargs)
+
+                with patch.object(httpx.AsyncClient, "post", routed_post), \
+                     patch.object(httpx.AsyncClient, "get", routed_get):
                     result = await orchestrator._distributed_mpc(
                         signal_id="sig-single",
                         local_share=shares[0],
@@ -741,6 +791,7 @@ class TestMultiValidatorMPC:
                 ]
 
                 real_post = httpx.AsyncClient.post
+                real_get = httpx.AsyncClient.get
 
                 async def routed_post(self_client, url, **kwargs):
                     for i, client in enumerate(clients):
@@ -750,7 +801,16 @@ class TestMultiValidatorMPC:
                             return await client.post(path, **kwargs)
                     return await real_post(self_client, url, **kwargs)
 
-                with patch.object(httpx.AsyncClient, "post", routed_post):
+                async def routed_get(self_client, url, **kwargs):
+                    for i, client in enumerate(clients):
+                        base = f"http://v{i}:8421"
+                        if url.startswith(base):
+                            path = url[len(base):]
+                            return await client.get(path, **kwargs)
+                    return await real_get(self_client, url, **kwargs)
+
+                with patch.object(httpx.AsyncClient, "post", routed_post), \
+                     patch.object(httpx.AsyncClient, "get", routed_get):
                     distributed = await orchestrator._distributed_mpc(
                         signal_id="sig-match",
                         local_share=shares[0],
@@ -1283,6 +1343,7 @@ class TestNetworkOTDistributedMPC:
 
                 real_post = httpx.AsyncClient.post
                 call_count = 0
+                _, routed_get_fn = self._routers(clients)
 
                 async def ot_failing_post(self_client, url, **kwargs):
                     nonlocal call_count
@@ -1297,7 +1358,8 @@ class TestNetworkOTDistributedMPC:
                     return await real_post(self_client, url, **kwargs)
 
                 with self._env_context("USE_NETWORK_OT", "true"):
-                    with patch.object(httpx.AsyncClient, "post", ot_failing_post):
+                    with patch.object(httpx.AsyncClient, "post", ot_failing_post), \
+                         patch.object(httpx.AsyncClient, "get", routed_get_fn):
                         result = await orchestrator._distributed_mpc(
                             signal_id="sig-ot-fail",
                             local_share=shares[0],
@@ -1352,7 +1414,7 @@ class TestNetworkOTDistributedMPC:
                     {"uid": i, "url": f"http://v{i}:8421"}
                     for i in range(1, n_validators)
                 ]
-                routed_post, _ = self._routers(clients)
+                routed_post, routed_get_fn = self._routers(clients)
 
                 ot_called = False
                 real_post = httpx.AsyncClient.post
@@ -1364,7 +1426,8 @@ class TestNetworkOTDistributedMPC:
                     return await routed_post(self_client, url, **kwargs)
 
                 with self._env_context("USE_NETWORK_OT", "true"):
-                    with patch.object(httpx.AsyncClient, "post", tracking_post):
+                    with patch.object(httpx.AsyncClient, "post", tracking_post), \
+                         patch.object(httpx.AsyncClient, "get", routed_get_fn):
                         result = await orchestrator._distributed_mpc(
                             signal_id="sig-ot-3v",
                             local_share=shares[0],

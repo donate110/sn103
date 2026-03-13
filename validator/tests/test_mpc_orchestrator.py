@@ -295,6 +295,13 @@ class TestDistributedMPC:
         peers = self._make_peers(5)
         share = Share(x=1, y=42)
 
+        # Mock share_info for peer discovery
+        for i in range(5):
+            httpx_mock.add_response(
+                url=f"http://peer{i + 1}:8421/v1/signal/sig-1/share_info",
+                json={"signal_id": "sig-1", "share_x": i + 2},
+            )
+
         # All peers reject
         for i in range(5):
             httpx_mock.add_response(
@@ -313,6 +320,13 @@ class TestDistributedMPC:
 
         peers = self._make_peers(5)
         share = Share(x=1, y=42)
+
+        # Mock share_info for peer discovery
+        for i in range(5):
+            httpx_mock.add_response(
+                url=f"http://peer{i + 1}:8421/v1/signal/sig-1/share_info",
+                json={"signal_id": "sig-1", "share_x": i + 2},
+            )
 
         # All peers return 500, register enough for retries
         for _ in range(orch._PEER_RETRIES + 1):
@@ -333,6 +347,13 @@ class TestDistributedMPC:
 
         peers = self._make_peers(5)
         share = Share(x=1, y=42)
+
+        # Mock share_info for peer discovery
+        for i in range(5):
+            httpx_mock.add_response(
+                url=f"http://peer{i + 1}:8421/v1/signal/sig-1/share_info",
+                json={"signal_id": "sig-1", "share_x": i + 2},
+            )
 
         for i in range(5):
             httpx_mock.add_response(

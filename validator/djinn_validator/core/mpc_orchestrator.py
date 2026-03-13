@@ -366,7 +366,41 @@ class MPCOrchestrator:
         if n_gates == 0:
             return MPCResult(available=False, participating_validators=1)
 
-        raw_xs = [my_x] + [peer["uid"] + 1 for peer in peers]
+        # Collect actual Shamir share x-coordinates from peers in parallel.
+        # The share_x values are assigned at signal creation time (1, 2, 3, ...)
+        # and differ from metagraph UIDs. Using UID+1 would break Lagrange
+        # interpolation since the secret was split at different evaluation points.
+        peer_x_map: dict[int, int] = {}  # peer UID -> share_x
+
+        async def _lookup_share_x(peer: dict[str, Any]) -> tuple[int, int] | None:
+            try:
+                resp = await self._peer_request(
+                    "get",
+                    f"{peer['url']}/v1/signal/{signal_id}/share_info",
+                    peer_uid=peer["uid"],
+                )
+                if resp is not None and resp.status_code == 200:
+                    data = resp.json()
+                    return peer["uid"], data["share_x"]
+            except (httpx.HTTPError, KeyError, ValueError, AttributeError) as e:
+                log.debug("peer_share_x_lookup_failed", peer_uid=peer["uid"], error=str(e))
+            return None
+
+        try:
+            share_x_results = await asyncio.wait_for(
+                asyncio.gather(*(_lookup_share_x(p) for p in peers), return_exceptions=True),
+                timeout=GATHER_TIMEOUT,
+            )
+            for res in share_x_results:
+                if isinstance(res, tuple) and res is not None:
+                    peer_x_map[res[0]] = res[1]
+        except asyncio.TimeoutError:
+            log.warning("peer_share_x_lookup_timeout", n_peers=len(peers))
+
+        # Only keep peers that hold a share for this signal
+        peers = [p for p in peers if p["uid"] in peer_x_map]
+
+        raw_xs = [my_x] + [peer_x_map[p["uid"]] for p in peers]
         if len(raw_xs) != len(set(raw_xs)):
             log.warning("duplicate_participant_x", raw=raw_xs, unique=list(set(raw_xs)))
         participant_xs = sorted(set(x for x in raw_xs if 1 <= x <= 255))
@@ -487,7 +521,7 @@ class MPCOrchestrator:
         async def _init_peer(
             peer: dict[str, Any],
         ) -> dict[str, Any] | None:
-            peer_x = peer["uid"] + 1
+            peer_x = peer_x_map[peer["uid"]]
             init_payload: dict[str, Any] = {
                 "session_id": session.session_id,
                 "signal_id": signal_id,
@@ -641,10 +675,10 @@ class MPCOrchestrator:
                     )
                     if resp.status_code == 200:
                         data = resp.json()
-                        peer_x = peer["uid"] + 1
+                        px = peer_x_map[peer["uid"]]
                         d_mac = int(data["d_mac"], 16) if data.get("d_mac") else None
                         e_mac = int(data["e_mac"], 16) if data.get("e_mac") else None
-                        return peer_x, int(data["d_value"], 16), int(data["e_value"], 16), d_mac, e_mac
+                        return px, int(data["d_value"], 16), int(data["e_value"], 16), d_mac, e_mac
                 except (httpx.HTTPError, KeyError, ValueError, json.JSONDecodeError) as e:
                     log.warning(
                         "mpc_gate_failed",
@@ -778,8 +812,8 @@ class MPCOrchestrator:
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    peer_x = peer["uid"] + 1
-                    return peer_x, int(data["z_share"], 16)
+                    px = peer_x_map[peer["uid"]]
+                    return px, int(data["z_share"], 16)
             except (httpx.HTTPError, KeyError, ValueError, json.JSONDecodeError) as e:
                 log.warning("mpc_finalize_failed", peer_uid=peer["uid"], error=str(e))
             return None

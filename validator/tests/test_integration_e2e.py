@@ -139,6 +139,7 @@ class TestFullSignalLifecycle:
                 ]
 
                 real_post = httpx.AsyncClient.post
+                real_get = httpx.AsyncClient.get
 
                 async def routed_post(self_client, url, **kwargs):
                     for i, client in enumerate(clients):
@@ -148,7 +149,16 @@ class TestFullSignalLifecycle:
                             return await client.post(path, **kwargs)
                     return await real_post(self_client, url, **kwargs)
 
-                with patch.object(httpx.AsyncClient, "post", routed_post):
+                async def routed_get(self_client, url, **kwargs):
+                    for i, client in enumerate(clients):
+                        base = f"http://v{i}:8421"
+                        if url.startswith(base):
+                            path = url[len(base):]
+                            return await client.get(path, **kwargs)
+                    return await real_get(self_client, url, **kwargs)
+
+                with patch.object(httpx.AsyncClient, "post", routed_post), \
+                     patch.object(httpx.AsyncClient, "get", routed_get):
                     mpc_result = await orchestrator._distributed_mpc(
                         signal_id=signal_id,
                         local_share=index_shares[0],
@@ -233,6 +243,7 @@ class TestFullSignalLifecycle:
                 ]
 
                 real_post = httpx.AsyncClient.post
+                real_get = httpx.AsyncClient.get
 
                 async def routed_post(self_client, url, **kwargs):
                     for i, client in enumerate(clients):
@@ -242,7 +253,16 @@ class TestFullSignalLifecycle:
                             return await client.post(path, **kwargs)
                     return await real_post(self_client, url, **kwargs)
 
-                with patch.object(httpx.AsyncClient, "post", routed_post):
+                async def routed_get(self_client, url, **kwargs):
+                    for i, client in enumerate(clients):
+                        base = f"http://v{i}:8421"
+                        if url.startswith(base):
+                            path = url[len(base):]
+                            return await client.get(path, **kwargs)
+                    return await real_get(self_client, url, **kwargs)
+
+                with patch.object(httpx.AsyncClient, "post", routed_post), \
+                     patch.object(httpx.AsyncClient, "get", routed_get):
                     mpc_result = await orchestrator._distributed_mpc(
                         signal_id=signal_id,
                         local_share=index_shares[0],
@@ -470,6 +490,7 @@ class TestDistributedPurchaseViaAPI:
                 ]
 
                 real_post = httpx.AsyncClient.post
+                real_get = httpx.AsyncClient.get
 
                 async def routed_post(self_client, url, **kwargs):
                     for i, client in enumerate(clients):
@@ -479,7 +500,16 @@ class TestDistributedPurchaseViaAPI:
                             return await client.post(path, **kwargs)
                     return await real_post(self_client, url, **kwargs)
 
-                with patch.object(httpx.AsyncClient, "post", routed_post):
+                async def routed_get(self_client, url, **kwargs):
+                    for i, client in enumerate(clients):
+                        base = f"http://v{i}:8421"
+                        if url.startswith(base):
+                            path = url[len(base):]
+                            return await client.get(path, **kwargs)
+                    return await real_get(self_client, url, **kwargs)
+
+                with patch.object(httpx.AsyncClient, "post", routed_post), \
+                     patch.object(httpx.AsyncClient, "get", routed_get):
                     mpc_result = await orchestrator._distributed_mpc(
                         signal_id=signal_id,
                         local_share=index_shares[0],
