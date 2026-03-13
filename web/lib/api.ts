@@ -314,59 +314,68 @@ export function getMinerClient(): MinerClient {
 /**
  * Resilient line check that retries across multiple validators.
  *
- * Each validator proxies to a random miner. Some miners have broken or
- * missing Odds API keys, returning 0 available lines for valid games.
- * This function calls checkLines through multiple validators (sequentially
- * to avoid hammering the network) and returns the first positive result.
- * Falls back to a single-validator call if discovery fails.
+ * Each validator proxies to a random miner. ~50% of miners in the network
+ * have broken or missing Odds API keys, returning 0 available lines for
+ * valid games. This function fires parallel checks through multiple
+ * validators and returns the first positive result.
  */
 export async function resilientCheckLines(
   req: CheckRequest,
-  maxAttempts: number = 5,
 ): Promise<CheckResponse> {
-  // Try the default validator first (fastest path)
-  const primary = getValidatorClient();
-  try {
-    const result = await primary.checkLines(req);
-    if (result.available_indices.length > 0 && !result.api_error) {
-      return result;
-    }
-  } catch {
-    // Fall through to retry
-  }
-
-  // Discover all validators and try through different ones
+  // Discover all validators and fire parallel checks.
+  // Each validator routes to a different random miner, so parallel calls
+  // maximize the chance of hitting a working one.
   let validators: ValidatorClient[];
   try {
     validators = await discoverValidatorClients();
   } catch {
-    validators = [primary];
+    validators = [getValidatorClient()];
   }
 
-  // Shuffle to spread load
+  // Shuffle to spread load, then take up to 4 validators
   for (let i = validators.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [validators[i], validators[j]] = [validators[j], validators[i]];
   }
+  const batch = validators.slice(0, 4);
 
-  let lastResult: CheckResponse | null = null;
-  for (let attempt = 0; attempt < Math.min(maxAttempts - 1, validators.length); attempt++) {
+  // Fire all checks in parallel, race for the first positive result
+  const results = await Promise.allSettled(
+    batch.map((v) => v.checkLines(req)),
+  );
+
+  // Pick the result with the most available indices (best miner data)
+  let best: CheckResponse | null = null;
+  for (const r of results) {
+    if (r.status !== "fulfilled") continue;
+    const resp = r.value;
+    if (resp.api_error) continue;
+    if (!best || resp.available_indices.length > best.available_indices.length) {
+      best = resp;
+    }
+    // Early exit if all lines are available
+    if (best.available_indices.length === req.lines.length) break;
+  }
+
+  if (best && best.available_indices.length > 0) return best;
+
+  // All parallel checks returned empty. Try 4 more sequential attempts
+  // (each validator picks a new random miner per request).
+  for (let attempt = 0; attempt < 4; attempt++) {
     const v = validators[attempt % validators.length];
     try {
       const result = await v.checkLines(req);
-      lastResult = result;
       if (result.available_indices.length > 0 && !result.api_error) {
         return result;
       }
+      if (!best) best = result;
     } catch {
-      // Try next validator
+      // Try next
     }
   }
 
-  // Return the last result even if no lines were available (caller decides what to do)
-  if (lastResult) return lastResult;
+  if (best) return best;
 
-  // All attempts failed completely
   return {
     results: req.lines.map((l) => ({
       index: l.index,
