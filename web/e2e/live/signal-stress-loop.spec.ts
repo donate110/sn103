@@ -531,17 +531,21 @@ async function navigateToFreshSignalPage(
  * Purchase a specific signal by navigating directly to its detail page.
  * Skips the browse page entirely for faster, more targeted purchases.
  */
+// Named console listener so we can remove it between purchases
+function purchaseDiagListener(msg: { text: () => string }) {
+  if (msg.text().includes("[purchase]")) {
+    logLine("DIAG", msg.text());
+  }
+}
+
 async function purchaseSignalById(
   page: Page,
   idiotAccount: ReturnType<typeof privateKeyToAccount>,
   signalId: string,
 ): Promise<boolean> {
-  // Capture browser console logs for purchase diagnostics
-  page.on("console", (msg) => {
-    if (msg.text().includes("[purchase]")) {
-      logLine("DIAG", msg.text());
-    }
-  });
+  // Remove any previous listener before adding a fresh one (prevents accumulation)
+  page.removeListener("console", purchaseDiagListener);
+  page.on("console", purchaseDiagListener);
 
   // Retry up to 3 times for "not-found" (RPC propagation delay after signal creation)
   let pageLoaded: string = "timeout";
@@ -598,9 +602,23 @@ async function purchaseSignalById(
     return false;
   }
 
-  // Escrow deposit if needed
-  const escrowText = page.getByText(/your escrow balance/i);
-  if (await escrowText.isVisible().catch(() => false)) {
+  // Escrow deposit if needed — check on-chain first (UI text may show $0 during React hydration)
+  let escrowSufficient = false;
+  try {
+    const onChainBal = await publicClient.readContract({
+      address: ESCROW_ADDRESS,
+      abi: [{ inputs: [{ name: "user", type: "address" }], name: "getBalance", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }],
+      functionName: "getBalance",
+      args: [idiotAccount.address],
+    });
+    const balUsd = Number(onChainBal) / 1e6;
+    if (balUsd >= 10) {
+      logLine("INFO", `  On-chain escrow balance: $${balUsd.toFixed(2)} (sufficient)`);
+      escrowSufficient = true;
+    }
+  } catch {}
+  if (!escrowSufficient) {
+    const escrowText = page.getByText(/your escrow balance/i);
     const balText = await escrowText.textContent().catch(() => "");
     const balMatch = balText?.match(/\$?([\d,.]+)/);
     const bal = balMatch ? parseFloat(balMatch[1].replace(/,/g, "")) : 0;
@@ -643,7 +661,7 @@ async function purchaseSignalById(
       }
       await page.waitForTimeout(3_000);
     }
-  }
+  } // close if (!escrowSufficient)
 
   // Enter notional
   const notionalInput = page.locator("#notional");
@@ -923,7 +941,22 @@ async function purchaseFirstAvailableSignal(
     return false;
   }
 
-  // Check escrow balance and deposit if needed
+  // Check escrow balance and deposit if needed — on-chain first (UI may show stale $0)
+  let browseEscrowOk = false;
+  try {
+    const onChainBal = await publicClient.readContract({
+      address: ESCROW_ADDRESS,
+      abi: [{ inputs: [{ name: "user", type: "address" }], name: "getBalance", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }],
+      functionName: "getBalance",
+      args: [idiotAccount.address],
+    });
+    const balUsd = Number(onChainBal) / 1e6;
+    if (balUsd >= 10) {
+      logLine("INFO", `  On-chain escrow balance: $${balUsd.toFixed(2)} (sufficient)`);
+      browseEscrowOk = true;
+    }
+  } catch {}
+  if (!browseEscrowOk) {
   const escrowText = page.getByText(/your escrow balance/i);
   if (await escrowText.isVisible().catch(() => false)) {
     const balText = await escrowText.textContent().catch(() => "");
@@ -977,6 +1010,7 @@ async function purchaseFirstAvailableSignal(
       await page.waitForTimeout(3_000);
     }
   }
+  } // close if (!browseEscrowOk)
 
   // Enter notional amount - use #notional to avoid matching the deposit input.
   // Use waitFor instead of isVisible since the page needs time to render.
@@ -1548,13 +1582,13 @@ test.describe("Signal stress loop", () => {
                     logLine("INFO", `  Direct purchase: /idiot/signal/${result.signalId}`);
                     purchased = await Promise.race([
                       purchaseSignalById(idiotPage, idiotAcc, result.signalId),
-                      new Promise<false>((r) => setTimeout(() => r(false), 120_000)),
+                      new Promise<false>((r) => setTimeout(() => r(false), 240_000)),
                     ]);
                   } else {
                     logLine("INFO", `  No signal ID captured, falling back to browse page`);
                     purchased = await Promise.race([
                       purchaseFirstAvailableSignal(idiotPage, idiotAcc, -1),
-                      new Promise<false>((r) => setTimeout(() => r(false), 120_000)),
+                      new Promise<false>((r) => setTimeout(() => r(false), 240_000)),
                     ]);
                   }
                 } catch (purchaseErr) {
