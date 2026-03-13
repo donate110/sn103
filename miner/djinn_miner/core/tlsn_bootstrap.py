@@ -4,6 +4,9 @@ On first run, checks for djinn-tlsn-prover (miner) and djinn-tlsn-verifier
 (validator). If missing, downloads pre-built binaries from the latest GitHub
 release of Djinn-Inc/djinn and installs them to ~/.local/bin/.
 
+On subsequent runs, checks whether a newer release exists and upgrades
+automatically. The installed release tag is tracked in a version file.
+
 Can be overridden with TLSN_PROVER_BINARY / TLSN_VERIFIER_BINARY env vars
 pointing to existing binaries.
 """
@@ -25,6 +28,7 @@ log = structlog.get_logger()
 GITHUB_REPO = "Djinn-Inc/djinn"
 INSTALL_DIR = os.path.expanduser("~/.local/bin")
 BINARIES = ("djinn-tlsn-prover", "djinn-tlsn-verifier", "djinn-tlsn-notary")
+VERSION_FILE = os.path.join(INSTALL_DIR, ".djinn-tlsn-version")
 
 
 def _detect_platform() -> str | None:
@@ -52,6 +56,26 @@ def _latest_release_tag() -> str | None:
     except Exception as e:
         log.debug("tlsn_bootstrap_release_check_failed", error=str(e))
         return None
+
+
+def _installed_version() -> str | None:
+    """Read the currently installed release tag, or None if unknown."""
+    try:
+        if os.path.isfile(VERSION_FILE):
+            return open(VERSION_FILE).read().strip() or None
+    except OSError:
+        pass
+    return None
+
+
+def _write_version(tag: str) -> None:
+    """Record the installed release tag."""
+    try:
+        os.makedirs(INSTALL_DIR, exist_ok=True)
+        with open(VERSION_FILE, "w") as f:
+            f.write(tag)
+    except OSError as e:
+        log.debug("tlsn_bootstrap_version_write_failed", error=str(e))
 
 
 def _download_and_install(tag: str, plat: str) -> bool:
@@ -83,10 +107,28 @@ def _download_and_install(tag: str, plat: str) -> bool:
                     os.chmod(dst, os.stat(dst).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
                     log.info("tlsn_bootstrap_installed", binary=binary, path=dst)
 
+        _write_version(tag)
         return True
     except Exception as e:
         log.warning("tlsn_bootstrap_download_failed", error=str(e))
         return False
+
+
+def _check_upgrade() -> None:
+    """Check for a newer release and upgrade if available."""
+    installed = _installed_version()
+    latest = _latest_release_tag()
+    if not latest:
+        return
+    if installed == latest:
+        return
+
+    plat = _detect_platform()
+    if not plat:
+        return
+
+    log.info("tlsn_bootstrap_upgrading", installed=installed or "unknown", latest=latest)
+    _download_and_install(latest, plat)
 
 
 def ensure_binary(name: str) -> str:
@@ -114,6 +156,8 @@ def ensure_binary(name: str) -> str:
     # Check install dir
     installed = os.path.join(INSTALL_DIR, name)
     if os.path.isfile(installed) and os.access(installed, os.X_OK):
+        # Binary exists, but check for upgrades in the background
+        _check_upgrade()
         return installed
 
     # Try to download
