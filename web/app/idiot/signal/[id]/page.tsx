@@ -343,8 +343,10 @@ export default function PurchaseSignal() {
       if (escrowBalance !== undefined && escrowBalance < feeBig) {
         const needed = Number(feeBig) / 1e6;
         const have = Number(escrowBalance) / 1e6;
+        const fmtNeeded = needed > 0 && needed < 0.01 ? "< $0.01" : `$${needed.toFixed(2)}`;
+        const fmtHave = `$${have.toFixed(2)}`;
         setStepError(
-          `Insufficient escrow balance: you have $${have.toFixed(2)} but need $${needed.toFixed(2)}. Use the deposit form above.`,
+          `Insufficient escrow balance: you have ${fmtHave} but need ${fmtNeeded}. Use the deposit form above.`,
         );
         setStep("idle");
         return;
@@ -684,6 +686,7 @@ export default function PurchaseSignal() {
                 )}
                 <div className="flex gap-2 mt-2">
                   <input
+                    id="depositEscrow"
                     type="number"
                     inputMode="decimal"
                     placeholder="Amount"

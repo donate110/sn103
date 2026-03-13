@@ -29,7 +29,7 @@ export default function BrowseSignals() {
   const { address } = useAccount();
   const [sportFilter, setSportFilter] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("expiry");
-  const { signals, loading } = useActiveSignals(sportFilter || undefined);
+  const { signals, loading, error: signalError } = useActiveSignals(sportFilter || undefined);
   const { relationships } = useActiveRelationships(address, "idiot");
 
   const geniusesWithOpenAuditSets = useMemo(() => {
@@ -154,6 +154,13 @@ export default function BrowseSignals() {
           <div className="flex flex-col items-center justify-center py-16">
             <div className="w-10 h-10 rounded-full border-2 border-idiot-200 border-t-idiot-500 animate-spin mb-4" />
             <p className="text-slate-500">Loading available signals...</p>
+          </div>
+        </div>
+      ) : signalError ? (
+        <div className="card">
+          <div className="flex flex-col items-center justify-center py-16">
+            <p className="text-red-600 font-medium mb-1">Failed to load signals</p>
+            <p className="text-sm text-slate-500 text-center max-w-sm">{signalError}</p>
           </div>
         </div>
       ) : sortedSignals.length === 0 ? (

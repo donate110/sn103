@@ -520,30 +520,43 @@ async function purchaseSignalById(
     }
   });
 
-  await page.goto(`${BASE_URL}/idiot/signal/${signalId}`);
-  await bypassBetaGate(page);
-  await page.waitForLoadState("domcontentloaded");
-  await connectWallet(page);
+  // Retry up to 3 times for "not-found" (RPC propagation delay after signal creation)
+  let pageLoaded: string = "timeout";
+  for (let loadAttempt = 0; loadAttempt < 3; loadAttempt++) {
+    if (loadAttempt > 0) {
+      logLine("INFO", `  Retrying signal page load (attempt ${loadAttempt + 1})...`);
+      await page.waitForTimeout(5_000);
+    }
+    await page.goto(`${BASE_URL}/idiot/signal/${signalId}`);
+    if (loadAttempt === 0) {
+      await bypassBetaGate(page);
+    }
+    await page.waitForLoadState("domcontentloaded");
+    await connectWallet(page);
 
-  // Wait for React hydration (same loading flash fix as browse-based flow)
-  try {
-    await page.getByText(/loading signal data/i).waitFor({ state: "visible", timeout: 5_000 });
-  } catch {
-    await page.waitForTimeout(2_000);
+    // Wait for React hydration (same loading flash fix as browse-based flow)
+    try {
+      await page.getByText(/loading signal data/i).waitFor({ state: "visible", timeout: 5_000 });
+    } catch {
+      await page.waitForTimeout(2_000);
+    }
+
+    // Wait for the definitive post-loading state
+    pageLoaded = await Promise.race([
+      page.getByText(/connect your wallet/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "connect" as const),
+      page.getByText(/signal not found/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "not-found" as const),
+      page.locator("#notional").waitFor({ state: "visible", timeout: 20_000 }).then(() => "ready" as const),
+      page.getByText(/no longer available/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "expired" as const),
+      page.getByText(/signal unavailable|encryption keys/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "unavailable" as const),
+      page.getByText(/your escrow balance/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "escrow-visible" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 20_000)),
+    ]).catch(() => "timeout" as const);
+
+    logLine("INFO", `  Signal page state: ${pageLoaded}`);
+
+    // "not-found" may be transient (RPC lag); retry. Other failures are terminal.
+    if (pageLoaded !== "not-found") break;
   }
-
-  // Wait for the definitive post-loading state
-  const pageLoaded = await Promise.race([
-    page.getByText(/connect your wallet/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "connect" as const),
-    page.getByText(/signal not found/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "not-found" as const),
-    page.locator("#notional").waitFor({ state: "visible", timeout: 20_000 }).then(() => "ready" as const),
-    page.getByText(/no longer available/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "expired" as const),
-    page.getByText(/signal unavailable|encryption keys/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "unavailable" as const),
-    page.getByText(/your escrow balance/i).waitFor({ state: "visible", timeout: 20_000 }).then(() => "escrow-visible" as const),
-    new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 20_000)),
-  ]).catch(() => "timeout" as const);
-
-  logLine("INFO", `  Signal page state: ${pageLoaded}`);
 
   if (pageLoaded === "connect") {
     await connectWallet(page);
@@ -570,24 +583,42 @@ async function purchaseSignalById(
     const bal = balMatch ? parseFloat(balMatch[1].replace(/,/g, "")) : 0;
     if (bal < 10) {
       logLine("INFO", "  Escrow balance low, depositing 500 USDC...");
-      const depositInput = page.locator("#depositEscrow, input[placeholder*='Amount']").first();
-      if (await depositInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await depositInput.fill("500");
-        const depositBtn = page.getByRole("button", { name: /^deposit$/i });
-        if (await depositBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-          await depositBtn.click();
-          await page.waitForTimeout(5_000);
-          const approvalMsg = page.getByText(/approved.*click deposit again/i);
-          if (await approvalMsg.isVisible({ timeout: 30_000 }).catch(() => false)) {
-            logLine("INFO", "  USDC approved, clicking deposit again...");
-            await depositBtn.click();
-          }
-          const deposited = page.getByText(/deposited/i);
-          await deposited.isVisible({ timeout: 60_000 }).catch(() => false);
-          logLine("OK", "  Escrow deposit completed");
-          await page.waitForTimeout(2_000);
-        }
+      const depositInput = page.locator("#depositEscrow").first();
+      try {
+        await depositInput.waitFor({ state: "visible", timeout: 5_000 });
+      } catch {
+        logLine("WARN", "  Deposit input not found");
+        return false;
       }
+      await depositInput.fill("500");
+      const depositBtn = page.getByRole("button", { name: /^deposit$/i });
+      try {
+        await depositBtn.waitFor({ state: "visible", timeout: 3_000 });
+      } catch {
+        logLine("WARN", "  Deposit button not found");
+        return false;
+      }
+      await depositBtn.click();
+      logLine("INFO", "  Clicked deposit (step 1: approve)");
+
+      const approvalMsg = page.getByText(/approved.*click deposit again/i);
+      try {
+        await approvalMsg.waitFor({ state: "visible", timeout: 30_000 });
+        logLine("INFO", "  USDC approved, clicking deposit again...");
+        await depositBtn.click();
+        logLine("INFO", "  Clicked deposit (step 2: actual deposit)");
+      } catch {
+        logLine("INFO", "  No approval prompt (allowance may already exist)");
+      }
+
+      const deposited = page.getByText(/^deposited \$/i);
+      try {
+        await deposited.waitFor({ state: "visible", timeout: 60_000 });
+        logLine("OK", "  Escrow deposit completed");
+      } catch {
+        logLine("WARN", "  Deposit may not have completed (timed out)");
+      }
+      await page.waitForTimeout(3_000);
     }
   }
 
@@ -720,12 +751,14 @@ async function purchaseFirstAvailableSignal(
   // The RPC scan + isActive() checks can take 20-40s on Base Sepolia.
   const signalCards = page.locator("a[href*='/idiot/signal/']");
   const noSignalsText = page.getByText(/no signals found/i);
+  const errorText = page.getByText(/failed to load signals/i);
 
-  const waitForBrowseResult = async (timeoutMs: number): Promise<"cards" | "empty" | "loading"> => {
+  const waitForBrowseResult = async (timeoutMs: number): Promise<"cards" | "empty" | "error" | "loading"> => {
     try {
       const result = await Promise.race([
         signalCards.first().waitFor({ state: "visible", timeout: timeoutMs }).then(() => "cards" as const),
         noSignalsText.waitFor({ state: "visible", timeout: timeoutMs }).then(() => "empty" as const),
+        errorText.waitFor({ state: "visible", timeout: timeoutMs }).then(() => "error" as const),
         new Promise<"loading">((r) => setTimeout(() => r("loading"), timeoutMs)),
       ]);
       return result;
@@ -735,8 +768,11 @@ async function purchaseFirstAvailableSignal(
   };
 
   let browseResult = await waitForBrowseResult(30_000);
-  if (browseResult === "loading") {
-    // Still loading after 30s; reload to retry (cache clears on page change)
+  if (browseResult === "loading" || browseResult === "error") {
+    // Still loading or RPC error; reload to retry
+    if (browseResult === "error") {
+      logLine("WARN", "  Browse page RPC error, retrying...");
+    }
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -868,26 +904,47 @@ async function purchaseFirstAvailableSignal(
     const bal = balMatch ? parseFloat(balMatch[1].replace(/,/g, "")) : 0;
     if (bal < 10) {
       logLine("INFO", "  Escrow balance low, depositing 500 USDC...");
-      const depositInput = page.locator("#depositEscrow, input[placeholder*='Amount']").first();
-      if (await depositInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await depositInput.fill("500");
-        const depositBtn = page.getByRole("button", { name: /^deposit$/i });
-        if (await depositBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-          await depositBtn.click();
-          // Wait for approval popup then re-deposit
-          await page.waitForTimeout(5_000);
-          const approvalMsg = page.getByText(/approved.*click deposit again/i);
-          if (await approvalMsg.isVisible({ timeout: 30_000 }).catch(() => false)) {
-            logLine("INFO", "  USDC approved, clicking deposit again...");
-            await depositBtn.click();
-          }
-          // Wait for deposit to complete
-          const deposited = page.getByText(/deposited/i);
-          await deposited.isVisible({ timeout: 60_000 }).catch(() => false);
-          logLine("OK", "  Escrow deposit completed");
-          await page.waitForTimeout(2_000);
-        }
+      const depositInput = page.locator("#depositEscrow").first();
+      try {
+        await depositInput.waitFor({ state: "visible", timeout: 5_000 });
+      } catch {
+        logLine("WARN", "  Deposit input not found");
+        return false;
       }
+      await depositInput.fill("500");
+      const depositBtn = page.getByRole("button", { name: /^deposit$/i });
+      try {
+        await depositBtn.waitFor({ state: "visible", timeout: 3_000 });
+      } catch {
+        logLine("WARN", "  Deposit button not found");
+        return false;
+      }
+      await depositBtn.click();
+      logLine("INFO", "  Clicked deposit (step 1: approve)");
+
+      // Wait for USDC approval to complete and message to render
+      const approvalMsg = page.getByText(/approved.*click deposit again/i);
+      try {
+        await approvalMsg.waitFor({ state: "visible", timeout: 30_000 });
+        logLine("INFO", "  USDC approved, clicking deposit again...");
+        await depositBtn.click();
+        logLine("INFO", "  Clicked deposit (step 2: actual deposit)");
+      } catch {
+        // Approval may have been cached from a previous deposit; the first
+        // click might have gone straight to depositing.
+        logLine("INFO", "  No approval prompt (allowance may already exist)");
+      }
+
+      // Wait for the "Deposited $X" confirmation text (set by React state)
+      const deposited = page.getByText(/^deposited \$/i);
+      try {
+        await deposited.waitFor({ state: "visible", timeout: 60_000 });
+        logLine("OK", "  Escrow deposit completed");
+      } catch {
+        logLine("WARN", "  Deposit may not have completed (timed out waiting for confirmation)");
+      }
+      // Allow escrow balance hook to refresh from RPC
+      await page.waitForTimeout(3_000);
     }
   }
 
