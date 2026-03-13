@@ -3,7 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAccount, useWalletClient } from "wagmi";
-import { useSignal, usePurchaseSignal, useSignalNotionalFilled, useEscrowBalance, useDepositEscrow, useWalletUsdcBalance, humanizeError } from "@/lib/hooks";
+import { useSignal, usePurchaseSignal, useSignalNotionalFilled, useEscrowBalance, useDepositEscrow, useWalletUsdcBalance, humanizeError, getReadProvider } from "@/lib/hooks";
+import { getEscrowContract } from "@/lib/contracts";
 import { discoverValidatorClients, resilientCheckLines } from "@/lib/api";
 import { decrypt, fromHex, bigIntToKey, reconstructSecret } from "@/lib/crypto";
 import type { ShamirShare } from "@/lib/crypto";
@@ -340,9 +341,20 @@ export default function PurchaseSignal() {
 
       // Fee = notional * maxPriceBps / 10_000
       const feeBig = (notionalBig * BigInt(signal.maxPriceBps)) / 10_000n;
-      if (escrowBalance !== undefined && escrowBalance < feeBig) {
+      // Read balance fresh from chain (the React state may be stale if the
+      // user deposited after the page rendered but before clicking Purchase).
+      let freshBalance = escrowBalance ?? 0n;
+      if (buyerAddress) {
+        try {
+          const bal = await getEscrowContract(getReadProvider()).getBalance(buyerAddress);
+          freshBalance = BigInt(bal);
+        } catch {
+          // Fall back to React state
+        }
+      }
+      if (freshBalance < feeBig) {
         const needed = Number(feeBig) / 1e6;
-        const have = Number(escrowBalance) / 1e6;
+        const have = Number(freshBalance) / 1e6;
         const fmtNeeded = needed > 0 && needed < 0.01 ? "< $0.01" : `$${needed.toFixed(2)}`;
         const fmtHave = `$${have.toFixed(2)}`;
         setStepError(
