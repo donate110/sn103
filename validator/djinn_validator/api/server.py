@@ -2068,11 +2068,13 @@ def create_app(
             except Exception as e:
                 share_x_results[peer["uid"]] = {"error": str(e)[:200]}
 
-        # Test signed request to peers that hold shares
+        # Test signed GET and POST to peers that hold shares
+        import time as _t_diag
         signed_test = {}
         peers_with_shares = [p for p in peers if p["uid"] in share_x_results and share_x_results[p["uid"]].get("status") == 200]
         for peer in peers_with_shares[:3]:
-            import time as _t_diag
+            tests = {}
+            # GET test (signed, but share_info doesn't validate auth)
             t0 = _t_diag.monotonic()
             try:
                 resp = await _orchestrator._peer_request(
@@ -2080,18 +2082,36 @@ def create_app(
                     f"{peer['url']}/v1/signal/{signal_id}/share_info",
                     peer_uid=peer["uid"],
                 )
-                elapsed = _t_diag.monotonic() - t0
-                signed_test[peer["uid"]] = {
-                    "status": resp.status_code,
-                    "elapsed_ms": round(elapsed * 1000),
-                    "signed": True,
-                }
+                tests["get"] = {"status": resp.status_code, "ms": round((_t_diag.monotonic() - t0) * 1000)}
             except Exception as e:
-                elapsed = _t_diag.monotonic() - t0
-                signed_test[peer["uid"]] = {
-                    "error": str(e)[:200],
-                    "elapsed_ms": round(elapsed * 1000),
-                }
+                tests["get"] = {"error": str(e)[:100], "ms": round((_t_diag.monotonic() - t0) * 1000)}
+
+            # POST test (signed, mpc_init validates auth)
+            # Send a minimal init payload to test the full signed POST flow
+            sx = share_x_results[peer["uid"]].get("share_x", 1)
+            import secrets as _secrets_diag
+            test_init = {
+                "session_id": f"diag-test-{_secrets_diag.token_hex(4)}",
+                "signal_id": signal_id,
+                "available_indices": [1],
+                "coordinator_x": my_x,
+                "participant_xs": [my_x, sx],
+                "threshold": 2,
+            }
+            t0 = _t_diag.monotonic()
+            try:
+                resp = await _orchestrator._peer_request(
+                    "post",
+                    f"{peer['url']}/v1/mpc/init",
+                    peer_uid=peer["uid"],
+                    json=test_init,
+                )
+                body = resp.text[:200]
+                tests["post_init"] = {"status": resp.status_code, "ms": round((_t_diag.monotonic() - t0) * 1000), "body": body}
+            except Exception as e:
+                tests["post_init"] = {"error": str(e)[:200], "ms": round((_t_diag.monotonic() - t0) * 1000)}
+
+            signed_test[peer["uid"]] = tests
 
         # Check signing capability
         signing_ok = False
