@@ -445,10 +445,10 @@ class MPCOrchestrator:
         needed_peers = t - 1  # we (coordinator) count as one participant
         tasks = [asyncio.create_task(_lookup_share_x(p)) for p in peers]
         if tasks:
-            deadline = asyncio.get_event_loop().time() + GATHER_TIMEOUT
+            deadline = asyncio.get_running_loop().time() + GATHER_TIMEOUT
             pending = set(tasks)
             while pending:
-                remaining = deadline - asyncio.get_event_loop().time()
+                remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
                     break
                 done_batch, pending = await asyncio.wait(
