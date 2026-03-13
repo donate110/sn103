@@ -77,8 +77,13 @@ async function proxy(
     init.body = await request.text();
   }
 
+  // Purchase + MPC endpoints need longer timeouts: distributed MPC runs
+  // 10 sequential gate computations across multiple validators (~50s).
+  const isPurchaseOrMPC = path.includes("purchase") || path.includes("mpc/");
+  const timeoutMs = isPurchaseOrMPC ? 120_000 : 30_000;
+
   try {
-    const res = await fetch(target, { ...init, signal: AbortSignal.timeout(30_000) });
+    const res = await fetch(target, { ...init, signal: AbortSignal.timeout(timeoutMs) });
     const body = await res.text();
     return new NextResponse(body, {
       status: res.status,

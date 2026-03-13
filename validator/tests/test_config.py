@@ -334,7 +334,7 @@ class TestFloatEnv:
 class TestMpcAvailabilityTimeout:
     def test_default_value(self) -> None:
         config = Config()
-        assert config.mpc_availability_timeout == 15.0
+        assert config.mpc_availability_timeout == 90.0
 
     def test_too_low_raises(self) -> None:
         config = _config(sports_api_key="", bt_network="local", mpc_availability_timeout=2.0)

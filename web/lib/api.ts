@@ -319,10 +319,12 @@ export function getMinerClient(): MinerClient {
  * have broken Odds API data, returning 0 available lines for valid games.
  * Even working miners may report different subsets of lines as available.
  *
- * Strategy: fire parallel checks through 4 validators, merge the union
- * of all available_indices. For each index, use the richest bookmaker
- * data from any response. This maximizes the chance that the real pick
- * (unknown to the client) is in the available set for the MPC check.
+ * Strategy: fire parallel checks through ALL discovered validators
+ * (most miners have broken Odds API keys, so we need maximum coverage).
+ * Merge the union of all available_indices. For each index, use the
+ * richest bookmaker data from any response. This maximizes the chance
+ * that the real pick (unknown to the client) is in the available set
+ * for the MPC check.
  */
 export async function resilientCheckLines(
   req: CheckRequest,
@@ -334,16 +336,17 @@ export async function resilientCheckLines(
     validators = [getValidatorClient()];
   }
 
-  // Shuffle to spread load, take up to 4
+  // Shuffle to spread load, then check ALL validators in parallel.
+  // Most miners (~7/8) have broken Odds API keys, so checking only 4
+  // has a ~50% chance of missing the one working miner.
   for (let i = validators.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [validators[i], validators[j]] = [validators[j], validators[i]];
   }
-  const batch = validators.slice(0, 4);
 
-  // Fire parallel checks
+  // Fire parallel checks through ALL validators (lightweight endpoint)
   const settled = await Promise.allSettled(
-    batch.map((v) => v.checkLines(req)),
+    validators.map((v) => v.checkLines(req)),
   );
 
   // Collect all successful responses
@@ -354,10 +357,10 @@ export async function resilientCheckLines(
     }
   }
 
-  // If all parallel checks failed, try 4 sequential retries
+  // If all parallel checks failed, try sequential retries on each
   if (responses.length === 0) {
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const v = validators[attempt % validators.length];
+    for (let attempt = 0; attempt < validators.length; attempt++) {
+      const v = validators[attempt];
       try {
         const result = await v.checkLines(req);
         if (!result.api_error) responses.push(result);

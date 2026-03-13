@@ -1230,7 +1230,7 @@ test.describe("Signal stress loop", () => {
                 let purchased = false;
                 try {
                   if (result.signalId) {
-                    logLine("INFO", `  Direct purchase: /idiot/signal/${result.signalId.slice(0, 16)}...`);
+                    logLine("INFO", `  Direct purchase: /idiot/signal/${result.signalId}`);
                     purchased = await Promise.race([
                       purchaseSignalById(idiotPage, idiotAcc, result.signalId),
                       new Promise<false>((r) => setTimeout(() => r(false), 120_000)),

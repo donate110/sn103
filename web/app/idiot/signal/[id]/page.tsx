@@ -196,19 +196,22 @@ export default function PurchaseSignal() {
           ),
       );
 
-      // Resilient check: retries across multiple validators/miners since
-      // some miners have broken Odds API keys and return 0 available lines.
+      // Resilient check: retries across ALL discovered validators/miners since
+      // most miners have broken Odds API keys and return 0 available lines.
+      console.log("[purchase] starting line check for signal", params.id, "with", candidateLines.length, "lines");
       let checkResult: CheckResponse | null = null;
       try {
         const result = await resilientCheckLines({ lines: candidateLines });
+        console.log("[purchase] line check complete:", result.available_indices.length, "of", candidateLines.length, "available");
         if (result.available_indices.length > 0) {
           checkResult = result;
         }
-      } catch {
-        // All checks failed
+      } catch (e) {
+        console.log("[purchase] line check FAILED:", String(e).slice(0, 200));
       }
 
       if (!checkResult || checkResult.available_indices.length === 0) {
+        console.log("[purchase] ABORT: no lines available");
         setStepError(
           "No lines are currently available at any sportsbook. The signal may have gone stale — check back later.",
         );
