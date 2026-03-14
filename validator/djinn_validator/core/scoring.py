@@ -46,7 +46,8 @@ class MinerMetrics:
     queries_total: int = 0
     queries_correct: int = 0  # Phase 1 matched TLSNotary truth
     latencies: list[float] = field(default_factory=list)
-    proofs_submitted: int = 0  # queries with valid TLSNotary proof
+    proofs_submitted: int = 0  # queries where miner returned a proof
+    proofs_verified: int = 0  # proofs that passed TLSNotary verification
 
     # ── Attestation challenge metrics (separate from sports) ──
     attestations_total: int = 0
@@ -85,10 +86,14 @@ class MinerMetrics:
         return self.queries_correct / self.queries_total
 
     def coverage_score(self) -> float:
-        """Fraction of proof requests where miner submitted a valid proof."""
+        """Fraction of proof requests where miner's proof was verified.
+
+        Only TLSNotary-verified proofs count. Submitting an unverifiable
+        proof (HTTP hash, missing presentation bytes) earns no coverage.
+        """
         if self.proofs_requested == 0:
             return 0.0
-        return self.proofs_submitted / self.proofs_requested
+        return self.proofs_verified / self.proofs_requested
 
     def uptime_score(self) -> float:
         """Fraction of health checks responded to."""
@@ -710,6 +715,7 @@ class MinerScorer:
             m.queries_correct = 0
             m.latencies.clear()
             m.proofs_submitted = 0
+            m.proofs_verified = 0
             m.proofs_requested = 0
             # Reset attestation metrics
             m.attestations_total = 0

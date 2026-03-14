@@ -1598,6 +1598,8 @@ def create_app(
             "queries_total": m.queries_total,
             "queries_correct": m.queries_correct,
             "proofs_submitted": m.proofs_submitted,
+            "proofs_verified": m.proofs_verified,
+            "proofs_requested": m.proofs_requested,
             "attestations_total": m.attestations_total,
             "attestations_valid": m.attestations_valid,
             "health_checks_total": m.health_checks_total,

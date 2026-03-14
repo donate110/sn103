@@ -792,6 +792,8 @@ async def challenge_miners(
             )
             if proof_submitted:
                 metrics.proofs_submitted += 1
+                if proof_valid:
+                    metrics.proofs_verified += 1
                 result.proofs_submitted += 1
                 log.info(
                     "challenge_proof_result", uid=target.uid,
