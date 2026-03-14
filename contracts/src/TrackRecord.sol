@@ -83,6 +83,7 @@ contract TrackRecord is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     error ProofNotCommitted();
     error CommitTooRecent(uint256 commitBlock, uint256 currentBlock);
     error CommitExpired(uint256 commitBlock, uint256 currentBlock);
+    error CommitAlreadyActive(bytes32 commitHash, uint256 commitBlock);
 
     /// @notice Maximum blocks between commit and submit (~96s on Base at 3s blocks)
     uint256 public constant COMMIT_EXPIRY_BLOCKS = 32;
@@ -122,6 +123,10 @@ contract TrackRecord is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     ///      commitHash = keccak256(abi.encodePacked(_pA, _pB, _pC, _pubSignals))
     /// @param commitHash Hash of the proof to be submitted
     function commitProof(bytes32 commitHash) external {
+        uint256 existing = proofCommitments[msg.sender][commitHash];
+        if (existing != 0 && block.number - existing <= COMMIT_EXPIRY_BLOCKS) {
+            revert CommitAlreadyActive(commitHash, existing);
+        }
         proofCommitments[msg.sender][commitHash] = block.number;
         emit ProofCommitted(msg.sender, commitHash, block.number);
     }

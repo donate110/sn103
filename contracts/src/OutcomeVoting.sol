@@ -34,6 +34,9 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     /// @notice Minimum number of validators required
     uint256 public constant MIN_VALIDATORS = 3;
 
+    /// @notice Maximum number of validators to prevent gas limit issues in loops
+    uint256 public constant MAX_VALIDATORS = 100;
+
     // ─── State ──────────────────────────────────────────────────
 
     /// @notice Audit contract reference
@@ -191,6 +194,9 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     /// @notice Validator count is below the minimum required
     error BelowMinValidators(uint256 current, uint256 minimum);
 
+    /// @notice Validator count exceeds maximum
+    error AboveMaxValidators(uint256 current, uint256 maximum);
+
     // ─── Constructor / Initializer ──────────────────────────────
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -225,6 +231,7 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     function addValidator(address validator) external onlyOwner {
         if (validator == address(0)) revert ZeroAddress();
         if (isValidator[validator]) revert ValidatorAlreadyRegistered(validator);
+        if (validators.length >= MAX_VALIDATORS) revert AboveMaxValidators(validators.length, MAX_VALIDATORS);
 
         isValidator[validator] = true;
         validators.push(validator);
@@ -328,6 +335,7 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     /// @dev Atomically replace the entire validator set and increment nonce
     function _applySync(address[] calldata newValidators) internal {
         if (newValidators.length < MIN_VALIDATORS) revert BelowMinValidators(newValidators.length, MIN_VALIDATORS);
+        if (newValidators.length > MAX_VALIDATORS) revert AboveMaxValidators(newValidators.length, MAX_VALIDATORS);
 
         // Clear old set
         for (uint256 i = 0; i < validators.length; i++) {
@@ -375,16 +383,21 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
         if (finalized[cycleKey]) revert CycleAlreadyFinalized(cycleKey);
         if (hasVoted[cycleKey][msg.sender]) revert AlreadyVoted(msg.sender, cycleKey);
 
-        // If validator set changed since snapshot, reset the cycle for re-voting
+        // If validator set changed since snapshot, reset the cycle for re-voting.
+        // Clear hasVoted so validators can re-vote. Old voteCounts become stale
+        // because the new snapshot will use a different syncNonce in the scoreHash (CF-01).
         if (cycleSyncNonce[cycleKey] != 0 && syncNonce != cycleSyncNonce[cycleKey]) {
-            // Reset snapshot - next block will re-snapshot with current validator set
+            for (uint256 i = 0; i < validators.length; i++) {
+                delete hasVoted[cycleKey][validators[i]];
+                delete votedScore[cycleKey][validators[i]];
+            }
             cycleValidatorSnapshot[cycleKey] = 0;
             cycleSyncNonce[cycleKey] = 0;
         }
 
         // Snapshot validator count and sync nonce on first vote for this cycle
         if (cycleValidatorSnapshot[cycleKey] == 0) {
-            require(validators.length > 0, "OutcomeVoting: empty validator set");
+            if (validators.length == 0) revert EmptyValidatorSet();
             cycleValidatorSnapshot[cycleKey] = validators.length;
             cycleSyncNonce[cycleKey] = syncNonce;
         }
@@ -393,8 +406,9 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
         hasVoted[cycleKey][msg.sender] = true;
         votedScore[cycleKey][msg.sender] = qualityScore;
 
-        // Hash both values so quorum requires agreement on score AND notional
-        bytes32 scoreHash = keccak256(abi.encode(qualityScore, totalNotional));
+        // Hash score, notional, AND sync nonce so stale votes from a previous
+        // validator set are automatically invalidated (CF-01).
+        bytes32 scoreHash = keccak256(abi.encode(qualityScore, totalNotional, cycleSyncNonce[cycleKey]));
         uint256 newCount = voteCounts[cycleKey][scoreHash] + 1;
         voteCounts[cycleKey][scoreHash] = newCount;
 
@@ -483,7 +497,7 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
         uint256 totalNotional
     ) external view returns (uint256 count) {
         bytes32 cycleKey = _cycleKey(genius, idiot, cycle);
-        bytes32 scoreHash = keccak256(abi.encode(qualityScore, totalNotional));
+        bytes32 scoreHash = keccak256(abi.encode(qualityScore, totalNotional, cycleSyncNonce[cycleKey]));
         return voteCounts[cycleKey][scoreHash];
     }
 
@@ -530,6 +544,10 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
             delete hasVoted[cycleKey][validators[i]];
             delete votedScore[cycleKey][validators[i]];
         }
+
+        // Clear early exit request state for this cycle
+        delete earlyExitRequested[cycleKey];
+        delete earlyExitRequestedBy[cycleKey];
 
         emit CycleReset(genius, idiot, cycle);
     }

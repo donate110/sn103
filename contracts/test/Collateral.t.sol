@@ -319,20 +319,20 @@ contract CollateralTest is Test {
         assertEq(usdc.balanceOf(recipient), 5000e6);
     }
 
-    function test_slash_doesNotReduceLocked() public {
+    function test_slash_clampsLockedToDeposits() public {
         _depositAs(genius, 5000e6);
 
         // Lock 4k
         vm.prank(authorizedCaller);
         col.lock(1, genius, 4000e6);
 
-        // Slash 3k -> deposits become 2k, locked stays at 4k (no clamping)
+        // Slash 3k -> deposits become 2k, locked clamped from 4k to 2k (CF-03)
         vm.prank(authorizedCaller);
         col.slash(genius, 3000e6, recipient);
 
         assertEq(col.getDeposit(genius), 2000e6);
-        assertEq(col.getLocked(genius), 4000e6); // not clamped
-        assertEq(col.getAvailable(genius), 0); // getAvailable handles locked > deposit
+        assertEq(col.getLocked(genius), 2000e6); // clamped to deposits
+        assertEq(col.getAvailable(genius), 0);
         assertEq(usdc.balanceOf(recipient), 3000e6);
     }
 
@@ -567,18 +567,18 @@ contract CollateralTest is Test {
         vm.prank(authorizedCaller);
         col.lock(1, genius, 4000e6);
 
-        // Slash all 5k -> deposits=0, locked stays at 4k (no clamping)
+        // Slash all 5k -> deposits=0, locked clamped to 0 (CF-03)
         vm.prank(authorizedCaller);
         col.slash(genius, 5000e6, recipient);
 
         assertEq(col.getDeposit(genius), 0);
-        assertEq(col.getLocked(genius), 4000e6); // not clamped
+        assertEq(col.getLocked(genius), 0); // clamped to deposits (0)
         assertEq(col.getAvailable(genius), 0);
 
-        // signalLock still shows 4k
+        // signalLock still shows 4k (stale, but harmless after full slash)
         assertEq(col.getSignalLock(genius, 1), 4000e6);
 
-        // Release the signal lock
+        // Release the signal lock (clamped by locked=0, release reduces signalLock)
         vm.prank(authorizedCaller);
         col.release(1, genius, 4000e6);
 

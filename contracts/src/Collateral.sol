@@ -178,6 +178,12 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
         uint256 available = deposits[genius];
         slashAmount = amount > available ? available : amount;
         deposits[genius] -= slashAmount;
+        // CF-03: Maintain deposits >= locked invariant after slash.
+        // If slash reduced deposits below locked, clamp locked down to prevent
+        // getAvailable() returning 0 and blocking subsequent lock/withdraw operations.
+        if (locked[genius] > deposits[genius]) {
+            locked[genius] = deposits[genius];
+        }
         usdc.safeTransfer(recipient, slashAmount);
         emit Slashed(genius, slashAmount, recipient);
     }
