@@ -42,6 +42,11 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     ///      No realistic cycle can produce a score exceeding this bound.
     int256 public constant MAX_QUALITY_SCORE = 1_000_000_000e6;
 
+    /// @notice Maximum total notional per cycle (10 signals * 1M USDC max per signal)
+    /// @dev Bounds validator-attested totalNotional in voted settlement paths.
+    ///      SIGNALS_PER_CYCLE (10) * Escrow.MAX_NOTIONAL (1e12) = 1e13.
+    uint256 public constant MAX_CYCLE_NOTIONAL = 10e12;
+
     // -------------------------------------------------------------------------
     // State
     // -------------------------------------------------------------------------
@@ -118,6 +123,7 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     error CallerNotOutcomeVoting(address caller);
     error QualityScoreOutOfBounds(int256 score, int256 maxAbsolute);
     error NotPauserOrOwner(address caller);
+    error TotalNotionalOutOfBounds(uint256 totalNotional, uint256 maxAllowed);
 
     // -------------------------------------------------------------------------
     // Constructor
@@ -361,6 +367,9 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
         if (qualityScore > MAX_QUALITY_SCORE || qualityScore < -MAX_QUALITY_SCORE) {
             revert QualityScoreOutOfBounds(qualityScore, MAX_QUALITY_SCORE);
         }
+        if (totalNotional > MAX_CYCLE_NOTIONAL) {
+            revert TotalNotionalOutOfBounds(totalNotional, MAX_CYCLE_NOTIONAL);
+        }
         _validateDependencies();
 
         // Full settlement requires 10 signals (audit-ready). For fewer signals,
@@ -391,6 +400,9 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
         if (msg.sender != outcomeVoting) revert CallerNotOutcomeVoting(msg.sender);
         if (qualityScore > MAX_QUALITY_SCORE || qualityScore < -MAX_QUALITY_SCORE) {
             revert QualityScoreOutOfBounds(qualityScore, MAX_QUALITY_SCORE);
+        }
+        if (totalNotional > MAX_CYCLE_NOTIONAL) {
+            revert TotalNotionalOutOfBounds(totalNotional, MAX_CYCLE_NOTIONAL);
         }
         _validateDependencies();
 

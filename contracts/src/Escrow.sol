@@ -491,9 +491,11 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         }
         if (notional < MIN_NOTIONAL) return (false, "Notional too small");
         if (notional > MAX_NOTIONAL) return (false, "Notional too large");
-        // Check genius has enough free collateral for the SLA lock
-        if (address(collateral) != address(0) && sig.slaMultiplierBps > 0) {
-            uint256 lockNeeded = (notional * sig.slaMultiplierBps) / 10_000;
+        // Check genius has enough free collateral for SLA lock + protocol fee lock
+        if (address(collateral) != address(0)) {
+            uint256 slaLock = (notional * sig.slaMultiplierBps) / 10_000;
+            uint256 protocolFeeLock = (notional * 50) / 10_000;
+            uint256 lockNeeded = slaLock + protocolFeeLock;
             uint256 available = collateral.getAvailable(sig.genius);
             if (available < lockNeeded) return (false, "Insufficient genius collateral");
         }

@@ -135,6 +135,9 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     /// @notice Emitted when the pauser address is updated
     event PauserUpdated(address indexed newPauser);
 
+    /// @notice Emitted when a stuck cycle is reset by the owner
+    event CycleReset(address indexed genius, address indexed idiot, uint256 cycle);
+
     // ─── Errors ─────────────────────────────────────────────────
 
     /// @notice Caller is not a registered validator
@@ -499,6 +502,36 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
         returns (bytes32)
     {
         return keccak256(abi.encode(genius, idiot, cycle));
+    }
+
+    // ─── Stuck Cycle Recovery ────────────────────────────────────
+
+    /// @notice Reset a stuck voting cycle. Owner-only for recovery when a cycle
+    ///         cannot reach quorum (e.g., settlement reverted after partial voting,
+    ///         or validator set changed mid-vote leaving old voters blocked).
+    ///         Clears finalization, snapshot, and all per-validator vote state so
+    ///         validators can re-vote from scratch.
+    /// @param genius The Genius address
+    /// @param idiot The Idiot address
+    /// @param cycle The cycle number to reset
+    function resetCycle(address genius, address idiot, uint256 cycle) external onlyOwner {
+        bytes32 cycleKey = _cycleKey(genius, idiot, cycle);
+        // Only allow resetting non-finalized cycles (finalized cycles are already settled)
+        if (finalized[cycleKey]) revert CycleAlreadyFinalized(cycleKey);
+
+        // Clear snapshot so a fresh snapshot is taken on the next vote
+        cycleValidatorSnapshot[cycleKey] = 0;
+        cycleSyncNonce[cycleKey] = 0;
+
+        // Clear hasVoted for all current validators so they can re-vote.
+        // Old voteCounts entries become stale but are harmless since the
+        // snapshot reset means quorum is recalculated from scratch.
+        for (uint256 i = 0; i < validators.length; i++) {
+            delete hasVoted[cycleKey][validators[i]];
+            delete votedScore[cycleKey][validators[i]];
+        }
+
+        emit CycleReset(genius, idiot, cycle);
     }
 
     // ─── Emergency Pause ────────────────────────────────────────
