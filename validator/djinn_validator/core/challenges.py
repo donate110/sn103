@@ -773,7 +773,6 @@ async def challenge_miners(
         # ── Phase 3b: Discover peer notaries for proof requests ──
         peer_notaries = await discover_peer_notaries(client, miner_axons)
         _proof_notary_counts: dict[int, int] = {}
-        _max_per = max(4, len(proof_targets if 'proof_targets' in dir() else []) // max(len(peer_notaries), 1))
 
         # ── Phase 4: Request proofs from targeted miners ──
         # Spot-check: 20% of epochs require ALL miners to submit proof
@@ -787,22 +786,31 @@ async def challenge_miners(
             )
         _max_per = max(4, len(proof_targets) // max(len(peer_notaries), 1))
         result.proofs_requested = len(proof_targets)
+
+        # Pre-assign notaries for all targets (must be sequential for
+        # load-balancing counts to work correctly)
+        target_notaries: list[tuple[Any, PeerNotary | None]] = []
         for target in proof_targets:
-            # Track that this miner was requested for proof
             metrics = scorer.get_or_create(target.uid, target.hotkey)
             metrics.proofs_requested += 1
-
-            # Assign a peer notary for this proof request
             assigned_notary = assign_peer_notary(
                 target.uid, peer_notaries, prover_ip=target.ip,
                 assignment_counts=_proof_notary_counts, max_per_notary=_max_per,
             )
+            target_notaries.append((target, assigned_notary))
 
-            proof_submitted, proof_valid = await _request_and_verify_proof(
-                client, target.ip, target.port, target.query_id, target.uid,
-                wallet=wallet,
-                notary=assigned_notary,
-            )
+        # Run proof requests in parallel (TLSNotary proofs take 30-90s each;
+        # sequential execution with 50+ targets would take hours)
+        _proof_sem = asyncio.Semaphore(8)
+
+        async def _do_proof(target: Any, notary_for_target: PeerNotary | None) -> None:
+            async with _proof_sem:
+                proof_submitted, proof_valid = await _request_and_verify_proof(
+                    client, target.ip, target.port, target.query_id, target.uid,
+                    wallet=wallet,
+                    notary=notary_for_target,
+                )
+            metrics = scorer.get_or_create(target.uid, target.hotkey)
             if proof_submitted:
                 metrics.proofs_submitted += 1
                 if proof_valid:
@@ -813,13 +821,14 @@ async def challenge_miners(
                     proof_submitted=proof_submitted,
                     proof_valid=proof_valid,
                 )
-            # Annotate the miner result with proof info
             for mr in result.miner_results:
                 if mr["uid"] == target.uid:
                     mr["proof_requested"] = True
                     mr["proof_submitted"] = proof_submitted
                     mr["proof_valid"] = proof_valid
                     break
+
+        await asyncio.gather(*[_do_proof(t, n) for t, n in target_notaries])
 
     result.challenged = len(responses)
     if result.challenged:

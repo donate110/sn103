@@ -70,7 +70,7 @@ class SessionCapture:
     """
 
     _MAX_SESSIONS = 1000
-    _SESSION_TTL = 600  # 10 minutes
+    _SESSION_TTL = 1800  # 30 minutes (proof requests may come late in a full-proof epoch)
 
     def __init__(self) -> None:
         self._sessions: dict[str, CapturedSession] = {}
