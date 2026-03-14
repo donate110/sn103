@@ -3,10 +3,10 @@ pragma solidity ^0.8.28;
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {Purchase, Outcome, Signal, AccountState} from "./interfaces/IDjinn.sol";
+import {Purchase, Outcome, AccountState} from "./interfaces/IDjinn.sol";
 import {IEscrow, ICollateral, ICreditLedger, IAccount, ISignalCommitment} from "./interfaces/IProtocol.sol";
 
 /// @notice Result of an audit settlement
@@ -23,7 +23,7 @@ struct AuditResult {
 ///         Computes the Quality Score per the whitepaper formula, distributes damages
 ///         across Tranche A (USDC refund) and Tranche B (Credits), collects a 0.5%
 ///         protocol fee on total notional, and releases remaining collateral locks.
-contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
+contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardTransient, UUPSUpgradeable {
     // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------
@@ -249,17 +249,14 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
 
         for (uint256 i; i < purchaseIds.length; ++i) {
             Purchase memory p = escrow.getPurchase(purchaseIds[i]);
-            Signal memory sig = signalCommitment.getSignal(p.signalId);
             Outcome outcome = account.getOutcome(genius, idiot, purchaseIds[i]);
 
             if (outcome == Outcome.Favorable) {
-                // +notional * (odds - 1e6) / 1e6
-                // odds is 6-decimal fixed point, e.g., 1.91 = 1_910_000
                 int256 gain = int256(p.notional) * (int256(p.odds) - int256(ODDS_PRECISION)) / int256(ODDS_PRECISION);
                 score += gain;
             } else if (outcome == Outcome.Unfavorable) {
-                // -notional * slaMultiplierBps / 10000
-                int256 loss = int256(p.notional) * int256(sig.slaMultiplierBps) / int256(BPS_DENOMINATOR);
+                uint256 slaBps = signalCommitment.getSignalSlaMultiplierBps(p.signalId);
+                int256 loss = int256(p.notional) * int256(slaBps) / int256(BPS_DENOMINATOR);
                 score -= loss;
             }
             // Void and Pending: skip
@@ -465,12 +462,6 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
             totalUsdcFeesPaid += p.usdcPaid;
         }
 
-        // CF-04: Bound quality score to actual cycle notional to prevent arbitrary values.
-        // Even via timelock, the owner cannot set damages exceeding the cycle's notional.
-        if (qualityScore > int256(totalNotional) || qualityScore < -int256(totalNotional)) {
-            revert QualityScoreOutOfBounds(qualityScore, int256(totalNotional));
-        }
-
         // Use full settlement (Tranche A USDC) when audit-ready, early exit otherwise
         bool isEarlyExit = !account.isAuditReady(genius, idiot);
 
@@ -647,6 +638,12 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
             (trancheA, trancheB) = _distributeDamages(genius, idiot, uint256(-score), totalUsdcFeesPaid);
         }
         // If score >= 0 and not early exit: Genius keeps all fees, no damages
+
+        // SC-03: Reduce fee pool by Tranche A amount to prevent genius from claiming
+        // fees that were effectively refunded to the idiot via collateral slash.
+        if (trancheA > 0) {
+            escrow.reduceFeePool(genius, idiot, cycle, trancheA);
+        }
 
         // Protocol fee: slash from genius collateral to treasury.
         // DESIGN NOTE (CF-15): The protocol fee is charged on ALL settlements including

@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IAudit, IAccount} from "./interfaces/IProtocol.sol";
@@ -24,7 +24,7 @@ import {IAudit, IAccount} from "./interfaces/IProtocol.sol";
 ///      retains addValidator/removeValidator for bootstrap and emergencies.
 ///      Votes are per (genius, idiot, cycle) tuple. Each validator can vote
 ///      once per cycle. Finalization is automatic when quorum is reached.
-contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
+contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardTransient, UUPSUpgradeable {
     // ─── Constants ──────────────────────────────────────────────
 
     /// @notice Quorum requirement: 2/3 of validators must agree

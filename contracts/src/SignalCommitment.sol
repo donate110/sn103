@@ -207,6 +207,9 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
         if (p.slaMultiplierBps > 100_000) revert SlaMultiplierTooHigh(p.slaMultiplierBps);
         if (p.maxPriceBps == 0 || p.maxPriceBps > 5000) revert InvalidMaxPriceBps(p.maxPriceBps);
         if (p.expiresAt <= block.timestamp) revert ExpirationInPast(p.expiresAt, block.timestamp);
+        // maxNotional = 0 means unlimited notional capacity per signal.
+        // Each purchase is still bounded by Escrow.MAX_NOTIONAL (1M USDC) and
+        // requires sufficient genius collateral, providing natural limits.
         if (p.maxNotional > 0 && p.minNotional > p.maxNotional) {
             revert InvalidNotionalRange(p.minNotional, p.maxNotional);
         }

@@ -5,7 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {Outcome, Purchase, Signal, SignalStatus} from "./interfaces/IDjinn.sol";
@@ -16,7 +16,7 @@ import {ISignalCommitment, ICollateral, ICreditLedger, IAccount, IAudit} from ".
 ///         Buyers deposit USDC ahead of time for instant purchases. Fees are split between
 ///         escrowed USDC and Djinn Credits (credits used first). A fee pool tracks collections
 ///         per genius-idiot-cycle for audit-time refunds.
-contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
+contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, ReentrancyGuardTransient, UUPSUpgradeable {
     using SafeERC20 for IERC20;
 
     // -------------------------------------------------------------------------
@@ -51,11 +51,11 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     mapping(uint256 => uint256[]) internal _purchasesBySignal;
 
     /// @notice Fee pool: genius -> idiot -> cycle -> total USDC fees collected.
-    /// @dev DESIGN NOTE: The fee pool is NOT reduced during negative settlement. When
-    ///      Tranche A damages are paid, they come from genius COLLATERAL (via slash),
-    ///      not from this fee pool. This is intentional: fees compensate the genius for
-    ///      providing signals; damages come from their collateral bond. The genius can
-    ///      claim fees after settlement + 48h dispute window regardless of outcome.
+    /// @dev SC-03: The fee pool IS reduced by Tranche A (USDC refund) during negative
+    ///      settlement. When damages slash genius collateral to refund the idiot, the
+    ///      genius should not also claim those same fees. The Audit contract calls
+    ///      reduceFeePool() after distributing Tranche A damages. The genius can claim
+    ///      any remaining fees after settlement + 48h dispute window.
     mapping(address => mapping(address => mapping(uint256 => uint256))) public feePool;
 
     /// @notice Cumulative notional purchased per signal
@@ -418,6 +418,23 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         usdc.safeTransfer(msg.sender, amount);
 
         emit FeesClaimed(msg.sender, idiot, cycle, amount);
+    }
+
+    /// @notice Reduce the fee pool after Tranche A damages. Called by Audit during
+    ///         negative settlement to prevent genius from claiming fees that were
+    ///         effectively refunded to the idiot via collateral slash.
+    /// @param genius The Genius address
+    /// @param idiot The Idiot address
+    /// @param cycle The settlement cycle
+    /// @param amount Amount to reduce (capped at current pool balance)
+    function reduceFeePool(address genius, address idiot, uint256 cycle, uint256 amount) external {
+        if (msg.sender != auditContract) revert Unauthorized();
+        uint256 pool = feePool[genius][idiot][cycle];
+        if (amount >= pool) {
+            feePool[genius][idiot][cycle] = 0;
+        } else {
+            feePool[genius][idiot][cycle] = pool - amount;
+        }
     }
 
     /// @notice Batch claim fees from multiple settled idiot-cycle pairs.

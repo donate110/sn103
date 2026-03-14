@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
@@ -10,12 +11,15 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Ini
 ///         Credits are minted as Tranche B during negative audit settlement (see whitepaper Section 7)
 ///         and burned by the Escrow contract when an Idiot uses them to offset a purchase fee.
 /// @dev This is intentionally NOT an ERC20. Credits cannot be transferred, approved, or redeemed for cash.
-contract CreditLedger is Initializable, OwnableUpgradeable, UUPSUpgradeable {
+contract CreditLedger is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable {
     // ─── Storage
     // ────────────────────────────────────────────────────────
 
     /// @dev address => credit balance
     mapping(address => uint256) private _balances;
+
+    /// @notice Total credits outstanding across all addresses
+    uint256 private _totalSupply;
 
     /// @dev address => whether it can call mint/burn
     mapping(address => bool) public authorizedCallers;
@@ -76,6 +80,7 @@ contract CreditLedger is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @param initialOwner Address that will own this contract and manage authorized callers
     function initialize(address initialOwner) public initializer {
         __Ownable_init(initialOwner);
+        __Pausable_init();
     }
 
     // ─── External Functions
@@ -90,6 +95,7 @@ contract CreditLedger is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         if (amount == 0) revert MintAmountZero();
 
         _balances[to] += amount;
+        _totalSupply += amount;
 
         emit CreditsMinted(to, amount);
     }
@@ -108,6 +114,7 @@ contract CreditLedger is Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
         unchecked {
             _balances[from] = balance - amount;
+            _totalSupply -= amount;
         }
 
         emit CreditsBurned(from, amount);
@@ -134,13 +141,50 @@ contract CreditLedger is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         return _balances[account];
     }
 
+    /// @notice Returns the total credits outstanding across all addresses
+    /// @return supply Total credits minted minus burned
+    function totalSupply() external view returns (uint256 supply) {
+        return _totalSupply;
+    }
+
+    // ─── Emergency Pause
+    // ─────────────────────────────────────────────────────
+
+    /// @notice Address authorized to pause this contract in emergencies
+    address public pauser;
+
+    /// @notice Caller is not the pauser or the owner
+    error NotPauserOrOwner(address caller);
+
+    /// @notice Emitted when the pauser address is updated
+    event PauserUpdated(address indexed newPauser);
+
+    /// @notice Set the emergency pauser address
+    /// @param _pauser New pauser address (address(0) to disable)
+    function setPauser(address _pauser) external onlyOwner {
+        pauser = _pauser;
+        emit PauserUpdated(_pauser);
+    }
+
+    /// @notice Pause minting and burning
+    function pause() external {
+        if (msg.sender != pauser && msg.sender != owner()) revert NotPauserOrOwner(msg.sender);
+        _pause();
+    }
+
+    /// @notice Unpause minting and burning
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
     // ─── UUPS
     // ─────────────────────────────────────────────────────
 
-    /// @dev Only the owner (TimelockController) can authorize upgrades.
-    ///      CreditLedger tracks virtual balances — no USDC held directly.
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    /// @dev Owner can authorize upgrades only when paused.
+    ///      CreditLedger tracks virtual balances; pausing prevents state
+    ///      changes during upgrade.
+    function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
 
     /// @dev Reserved storage gap for future upgrades.
-    uint256[48] private __gap;
+    uint256[46] private __gap;
 }

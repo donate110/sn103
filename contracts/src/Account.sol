@@ -233,6 +233,8 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     function settleAudit(address genius, address idiot) external onlyAuthorized whenNotPaused {
         _validatePair(genius, idiot);
         bytes32 key = _accountKey(genius, idiot);
+        _accounts[key].settled = true;
+        emit SettledChanged(genius, idiot, true);
         _resetCycle(key);
         emit NewCycleStarted(genius, idiot, _accounts[key].currentCycle);
     }

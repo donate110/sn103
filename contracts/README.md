@@ -433,8 +433,8 @@ All upgradeable contracts use the UUPS (Universal Upgradeable Proxy Standard) pa
 | Escrow | `onlyOwner` + `whenPaused` |
 | Collateral | `onlyOwner` + `whenPaused` |
 | Audit | `onlyOwner` + `whenPaused` |
-| Account | `onlyOwner` |
-| CreditLedger | `onlyOwner` |
+| Account | `onlyOwner` + `whenPaused` |
+| CreditLedger | `onlyOwner` + `whenPaused` |
 | OutcomeVoting | `onlyOwner` + `whenPaused` |
 | ZKVerifier | `onlyOwner` |
 | TrackRecord | `onlyOwner` |
@@ -468,6 +468,8 @@ Contracts that hold USDC (Escrow, Collateral) or orchestrate USDC movement (Audi
 | `MAX_BLOB_SIZE` (recovery) | 4,096 (4 KB) | KeyRecovery | Maximum recovery blob size |
 | `QUORUM_NUMERATOR/DENOMINATOR` | 2 / 3 | OutcomeVoting | 2/3 supermajority quorum |
 | `MIN_VALIDATORS` | 3 | OutcomeVoting | Minimum validator set size |
+| `MAX_VALIDATORS` | 100 | OutcomeVoting | Maximum validator set size (gas safety) |
+| `MAX_CYCLE_NOTIONAL` | 10e12 (10M USDC) | Audit | Bounds validator-attested totalNotional |
 | TimelockController delay | 259,200s (72h) | Deploy.s.sol | Governance delay for owner operations |
 
 ---
@@ -476,7 +478,7 @@ Contracts that hold USDC (Escrow, Collateral) or orchestrate USDC movement (Audi
 
 ### Reentrancy Protection
 
-- Escrow, Collateral, Audit, and OutcomeVoting use OpenZeppelin's `ReentrancyGuard` (v5, namespaced storage slot, proxy-safe without an upgradeable variant).
+- Escrow, Collateral, Audit, and OutcomeVoting use OpenZeppelin's `ReentrancyGuardTransient` (EIP-1153 transient storage). Base supports transient storage post-Dencun, so the reentrancy guard uses `tstore`/`tload` with no persistent storage slot. This avoids proxy storage layout concerns entirely.
 - All external functions that transfer USDC or modify critical state are protected with `nonReentrant`.
 - Escrow follows the Checks-Effects-Interactions (CEI) pattern: state changes are finalized before external calls.
 
