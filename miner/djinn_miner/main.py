@@ -36,22 +36,45 @@ log = structlog.get_logger()
 
 
 async def bt_sync_loop(neuron: DjinnMiner, health: HealthTracker, telemetry: TelemetryStore | None = None) -> None:
-    """Background loop: keep metagraph fresh and check registration."""
+    """Background loop: keep metagraph fresh and check registration.
+
+    Handles deregistration gracefully: keeps running and polls for
+    re-registration instead of shutting down. When re-registration is
+    detected, re-serves the axon so the miner becomes discoverable again.
+    """
     log.info("bt_sync_loop_started")
     consecutive_errors = 0
+    _was_registered = health.bt_connected
 
     while True:
         try:
             neuron.sync_metagraph()
 
             if not neuron.is_registered():
-                log.warning("miner_deregistered", msg="No longer registered on subnet")
+                if _was_registered:
+                    log.warning("miner_deregistered", msg="No longer registered on subnet")
+                    if telemetry:
+                        telemetry.record("bt_deregistered", "Miner no longer registered on subnet")
+                _was_registered = False
                 health.set_bt_connected(False)
-                if telemetry:
-                    telemetry.record("bt_deregistered", "Miner no longer registered on subnet")
             else:
+                if not _was_registered:
+                    # Just (re-)registered. Refresh UID and serve the axon
+                    # so validators can discover us on the metagraph.
+                    hotkey = neuron.wallet.hotkey.ss58_address
+                    try:
+                        neuron.uid = list(neuron.metagraph.hotkeys).index(hotkey)
+                    except (ValueError, AttributeError):
+                        pass
+                    log.info("miner_registered", uid=neuron.uid, msg="Registered on subnet, serving axon")
+                    try:
+                        neuron._setup_axon()
+                    except Exception as e:
+                        log.warning("axon_serve_failed", error=str(e))
+                    if telemetry:
+                        telemetry.record("bt_registered", f"Miner registered with UID {neuron.uid}")
+                _was_registered = True
                 health.set_bt_connected(True)
-                # Refresh UID in case it changed after re-registration
                 if neuron.uid is not None:
                     health.set_uid(neuron.uid)
 
@@ -162,17 +185,18 @@ async def async_main() -> None:
     if bt_ok:
         health_tracker.set_uid(neuron.uid)  # type: ignore[arg-type]
         health_tracker.set_bt_connected(True)
-    elif config.bt_network in ("finney", "mainnet"):
-        log.error(
-            "bt_setup_failed_production",
-            msg="Wallet/subtensor setup failed on production network — refusing to start. "
-            "Check that your coldkeypub.txt is valid JSON: {\"ss58Address\": \"5Your...\"}",
-        )
-        raise SystemExit(1)
     else:
+        # Don't exit on registration failure. The miner should keep running
+        # so the API server stays up, the notary sidecar stays alive, and
+        # the BT sync loop can detect re-registration automatically.
+        # Exiting here causes a PM2 restart loop that wastes resources and
+        # prevents the notary sidecar from ever stabilizing.
         log.warning(
             "running_without_bittensor",
-            msg="Miner API will start but won't be discoverable on subnet",
+            msg="Not registered on subnet. Miner API will start, BT sync loop "
+            "will poll for re-registration. Register with: "
+            "btcli subnet register --netuid 103",
+            network=config.bt_network,
         )
 
     # Peer notary sidecar (enabled by default, disable with NOTARY_ENABLED=false)
@@ -228,8 +252,9 @@ async def async_main() -> None:
         asyncio.create_task(watchtower_loop(package_dir=Path(__file__).resolve().parent.parent)),
         asyncio.create_task(_prover_reaper_loop()),
     ]
-    if bt_ok:
-        running_tasks.append(asyncio.create_task(bt_sync_loop(neuron, health_tracker, telemetry)))
+    # Always run BT sync loop so the miner can detect re-registration
+    # even if it started while deregistered.
+    running_tasks.append(asyncio.create_task(bt_sync_loop(neuron, health_tracker, telemetry)))
     if notary_sidecar.enabled:
         running_tasks.append(asyncio.create_task(notary_sidecar.watchdog_loop()))
 

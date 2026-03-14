@@ -249,7 +249,8 @@ def create_app(
 
     # Notary MPC sessions are stateful and heavy — limit concurrency.
     # The sidecar can handle a few concurrent sessions but degrades fast.
-    _notary_sem = asyncio.Semaphore(int(os.getenv("NOTARY_MAX_CONCURRENT", "4")))
+    _notary_max_concurrent = int(os.getenv("NOTARY_MAX_CONCURRENT", "4"))
+    _notary_sem = asyncio.Semaphore(_notary_max_concurrent)
 
     @app.websocket("/v1/notary/ws")
     async def notary_ws_proxy(ws: WebSocket) -> None:
@@ -468,6 +469,8 @@ def create_app(
         health_tracker.record_ping()
         # Update live session counts for capability reporting
         health_tracker.set_tlsn_capacity(_ATTEST_MAX_CONCURRENT, _attest_inflight)
+        notary_active = _notary_max_concurrent - _notary_sem._value
+        health_tracker.set_notary_capacity(_notary_max_concurrent, notary_active)
         return health_tracker.get_status()
 
     # Cache Config for readiness checks (avoid re-loading dotenv on every probe)

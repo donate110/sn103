@@ -134,12 +134,35 @@ def _check_upgrade() -> None:
 def ensure_binary(name: str) -> str:
     """Ensure a TLSNotary binary is available, downloading if necessary.
 
+    Always checks for upgrades regardless of where the binary is found.
+    When a newer version is available in ~/.local/bin, it takes priority
+    over PATH or env-override binaries so that critical fixes (like the
+    notary timeout fix in v517) propagate to all miners via watchtower.
+
     Args:
         name: Binary name, e.g. "djinn-tlsn-prover" or "djinn-tlsn-verifier"
 
     Returns:
         Path to the binary (may be just the name if it's on PATH).
     """
+    installed = os.path.join(INSTALL_DIR, name)
+
+    # Always check for upgrades first. This ensures miners on watchtower
+    # pick up critical binary fixes (e.g. notary timeout) automatically.
+    if os.path.isfile(installed) and os.access(installed, os.X_OK):
+        _check_upgrade()
+    else:
+        # Not installed yet; try to download
+        plat = _detect_platform()
+        if plat:
+            tag = _latest_release_tag()
+            if tag:
+                _download_and_install(tag, plat)
+
+    # Prefer the managed install dir (gets auto-upgraded) over PATH/env
+    if os.path.isfile(installed) and os.access(installed, os.X_OK):
+        return installed
+
     # Check env override
     _ENV_KEYS = {"prover": "TLSN_PROVER_BINARY", "verifier": "TLSN_VERIFIER_BINARY", "notary": "TLSN_NOTARY_BINARY"}
     env_key = next((v for k, v in _ENV_KEYS.items() if k in name), "TLSN_PROVER_BINARY")
@@ -153,26 +176,4 @@ def ensure_binary(name: str) -> str:
     if found:
         return found
 
-    # Check install dir
-    installed = os.path.join(INSTALL_DIR, name)
-    if os.path.isfile(installed) and os.access(installed, os.X_OK):
-        # Binary exists, but check for upgrades in the background
-        _check_upgrade()
-        return installed
-
-    # Try to download
-    plat = _detect_platform()
-    if not plat:
-        log.warning("tlsn_bootstrap_unsupported_platform", system=platform.system(), machine=platform.machine())
-        return name  # Return bare name; will fail at runtime with clear error
-
-    tag = _latest_release_tag()
-    if not tag:
-        log.warning("tlsn_bootstrap_no_release", repo=GITHUB_REPO)
-        return name
-
-    if _download_and_install(tag, plat):
-        if os.path.isfile(installed) and os.access(installed, os.X_OK):
-            return installed
-
-    return name  # Fallback to bare name
+    return name  # Fallback to bare name; will fail at runtime with clear error
