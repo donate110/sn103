@@ -16,6 +16,7 @@ import os
 import re
 import signal
 import shutil
+import time
 from dataclasses import dataclass
 
 import structlog
@@ -56,6 +57,33 @@ class NotarySidecar:
         self._pubkey_hex: str = ""
         self._started = False
 
+    def _kill_orphaned_notary(self) -> None:
+        """Kill any djinn-tlsn-notary process listening on our port.
+
+        After os.execv (watchtower restart), the old notary child becomes
+        an orphan under PID 1. It still holds the port, preventing the
+        new notary from binding. Find it by matching the process name and
+        port argument, then SIGKILL it.
+        """
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", f"djinn-tlsn-notary.*--port {self._port}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split("\n"):
+                    pid = int(line.strip())
+                    if self._process and pid == self._process.pid:
+                        continue  # Don't kill our own managed process
+                    if pid == os.getpid():
+                        continue
+                    log.info("killing_orphaned_notary", pid=pid, port=self._port)
+                    os.kill(pid, signal.SIGKILL)
+                    time.sleep(0.5)  # Let the port release
+        except Exception as e:
+            log.debug("orphan_cleanup_error", error=str(e))
+
     @property
     def info(self) -> NotaryInfo:
         return NotaryInfo(
@@ -95,6 +123,12 @@ class NotarySidecar:
         if not self._enabled:
             log.debug("notary_sidecar_disabled")
             return False
+
+        # Kill any orphaned notary processes on our port. When the watchtower
+        # restarts the miner via os.execv, the old notary child becomes an
+        # orphan that still holds the port. Without this cleanup, the new
+        # notary fails with "Address already in use" and crash-loops.
+        self._kill_orphaned_notary()
 
         # Re-resolve on every start so the watchdog picks up upgraded binaries
         # without requiring a process restart.
