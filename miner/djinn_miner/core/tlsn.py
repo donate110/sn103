@@ -30,13 +30,8 @@ PROVER_BINARY = ensure_binary("djinn-tlsn-prover")
 # Max age (seconds) before a prover process is considered stuck and killed.
 _PROVER_MAX_AGE = int(os.getenv("TLSN_PROVER_MAX_AGE", "300"))
 
-NOTARY_HOST = os.getenv("TLSN_NOTARY_HOST", "notary.pse.dev")
-NOTARY_PORT = int(os.getenv("TLSN_NOTARY_PORT", "443"))
-
-# When True, refuse to fall back to the centralized PSE notary.
-# All validators now assign peer notaries, so PSE fallback just creates
-# zombie provers that hang on notary.pse.dev for hours. Fail fast instead.
-REQUIRE_PEER_NOTARY = os.getenv("TLSN_REQUIRE_PEER_NOTARY", "true").lower() in ("true", "1", "yes")
+NOTARY_HOST = os.getenv("TLSN_NOTARY_HOST", "")
+NOTARY_PORT = int(os.getenv("TLSN_NOTARY_PORT", "7047"))
 
 # Headers whose values should be redacted from the proof
 REDACT_HEADERS = os.getenv("TLSN_REDACT_HEADERS", "authorization,apikey,x-api-key")
@@ -93,33 +88,12 @@ async def generate_proof(
     host = notary_host or NOTARY_HOST
     port = notary_port or NOTARY_PORT
 
-    # Warn when falling back to centralized PSE notary.
-    # During transition, validators may not yet assign peer notaries,
-    # so we allow PSE with a deprecation warning rather than hard-blocking.
-    # Once all validators are updated, set TLSN_ALLOW_PSE_FALLBACK=false
-    # to hard-block PSE.
-    if not notary_host and host == "notary.pse.dev":
-        try:
-            from djinn_miner.api.metrics import CENTRALIZED_NOTARY_FALLBACKS
-            CENTRALIZED_NOTARY_FALLBACKS.inc()
-        except Exception:
-            pass
-        if REQUIRE_PEER_NOTARY:
-            log.error(
-                "pse_notary_blocked",
-                msg="No peer notary assigned and TLSN_ALLOW_PSE_FALLBACK is not set. "
-                "Refusing to use centralized notary.pse.dev. Validator should assign "
-                "a peer notary via notary_host/notary_port.",
-            )
-            return TLSNProofResult(
-                success=False,
-                error="No peer notary assigned. Centralized PSE notary is disabled.",
-            )
-        log.warning(
-            "using_centralized_notary_fallback",
-            host=host,
-            msg="No peer notary assigned — falling back to centralized notary. "
-            "This will be blocked in a future update.",
+    # Peer notary is required. Validators assign one via notary_host/notary_port.
+    # If none was assigned, fail fast rather than hanging on an external service.
+    if not notary_host and not NOTARY_HOST:
+        return TLSNProofResult(
+            success=False,
+            error="No peer notary assigned. Validator must provide notary_host/notary_port.",
         )
 
     # Resolve redirects and probe response size. The prover can't follow
@@ -173,21 +147,6 @@ async def generate_proof(
                 url, notary_host, port, output_path, timeout,
                 max_recv_data=recv_data_size,
             )
-            # If peer notary failed, fall back to PSE rather than returning error
-            if not result.success and not REQUIRE_PEER_NOTARY:
-                log.warning(
-                    "peer_notary_failed_pse_fallback",
-                    peer_host=notary_host,
-                    peer_port=port,
-                    error=result.error[:100],
-                )
-                try:
-                    from djinn_miner.api.metrics import CENTRALIZED_NOTARY_FALLBACKS
-                    CENTRALIZED_NOTARY_FALLBACKS.inc()
-                except Exception:
-                    pass
-                return await _run_prover(url, NOTARY_HOST, NOTARY_PORT, output_path, timeout,
-                                         max_recv_data=recv_data_size)
             return result
         return await _run_prover(url, host, port, output_path, timeout,
                                  max_recv_data=recv_data_size)

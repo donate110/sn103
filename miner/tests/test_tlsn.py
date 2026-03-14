@@ -65,7 +65,7 @@ class TestGenerateProof:
 
         with (
             patch("djinn_miner.core.tlsn.asyncio.create_subprocess_exec", side_effect=mock_subprocess),
-            patch("djinn_miner.core.tlsn.REQUIRE_PEER_NOTARY", False),
+            patch("djinn_miner.core.tlsn.NOTARY_HOST", "localhost"),
         ):
             result = await generate_proof(
                 "https://api.the-odds-api.com/v4/sports/nba/odds?apiKey=test",
@@ -84,7 +84,7 @@ class TestGenerateProof:
                 "djinn_miner.core.tlsn.asyncio.create_subprocess_exec",
                 side_effect=FileNotFoundError("not found"),
             ),
-            patch("djinn_miner.core.tlsn.REQUIRE_PEER_NOTARY", False),
+            patch("djinn_miner.core.tlsn.NOTARY_HOST", "localhost"),
         ):
             result = await generate_proof("https://example.com")
 
@@ -117,7 +117,7 @@ class TestGenerateProof:
         with (
             patch("djinn_miner.core.tlsn.asyncio.create_subprocess_exec", side_effect=mock_subprocess),
             patch("djinn_miner.core.tlsn.asyncio.wait_for", side_effect=mock_wait_for),
-            patch("djinn_miner.core.tlsn.REQUIRE_PEER_NOTARY", False),
+            patch("djinn_miner.core.tlsn.NOTARY_HOST", "localhost"),
         ):
             result = await generate_proof("https://example.com", timeout=0.1)
 
@@ -135,7 +135,7 @@ class TestGenerateProof:
 
         with (
             patch("djinn_miner.core.tlsn.asyncio.create_subprocess_exec", side_effect=mock_subprocess),
-            patch("djinn_miner.core.tlsn.REQUIRE_PEER_NOTARY", False),
+            patch("djinn_miner.core.tlsn.NOTARY_HOST", "localhost"),
         ):
             result = await generate_proof("https://example.com")
 
