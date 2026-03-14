@@ -307,6 +307,14 @@ class MinerScorer:
                 )
             else:
                 score = sports
+
+            # Miners that were challenged for attestation but never produced
+            # a valid proof are penalized heavily. Being online isn't enough;
+            # you must be able to do the work when asked. Miners that haven't
+            # been challenged yet (attestations_total == 0) are unaffected.
+            if m.attestations_total > 0 and m.attestations_valid == 0:
+                score *= 0.05  # 95% penalty
+
             raw[m.uid] = score
             breakdowns[m.uid] = {
                 "accuracy": m.accuracy_score(),
@@ -484,6 +492,11 @@ class MinerScorer:
                 )
             else:
                 score = self.W_EMPTY_UPTIME * m.uptime_score() + self.W_EMPTY_HISTORY * history
+
+            # Same penalty as active epochs: challenged but never verified = near zero
+            if m.attestations_total > 0 and m.attestations_valid == 0:
+                score *= 0.05
+
             raw[m.uid] = score
             breakdowns[m.uid] = {
                 "accuracy": 0.0,
