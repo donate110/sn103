@@ -563,8 +563,8 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     function _releaseSignalLocks(address genius, uint256[] memory purchaseIds) internal {
         for (uint256 i; i < purchaseIds.length; ++i) {
             Purchase memory p = escrow.getPurchase(purchaseIds[i]);
-            Signal memory sig = signalCommitment.getSignal(p.signalId);
-            uint256 slaLock = (p.notional * sig.slaMultiplierBps) / BPS_DENOMINATOR;
+            uint256 slaBps = signalCommitment.getSignalSlaMultiplierBps(p.signalId);
+            uint256 slaLock = (p.notional * slaBps) / BPS_DENOMINATOR;
             uint256 protocolFeeLock = (p.notional * PROTOCOL_FEE_BPS) / BPS_DENOMINATOR;
             uint256 expectedLock = slaLock + protocolFeeLock;
             // Cap at actual remaining lock to avoid revert if partially slashed

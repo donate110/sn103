@@ -63,6 +63,9 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
     /// @notice Emitted when withdrawal freeze status changes
     event WithdrawalFreezeUpdated(address indexed genius, bool frozen);
 
+    /// @dev Emitted when release() clamps locked to prevent underflow (accounting drift after slash)
+    event LockedClampedOnRelease(address indexed genius, uint256 signalId, uint256 releaseAmount, uint256 lockedBefore);
+
     error Unauthorized();
     error WithdrawalsFrozen(address genius);
     error NotPauserOrOwner(address caller);
@@ -154,7 +157,12 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
             revert InsufficientSignalLock(signalLock, amount);
         }
         signalLocks[genius][signalId] -= amount;
-        locked[genius] -= amount;
+        if (amount > locked[genius]) {
+            emit LockedClampedOnRelease(genius, signalId, amount, locked[genius]);
+            locked[genius] = 0;
+        } else {
+            locked[genius] -= amount;
+        }
         emit Released(signalId, genius, amount);
     }
 

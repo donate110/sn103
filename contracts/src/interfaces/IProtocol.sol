@@ -11,6 +11,7 @@ import {Outcome, Purchase, Signal, SignalStatus, AccountState} from "./IDjinn.so
 /// @notice SignalCommitment — used by Escrow and Audit
 interface ISignalCommitment {
     function getSignal(uint256 signalId) external view returns (Signal memory);
+    function getSignalSlaMultiplierBps(uint256 signalId) external view returns (uint256);
     function updateStatus(uint256 signalId, SignalStatus status) external;
 }
 

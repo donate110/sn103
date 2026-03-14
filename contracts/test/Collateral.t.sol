@@ -564,7 +564,7 @@ contract CollateralTest is Test {
         assertEq(col.getAvailable(genius), 1500e6);
     }
 
-    function test_slash_exceeding_then_release_reverts_underflow() public {
+    function test_slash_exceeding_then_release_clamps_locked() public {
         _depositAs(genius, 5000e6);
 
         // Lock 4k
@@ -582,13 +582,16 @@ contract CollateralTest is Test {
         // signalLock still shows 4k (stale, but harmless after full slash)
         assertEq(col.getSignalLock(genius, 1), 4000e6);
 
-        // CF-04: release now reverts on underflow instead of silently clamping.
-        // This surfaces the accounting inconsistency rather than hiding it.
-        // In production, Audit._releaseSignalLocks caps release to min(expectedLock, actualLock),
-        // and releases happen BEFORE slash, so this path is only reachable via a bug.
-        vm.expectRevert();
+        // Release clamps locked to 0 with a monitoring event instead of reverting.
+        // This prevents settlement from bricking when slash() has clamped locked
+        // below the sum of signalLocks. In production, Audit._releaseSignalLocks
+        // caps release to min(expectedLock, actualLock), and releases happen BEFORE
+        // slash, so this path is only reachable via unusual ordering.
         vm.prank(authorizedCaller);
         col.release(1, genius, 4000e6);
+
+        assertEq(col.getLocked(genius), 0, "locked should be clamped to 0");
+        assertEq(col.getSignalLock(genius, 1), 0, "signalLock should be reduced");
     }
 
     function test_slash_returnsActualAmount() public {

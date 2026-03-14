@@ -592,14 +592,14 @@ contract LifecycleIntegrationTest is Test {
         assertTrue(result.timestamp > 0, "Settlement timestamp should be set");
 
         // Step 3: Genius tries to claim fees immediately → ClaimTooEarly
-        uint256 claimableAt = result.timestamp + escrow.DISPUTE_WINDOW();
+        uint256 claimableAt = result.timestamp + escrow.FEE_CLAIM_DELAY();
         vm.expectRevert(
             abi.encodeWithSelector(Escrow.ClaimTooEarly.selector, genius1, idiot1, 0, claimableAt)
         );
         vm.prank(genius1);
         escrow.claimFees(idiot1, 0);
 
-        // Step 4: Warp past dispute window
+        // Step 4: Warp past fee claim delay
         vm.warp(result.timestamp + 48 hours + 1);
 
         // Step 5: Genius claims fees → success

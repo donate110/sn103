@@ -334,6 +334,15 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
         return s.status == SignalStatus.Active && block.timestamp < s.expiresAt;
     }
 
+    /// @notice Get only the SLA multiplier for a signal (gas-efficient for settlement)
+    /// @dev Avoids loading the full Signal struct (which includes the encrypted blob)
+    /// @param signalId The signal to look up
+    /// @return slaMultiplierBps The SLA multiplier in basis points
+    function getSignalSlaMultiplierBps(uint256 signalId) external view returns (uint256) {
+        if (!_exists[signalId]) revert SignalNotFound(signalId);
+        return _signals[signalId].slaMultiplierBps;
+    }
+
     /// @notice Check whether a signal ID has been used
     /// @param signalId The signal ID to check
     /// @return True if a signal with this ID has been committed

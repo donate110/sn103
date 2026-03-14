@@ -50,7 +50,12 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     /// @notice Mapping from signalId to the list of purchaseIds for that signal
     mapping(uint256 => uint256[]) internal _purchasesBySignal;
 
-    /// @notice Fee pool: genius -> idiot -> cycle -> total USDC fees collected
+    /// @notice Fee pool: genius -> idiot -> cycle -> total USDC fees collected.
+    /// @dev DESIGN NOTE: The fee pool is NOT reduced during negative settlement. When
+    ///      Tranche A damages are paid, they come from genius COLLATERAL (via slash),
+    ///      not from this fee pool. This is intentional: fees compensate the genius for
+    ///      providing signals; damages come from their collateral bond. The genius can
+    ///      claim fees after settlement + 48h dispute window regardless of outcome.
     mapping(address => mapping(address => mapping(uint256 => uint256))) public feePool;
 
     /// @notice Cumulative notional purchased per signal
@@ -141,8 +146,11 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     /// @notice Maximum odds: 1000x (prevents unreasonable values)
     uint256 public constant MAX_ODDS = 1_000_000_000;
 
-    /// @notice Dispute window: 48 hours after settlement before fees can be claimed
-    uint256 public constant DISPUTE_WINDOW = 48 hours;
+    /// @notice Delay before genius can claim fees after settlement (48 hours).
+    /// @dev This is a monitoring delay, not an on-chain dispute mechanism. It gives
+    ///      the protocol team time to detect and respond to incorrect settlements
+    ///      via forceSettle through the TimelockController before fees are released.
+    uint256 public constant FEE_CLAIM_DELAY = 48 hours;
 
     // -------------------------------------------------------------------------
     // Modifiers
@@ -397,8 +405,8 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         (, , , , uint256 settledAt) = IAudit(auditContract).auditResults(msg.sender, idiot, cycle);
         if (settledAt == 0) revert CycleNotSettled(msg.sender, idiot, cycle);
 
-        // Enforce dispute window — fees cannot be claimed until 48h after settlement
-        uint256 claimableAt = settledAt + DISPUTE_WINDOW;
+        // Enforce fee claim delay: fees cannot be claimed until 48h after settlement
+        uint256 claimableAt = settledAt + FEE_CLAIM_DELAY;
         if (block.timestamp < claimableAt) {
             revert ClaimTooEarly(msg.sender, idiot, cycle, claimableAt);
         }
@@ -424,8 +432,8 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
             (, , , , uint256 settledAt) = IAudit(auditContract).auditResults(msg.sender, idiots[i], cycles[i]);
             if (settledAt == 0) revert CycleNotSettled(msg.sender, idiots[i], cycles[i]);
 
-            // Enforce dispute window — fees cannot be claimed until 48h after settlement
-            uint256 claimableAt = settledAt + DISPUTE_WINDOW;
+            // Enforce fee claim delay: fees cannot be claimed until 48h after settlement
+            uint256 claimableAt = settledAt + FEE_CLAIM_DELAY;
             if (block.timestamp < claimableAt) {
                 revert ClaimTooEarly(msg.sender, idiots[i], cycles[i], claimableAt);
             }

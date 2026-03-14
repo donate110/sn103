@@ -115,7 +115,7 @@ Settled               (terminal, no transitions)
 10. Locks genius collateral: `notional * slaMultiplierBps / 10_000 + notional * 50 / 10_000` (SLA lock + 0.5% protocol fee lock).
 11. Records the purchase in the Account contract.
 
-**Fee claims:** After a cycle is settled, the Genius can claim accumulated USDC fees via `claimFees()` or `claimFeesBatch()`. A 48-hour dispute window applies after settlement before fees become claimable.
+**Fee claims:** After a cycle is settled, the Genius can claim accumulated USDC fees via `claimFees()` or `claimFeesBatch()`. A 48-hour monitoring delay (`FEE_CLAIM_DELAY`) applies after settlement before fees become claimable, giving the protocol team time to detect and respond to incorrect settlements.
 
 **Outcome recording:** Authorized callers (oracle adapters, validator bridges) can set purchase outcomes via `setOutcome()`. This syncs outcomes to both Escrow and Account.
 
@@ -435,7 +435,7 @@ All upgradeable contracts use the UUPS (Universal Upgradeable Proxy Standard) pa
 | Audit | `onlyOwner` + `whenPaused` |
 | Account | `onlyOwner` |
 | CreditLedger | `onlyOwner` |
-| OutcomeVoting | `onlyOwner` |
+| OutcomeVoting | `onlyOwner` + `whenPaused` |
 | ZKVerifier | `onlyOwner` |
 | TrackRecord | `onlyOwner` |
 
@@ -460,7 +460,7 @@ Contracts that hold USDC (Escrow, Collateral) or orchestrate USDC movement (Audi
 | `MAX_ODDS` | 1,000,000,000 (1000x) | Escrow | Maximum allowed odds |
 | `MIN_NOTIONAL` | 1e6 (1 USDC) | Escrow | Minimum notional per purchase |
 | `MAX_NOTIONAL` | 1e12 (1M USDC) | Escrow | Maximum notional per purchase |
-| `DISPUTE_WINDOW` | 48 hours | Escrow | Time after settlement before fees are claimable |
+| `FEE_CLAIM_DELAY` | 48 hours | Escrow | Monitoring delay after settlement before fees are claimable |
 | `MAX_BLOB_SIZE` | 65,536 (64 KB) | SignalCommitment | Maximum encrypted blob size |
 | `MAX_SPORTSBOOKS` | 50 | SignalCommitment | Maximum sportsbooks per signal |
 | `MAX_DECOY_LINE_LENGTH` | 1,024 (1 KB) | SignalCommitment | Maximum length per decoy line |
@@ -476,7 +476,7 @@ Contracts that hold USDC (Escrow, Collateral) or orchestrate USDC movement (Audi
 
 ### Reentrancy Protection
 
-- Escrow, Collateral, Audit, and OutcomeVoting use OpenZeppelin's `ReentrancyGuardTransient` (EIP-1153 transient storage).
+- Escrow, Collateral, Audit, and OutcomeVoting use OpenZeppelin's `ReentrancyGuard` (v5, namespaced storage slot, proxy-safe without an upgradeable variant).
 - All external functions that transfer USDC or modify critical state are protected with `nonReentrant`.
 - Escrow follows the Checks-Effects-Interactions (CEI) pattern: state changes are finalized before external calls.
 
