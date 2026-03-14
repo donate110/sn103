@@ -347,12 +347,18 @@ async def _run_prover_via_ws(
                         await ws.send(data)
 
                 async def ws_to_tcp() -> None:
-                    async for msg in ws:
-                        if isinstance(msg, bytes):
-                            writer.write(msg)
-                            await writer.drain()
+                    try:
+                        async for msg in ws:
+                            if isinstance(msg, bytes):
+                                writer.write(msg)
+                                await writer.drain()
+                    finally:
+                        # Close the TCP writer so tcp_to_ws detects EOF
+                        # and exits instead of hanging forever.
+                        writer.close()
 
-                await asyncio.gather(tcp_to_ws(), ws_to_tcp())
+                async with asyncio.timeout(150):
+                    await asyncio.gather(tcp_to_ws(), ws_to_tcp())
         except Exception as e:
             bridge_error = str(e)
             log.warning("tlsn_ws_bridge_error", error=str(e))

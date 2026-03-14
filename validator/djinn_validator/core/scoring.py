@@ -144,7 +144,10 @@ class MinerMetrics:
         self.attestations_total += 1
         if proof_valid:
             self.attestations_valid += 1
-        self.attestation_latencies.append(latency)
+        # Only record real latencies (skip latency=0 from known-broken miner
+        # auto-scoring, which would pollute speed normalization)
+        if latency > 0:
+            self.attestation_latencies.append(latency)
 
     def notary_reliability(self) -> float:
         """Fraction of notary assignments that produced a verified proof."""
