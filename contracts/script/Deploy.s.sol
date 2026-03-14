@@ -182,6 +182,7 @@ contract Deploy is Script {
         c.coll.setPauser(pauserAddr);
         c.sc.setPauser(pauserAddr);
         c.voting.setPauser(pauserAddr);
+        c.acct.setPauser(pauserAddr);
     }
 
     function _deployTimelock(address multisig) internal returns (TimelockController) {
@@ -245,6 +246,7 @@ contract Deploy is Script {
         require(c.coll.pauser() == pauserAddr, "Collateral: pauser not set");
         require(c.sc.pauser() == pauserAddr, "SignalCommitment: pauser not set");
         require(c.voting.pauser() == pauserAddr, "OutcomeVoting: pauser not set");
+        require(c.acct.pauser() == pauserAddr, "Account: pauser not set");
 
         // Ownership
         require(c.acct.owner() == tl, "Account: owner not timelock");

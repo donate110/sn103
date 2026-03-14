@@ -99,7 +99,7 @@ contract UpgradeAuditFixes is Script {
     }
 
     function _scheduleBatch(Proxies memory px, Impls memory im) internal {
-        uint256 opCount = 11;
+        uint256 opCount = 13;
         address[] memory targets = new address[](opCount);
         uint256[] memory values = new uint256[](opCount);
         bytes[] memory payloads = new bytes[](opCount);
@@ -116,31 +116,39 @@ contract UpgradeAuditFixes is Script {
         targets[2] = px.audit;
         payloads[2] = abi.encodeCall(Audit.pause, ());
 
-        // Op 3-7: Upgrade all 5 proxies
+        // Op 3: Account.pause() (CF-10: Account._authorizeUpgrade is whenPaused)
         targets[3] = px.account;
-        payloads[3] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.account, ""));
+        payloads[3] = abi.encodeCall(DjinnAccount.pause, ());
 
-        targets[4] = px.audit;
-        payloads[4] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.audit, ""));
+        // Op 4-8: Upgrade all 5 proxies
+        targets[4] = px.account;
+        payloads[4] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.account, ""));
 
-        targets[5] = px.collateral;
-        payloads[5] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.collateral, ""));
+        targets[5] = px.audit;
+        payloads[5] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.audit, ""));
 
-        targets[6] = px.escrow;
-        payloads[6] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.escrow, ""));
+        targets[6] = px.collateral;
+        payloads[6] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.collateral, ""));
 
-        targets[7] = px.outcomeVoting;
-        payloads[7] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.voting, ""));
+        targets[7] = px.escrow;
+        payloads[7] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.escrow, ""));
 
-        // Op 8-10: Unpause
-        targets[8] = px.collateral;
-        payloads[8] = abi.encodeCall(Collateral.unpause, ());
+        targets[8] = px.outcomeVoting;
+        payloads[8] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.voting, ""));
 
-        targets[9] = px.escrow;
-        payloads[9] = abi.encodeCall(Escrow.unpause, ());
+        // Op 9-12: Unpause
+        targets[9] = px.collateral;
+        payloads[9] = abi.encodeCall(Collateral.unpause, ());
 
-        targets[10] = px.audit;
-        payloads[10] = abi.encodeCall(Audit.unpause, ());
+        targets[10] = px.escrow;
+        payloads[10] = abi.encodeCall(Escrow.unpause, ());
+
+        targets[11] = px.audit;
+        payloads[11] = abi.encodeCall(Audit.unpause, ());
+
+        // Op 12: Account.unpause() (CF-10)
+        targets[12] = px.account;
+        payloads[12] = abi.encodeCall(DjinnAccount.unpause, ());
 
         uint256 delay = px.timelock.getMinDelay();
         console.log("Timelock delay (seconds):", delay);

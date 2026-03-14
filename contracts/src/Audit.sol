@@ -424,9 +424,10 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     // -------------------------------------------------------------------------
 
     /// @notice Owner-only emergency settlement for stuck/orphaned cycles.
-    ///         Always settles as early exit (damages in Credits only, not USDC)
-    ///         regardless of signal count. Use this when a cycle cannot reach
-    ///         10 signals and needs to be cleaned up.
+    ///         Uses full settlement (Tranche A USDC) when the pair is audit-ready
+    ///         (10 signals), and early exit (Credits only) otherwise. The protocol
+    ///         fee is always charged. Use this when a cycle cannot settle through
+    ///         normal or voted paths.
     /// @param genius The Genius address
     /// @param idiot The Idiot address
     /// @param qualityScore The owner-determined quality score
@@ -531,12 +532,20 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
         // slash() returns the actual amount slashed (may be less if deposits insufficient).
         // Any shortfall moves from Tranche A to Tranche B (Credits instead of USDC).
         if (trancheA > 0) {
-            uint256 actualSlash = collateral.slash(genius, trancheA, idiot);
-            if (actualSlash < trancheA) {
-                // Shortfall: Genius didn't have enough collateral
-                uint256 shortfall = trancheA - actualSlash;
-                trancheB += shortfall;
-                trancheA = actualSlash;
+            // CF-06: Use try/catch to handle USDC transfer failures (e.g., Circle blacklisting).
+            // If the slash fails (blacklisted idiot), convert entire Tranche A to Tranche B credits
+            // so settlement can complete without permanently freezing genius collateral.
+            try collateral.slash(genius, trancheA, idiot) returns (uint256 actualSlash) {
+                if (actualSlash < trancheA) {
+                    uint256 shortfall = trancheA - actualSlash;
+                    trancheB += shortfall;
+                    trancheA = actualSlash;
+                }
+            } catch {
+                // Slash failed (likely USDC transfer revert due to blacklisting).
+                // Fall back to Credits for the full damage amount.
+                trancheB += trancheA;
+                trancheA = 0;
             }
         }
 
@@ -587,9 +596,16 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
         // Use validator-attested totalNotional (excludes voids) for fee calculation.
         // Still need totalUsdcFeesPaid from on-chain records for damage cap computation.
         uint256 totalUsdcFeesPaid;
+        uint256 onChainNotional;
         for (uint256 i; i < purchaseIds.length; ++i) {
             Purchase memory p = escrow.getPurchase(purchaseIds[i]);
             totalUsdcFeesPaid += p.usdcPaid;
+            onChainNotional += p.notional;
+        }
+        // CF-02: Validator-attested notional cannot exceed on-chain purchase total.
+        // Void filtering may reduce votedNotional below onChainNotional, but never above.
+        if (votedNotional > onChainNotional) {
+            revert TotalNotionalOutOfBounds(votedNotional, onChainNotional);
         }
         _settleCommon(genius, idiot, cycle, score, isEarlyExit, votedNotional, totalUsdcFeesPaid, purchaseIds);
     }

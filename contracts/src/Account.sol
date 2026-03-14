@@ -142,7 +142,7 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     /// @param genius The Genius address
     /// @param idiot The Idiot (buyer) address
     /// @param purchaseId The unique purchase identifier
-    function recordPurchase(address genius, address idiot, uint256 purchaseId) external onlyAuthorized {
+    function recordPurchase(address genius, address idiot, uint256 purchaseId) external onlyAuthorized whenNotPaused {
         _validatePair(genius, idiot);
 
         bytes32 key = _accountKey(genius, idiot);
@@ -178,7 +178,7 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     /// @param idiot The Idiot (buyer) address
     /// @param purchaseId The purchase to record an outcome for
     /// @param outcome The outcome (Favorable, Unfavorable, or Void — not Pending)
-    function recordOutcome(address genius, address idiot, uint256 purchaseId, Outcome outcome) external onlyAuthorized {
+    function recordOutcome(address genius, address idiot, uint256 purchaseId, Outcome outcome) external onlyAuthorized whenNotPaused {
         _validatePair(genius, idiot);
         if (outcome == Outcome.Pending) revert InvalidOutcome();
 
@@ -207,7 +207,7 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     /// @notice Start a new audit cycle for a Genius-Idiot pair
     /// @param genius The Genius address
     /// @param idiot The Idiot (buyer) address
-    function startNewCycle(address genius, address idiot) external onlyAuthorized {
+    function startNewCycle(address genius, address idiot) external onlyAuthorized whenNotPaused {
         _validatePair(genius, idiot);
         bytes32 key = _accountKey(genius, idiot);
         _resetCycle(key);
@@ -218,7 +218,7 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     /// @param genius The Genius address
     /// @param idiot The Idiot (buyer) address
     /// @param settled Whether the current cycle has been settled
-    function setSettled(address genius, address idiot, bool settled) external onlyAuthorized {
+    function setSettled(address genius, address idiot, bool settled) external onlyAuthorized whenNotPaused {
         _validatePair(genius, idiot);
 
         bytes32 key = _accountKey(genius, idiot);
@@ -230,7 +230,7 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     /// @notice Settle an audit for a Genius-Idiot pair: marks as settled and starts a new cycle
     /// @param genius The Genius address
     /// @param idiot The Idiot (buyer) address
-    function settleAudit(address genius, address idiot) external onlyAuthorized {
+    function settleAudit(address genius, address idiot) external onlyAuthorized whenNotPaused {
         _validatePair(genius, idiot);
         bytes32 key = _accountKey(genius, idiot);
         _resetCycle(key);

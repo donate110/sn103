@@ -229,7 +229,7 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     ///         Writes to both Escrow and Account to maintain a single source of truth.
     /// @param purchaseId The purchase to update
     /// @param outcome The new outcome (must not be Pending)
-    function setOutcome(uint256 purchaseId, Outcome outcome) external {
+    function setOutcome(uint256 purchaseId, Outcome outcome) external whenNotPaused nonReentrant {
         if (!authorizedCallers[msg.sender]) revert Unauthorized();
         if (outcome == Outcome.Pending) revert InvalidOutcome(outcome);
         if (purchaseId >= nextPurchaseId) revert PurchaseNotFound(purchaseId);

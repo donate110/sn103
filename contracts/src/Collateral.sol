@@ -154,11 +154,7 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
             revert InsufficientSignalLock(signalLock, amount);
         }
         signalLocks[genius][signalId] -= amount;
-        if (amount > locked[genius]) {
-            locked[genius] = 0;
-        } else {
-            locked[genius] -= amount;
-        }
+        locked[genius] -= amount;
         emit Released(signalId, genius, amount);
     }
 
