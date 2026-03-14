@@ -1037,14 +1037,37 @@ async def challenge_miners_attestation(
         if not capable:
             return ar
 
+        # Filter out miners that have consistently failed attestation.
+        # No point waiting 60s for miners that have failed 3+ times and
+        # never succeeded. Give them one retry per epoch via the
+        # redemption mechanism in select_attest_miners instead.
+        filtered: list[dict] = []
+        skipped = 0
+        for axon in capable:
+            uid = axon.get("uid")
+            m = scorer._miners.get(uid) if uid is not None else None
+            if m and m.attestations_total >= 3 and m.attestations_valid == 0:
+                # Known-broken miner. Still record that it was challenged
+                # (so the penalty applies) but don't waste time on the
+                # full 60s timeout.
+                m.record_attestation(latency=0, proof_valid=False)
+                skipped += 1
+                continue
+            filtered.append(axon)
+        if skipped:
+            log.info("attest_challenge_skipped_known_broken", count=skipped)
+        capable = filtered
+
+        if not capable:
+            return ar
+
         # Phase 2: full challenge only capable miners
-        # Load-balance notary assignments: cap concurrent provers per notary.
-        # With sem=4, a notary handles at most 4 MPC sessions at once; we cap
-        # total assignments per notary so each one isn't overwhelmed across
-        # the full round.  max_per_notary scales with the notary pool size.
+        # Higher concurrency (20) with shorter timeout (60s) to avoid
+        # spending an hour waiting for dead miners. Real TLSNotary proofs
+        # complete in 10-60s; anything over 60s is hung.
         _notary_counts: dict[int, int] = {}
         _max_per_notary = max(4, len(capable) // max(len(peer_notaries), 1))
-        sem = asyncio.Semaphore(4)
+        sem = asyncio.Semaphore(20)
         per_miner: list[dict] = []
 
         async def _challenge_one(axon: dict) -> tuple[bool, bool]:
@@ -1083,7 +1106,7 @@ async def challenge_miners_attestation(
                         miner_url,
                         content=body,
                         headers={"Content-Type": "application/json", **auth_headers},
-                        timeout=210.0,
+                        timeout=60.0,
                     )
                     latency = time.perf_counter() - start
                     mr["latency"] = round(latency, 1)
