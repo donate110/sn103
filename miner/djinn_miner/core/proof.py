@@ -136,11 +136,19 @@ class ProofGenerator:
     def tlsn_available(self) -> bool:
         return self._tlsn_available
 
-    async def generate(self, query_id: str, session_data: str = "") -> ProofResponse:
+    async def generate(
+        self,
+        query_id: str,
+        session_data: str = "",
+        *,
+        notary_host: str | None = None,
+        notary_port: int | None = None,
+        notary_ws: bool = False,
+    ) -> ProofResponse:
         """Generate a proof for a captured HTTP session.
 
         Priority:
-        1. TLSNotary proof (if binary available and session has URL with API key)
+        1. TLSNotary proof (if binary available, session exists, and notary assigned)
         2. HTTP attestation (if captured session exists)
         3. Basic hash proof (fallback)
         """
@@ -148,7 +156,12 @@ class ProofGenerator:
 
         # Try TLSNotary first
         if self._tlsn_available and session is not None:
-            tlsn_result = await self._try_tlsn_proof(session)
+            tlsn_result = await self._try_tlsn_proof(
+                session,
+                notary_host=notary_host,
+                notary_port=notary_port,
+                notary_ws=notary_ws,
+            )
             if tlsn_result is not None:
                 self._capture.remove(query_id)
                 self._generated_count += 1
@@ -202,7 +215,14 @@ class ProofGenerator:
             message="basic hash proof — not cryptographically verified (no captured session or TLSNotary)",
         )
 
-    async def _try_tlsn_proof(self, session: CapturedSession) -> ProofResponse | None:
+    async def _try_tlsn_proof(
+        self,
+        session: CapturedSession,
+        *,
+        notary_host: str | None = None,
+        notary_port: int | None = None,
+        notary_ws: bool = False,
+    ) -> ProofResponse | None:
         """Attempt to generate a TLSNotary proof for the session."""
         # Reconstruct the original URL with API key for TLSNotary
         # The session stores URL without key, but we need the full URL for TLS
@@ -211,7 +231,12 @@ class ProofGenerator:
             sep = "&" if "?" in url else "?"
             url = f"{url}{sep}{urlencode(session.request_params)}"
 
-        result = await tlsn_module.generate_proof(url)
+        result = await tlsn_module.generate_proof(
+            url,
+            notary_host=notary_host,
+            notary_port=notary_port,
+            notary_ws=notary_ws,
+        )
 
         if not result.success:
             log.warning(

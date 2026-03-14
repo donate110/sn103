@@ -94,6 +94,9 @@ class ProofRequest(BaseModel):
 
     query_id: str = Field(max_length=256, description="ID of the original check query")
     session_data: str = Field(default="", max_length=10_000, description="Optional session data for fallback proof")
+    notary_host: str | None = Field(default=None, description="Peer notary IP for TLSNotary proof")
+    notary_port: int | None = Field(default=None, description="Peer notary port (API port, WebSocket proxy)")
+    notary_ws: bool = Field(default=False, description="Use WebSocket transport to peer notary")
 
 
 class ProofResponse(BaseModel):

@@ -203,15 +203,22 @@ def create_app(
 
     @app.post("/v1/proof", response_model=ProofResponse)
     async def submit_proof(request: ProofRequest) -> ProofResponse:
-        """Phase 2: Generate and submit a TLSNotary proof (stub).
+        """Phase 2: Generate and submit a TLSNotary proof.
 
-        In production, this generates a TLSNotary proof of the TLS session
-        used during Phase 1. Currently returns a mock proof.
+        The validator assigns a peer notary via notary_host/notary_port so
+        the proof is independently witnessed. Without a notary assignment,
+        only non-TLSNotary fallback proofs are possible.
         """
         try:
             result = await asyncio.wait_for(
-                proof_gen.generate(request.query_id, request.session_data),
-                timeout=30.0,
+                proof_gen.generate(
+                    request.query_id,
+                    request.session_data,
+                    notary_host=request.notary_host,
+                    notary_port=request.notary_port,
+                    notary_ws=request.notary_ws,
+                ),
+                timeout=180.0,
             )
         except TimeoutError:
             log.error("proof_generation_timeout", query_id=request.query_id)

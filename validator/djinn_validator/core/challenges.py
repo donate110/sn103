@@ -770,6 +770,11 @@ async def challenge_miners(
                 query_id=r.query_id or "none",
             )
 
+        # ── Phase 3b: Discover peer notaries for proof requests ──
+        peer_notaries = await discover_peer_notaries(client, miner_axons)
+        _proof_notary_counts: dict[int, int] = {}
+        _max_per = max(4, len(proof_targets if 'proof_targets' in dir() else []) // max(len(peer_notaries), 1))
+
         # ── Phase 4: Request proofs from targeted miners ──
         # Spot-check: 20% of epochs require ALL miners to submit proof
         is_full_proof_epoch = random.random() < FULL_PROOF_EPOCH_PROBABILITY
@@ -780,15 +785,23 @@ async def challenge_miners(
             proof_targets = _select_proof_targets(
                 responses, consensus, synthetic_indices,
             )
+        _max_per = max(4, len(proof_targets) // max(len(peer_notaries), 1))
         result.proofs_requested = len(proof_targets)
         for target in proof_targets:
             # Track that this miner was requested for proof
             metrics = scorer.get_or_create(target.uid, target.hotkey)
             metrics.proofs_requested += 1
 
+            # Assign a peer notary for this proof request
+            assigned_notary = assign_peer_notary(
+                target.uid, peer_notaries, prover_ip=target.ip,
+                assignment_counts=_proof_notary_counts, max_per_notary=_max_per,
+            )
+
             proof_submitted, proof_valid = await _request_and_verify_proof(
                 client, target.ip, target.port, target.query_id, target.uid,
                 wallet=wallet,
+                notary=assigned_notary,
             )
             if proof_submitted:
                 metrics.proofs_submitted += 1
@@ -826,20 +839,29 @@ async def _request_and_verify_proof(
     query_id: str,
     uid: int,
     wallet: Any | None = None,
+    notary: PeerNotary | None = None,
 ) -> tuple[bool, bool]:
     """Request a TLSNotary proof from the miner and verify it.
+
+    When a peer notary is assigned, passes notary_host/notary_port/notary_ws
+    so the miner can produce a peer-notarized TLSNotary proof.
 
     Returns (proof_submitted, proof_valid).
     """
     proof_url = f"http://{ip}:{port}/v1/proof"
     try:
-        body = json.dumps({"query_id": query_id}).encode()
+        payload: dict[str, Any] = {"query_id": query_id}
+        if notary:
+            payload["notary_host"] = notary.ip
+            payload["notary_port"] = notary.port
+            payload["notary_ws"] = True
+        body = json.dumps(payload).encode()
         auth_headers = _sign_miner_request("/v1/proof", body, wallet)
         proof_resp = await client.post(
             proof_url,
             content=body,
             headers={"Content-Type": "application/json", **auth_headers},
-            timeout=30.0,
+            timeout=180.0,
         )
         if proof_resp.status_code != 200:
             log.debug("proof_request_error", uid=uid, status=proof_resp.status_code)
@@ -874,8 +896,12 @@ async def _request_and_verify_proof(
             if not tlsn_verifier.is_available():
                 log.debug("tlsn_verifier_unavailable", uid=uid)
                 return True, False
+            notary_key = notary.pubkey_hex if notary else None
             verify_result = await asyncio.wait_for(
-                tlsn_verifier.verify_proof(proof_bytes),
+                tlsn_verifier.verify_proof(
+                    proof_bytes,
+                    expected_notary_key=notary_key,
+                ),
                 timeout=30.0,
             )
             if not verify_result.verified:
