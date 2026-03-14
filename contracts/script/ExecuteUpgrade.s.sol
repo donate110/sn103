@@ -120,5 +120,9 @@ contract ExecuteUpgrade is Script {
         console.log("=== UPGRADE EXECUTED ===");
         console.log("All 5 proxies upgraded. Addresses unchanged.");
         console.log("Collateral, Escrow, and Audit unpaused.");
+        console.log("");
+        console.log("NOTE: This batch uses the original 11-op schedule (no Account pause/unpause).");
+        console.log("The old Account implementation does not require whenPaused for upgrade.");
+        console.log("Future upgrade batches MUST pause Account (see UpgradeAuditFixes.s.sol).");
     }
 }
