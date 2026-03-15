@@ -1103,6 +1103,9 @@ def create_app(
                     m.record_attestation(latency=elapsed, proof_valid=False)
                 if assigned_notary:
                     _failed_notary_uids.add(assigned_notary.uid)
+                    if _prover_metrics:
+                        _prover_metrics.notary_pair_failures[assigned_notary.uid] = \
+                            _prover_metrics.notary_pair_failures.get(assigned_notary.uid, 0) + 1
                 return None
 
             if resp.status_code != 200:
@@ -1139,9 +1142,14 @@ def create_app(
                 if scorer is not None and axon["uid"] >= 0:
                     m = scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                     m.record_attestation(latency=_t.perf_counter() - attempt_start, proof_valid=False)
-                # If the error mentions notary/WebSocket, mark that notary as failed
-                if assigned_notary and ("notary" in err.lower() or "websocket" in err.lower() or "bridge" in err.lower()):
+                # If the error mentions notary/WebSocket/connection/MPC, mark notary as failed
+                _notary_keywords = ("notary", "websocket", "bridge", "connection is closed", "mpc", "preprocessing")
+                if assigned_notary and any(kw in err.lower() for kw in _notary_keywords):
                     _failed_notary_uids.add(assigned_notary.uid)
+                    # Persist pair failure so future requests avoid this notary
+                    if _prover_metrics:
+                        _prover_metrics.notary_pair_failures[assigned_notary.uid] = \
+                            _prover_metrics.notary_pair_failures.get(assigned_notary.uid, 0) + 1
                 log.warning("attest_miner_failed", miner_uid=axon["uid"], error=err)
                 return None
 
