@@ -130,9 +130,9 @@ async def epoch_loop(
                             age_s=round(pdata.get("proof_age_s", 0), 1),
                         )
                     else:
-                        log.debug("proactive_proof_invalid", uid=uid, error=verify_result.error)
+                        log.warning("proactive_proof_invalid", uid=uid, error=verify_result.error)
                 except Exception as e:
-                    log.debug("proactive_proof_check_error", uid=uid, error=str(e))
+                    log.warning("proactive_proof_check_error", uid=uid, error=str(e))
 
             async def _check_health(client: httpx.AsyncClient, uid: int) -> None:
                 axon = neuron.get_axon_info(uid)
