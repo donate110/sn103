@@ -41,6 +41,7 @@ class CachedProof:
     proof_hex: str = ""
     created_at: float = 0.0  # time.time()
     date_header: str = ""
+    binary_hash: str = ""  # SHA256 prefix of TLSNotary binary
 
     @property
     def age_seconds(self) -> float:
@@ -64,6 +65,22 @@ class ProactiveAttester:
         self._cached: CachedProof | None = None
         self._running = False
         self._consecutive_failures = 0
+        self._binary_hash = self._compute_binary_hash()
+
+    @staticmethod
+    def _compute_binary_hash() -> str:
+        """SHA256 prefix of the TLSNotary notary binary for version matching."""
+        import hashlib
+        try:
+            from djinn_miner.core.tlsn import _get_prover_binary
+            binary_path = _get_prover_binary()
+            with open(binary_path, "rb") as f:
+                h = hashlib.sha256()
+                while chunk := f.read(65536):
+                    h.update(chunk)
+            return h.hexdigest()[:16]
+        except Exception:
+            return ""
 
     @property
     def latest(self) -> CachedProof | None:
@@ -130,6 +147,7 @@ class ProactiveAttester:
             proof_hex=proof_hex,
             created_at=time.time(),
             date_header=date_header,
+            binary_hash=self._binary_hash,
         )
 
     async def run_loop(self) -> None:

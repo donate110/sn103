@@ -162,6 +162,7 @@ class HealthTracker:
                     proof_hex="",  # Don't include full proof in health (too large)
                     proof_age_s=round(cached.age_seconds, 1),
                     date_header=cached.date_header,
+                    binary_hash=cached.binary_hash,
                 )
 
         return HealthResponse(

@@ -928,19 +928,49 @@ def create_app(
                 all_notaries = await discover_peer_notaries(
                     _attest_client, list(axon_by_uid.values())
                 )
-                # Prefer notaries from miners with verified proactive proofs
+                # Filter notaries by binary version compatibility.
+                # MPC requires matching binary versions. Different builds of
+                # the TLSNotary library are not interoperable.
                 if scorer is not None:
                     verified = [
                         n for n in all_notaries
                         if (m := scorer.get(n.uid)) is not None and m.proactive_proof_verified
                     ]
-                    if verified:
-                        peer_notaries = verified
-                        log.info("attest_peer_notaries_filtered", verified=len(verified), total=len(all_notaries))
-                    else:
-                        # No verified notaries; fall back to all discovered
+                    if not verified:
                         peer_notaries = all_notaries
                         log.info("attest_peer_notaries_no_verified", total=len(all_notaries))
+                    else:
+                        # Group verified notaries by binary hash
+                        by_hash: dict[str, list] = {}
+                        for n in verified:
+                            m = scorer.get(n.uid)
+                            bh = m.tlsn_binary_hash if m else ""
+                            by_hash.setdefault(bh or "unknown", []).append(n)
+
+                        # Find the binary hash of the candidate miners (provers).
+                        # Prefer notaries matching the prover's binary hash.
+                        # Collect all prover binary hashes from the candidate pool.
+                        prover_hashes: set[str] = set()
+                        for uid_key in axon_by_uid:
+                            pm = scorer.get(uid_key)
+                            if pm and pm.tlsn_binary_hash:
+                                prover_hashes.add(pm.tlsn_binary_hash)
+
+                        # Select notaries matching any prover's binary hash
+                        compatible = []
+                        for bh in prover_hashes:
+                            compatible.extend(by_hash.get(bh, []))
+
+                        if compatible:
+                            peer_notaries = compatible
+                            log.info("attest_peer_notaries_version_matched",
+                                     matched=len(compatible), verified=len(verified),
+                                     total=len(all_notaries), hashes=list(prover_hashes))
+                        else:
+                            # No version match; fall back to all verified
+                            peer_notaries = verified
+                            log.info("attest_peer_notaries_no_version_match",
+                                     verified=len(verified), total=len(all_notaries))
                 else:
                     peer_notaries = all_notaries
                 log.info("attest_peer_notaries_discovered", count=len(peer_notaries))
@@ -1016,12 +1046,15 @@ def create_app(
             timeout = min(req.timeout or tier_timeout, 600.0)
             breaker = _get_miner_breaker(axon["uid"]) if axon["uid"] >= 0 else None
 
-            # Assign a peer notary, excluding previously failed notaries
+            # Assign a peer notary, using pair history to prefer compatible notaries
+            _prover_metrics = scorer.get(axon["uid"]) if scorer else None
             assigned_notary = assign_peer_notary(
                 axon["uid"], peer_notaries, prover_ip=axon.get("ip"),
                 assignment_counts=_notary_assignment_counts,
                 max_per_notary=2,
                 exclude_uids=_failed_notary_uids,
+                pair_successes=_prover_metrics.notary_pair_successes if _prover_metrics else None,
+                pair_failures=_prover_metrics.notary_pair_failures if _prover_metrics else None,
             )
 
             payload: dict = {"url": req.url, "request_id": req.request_id}
@@ -1274,6 +1307,14 @@ def create_app(
             miner_metrics.record_attestation(
                 latency=elapsed, proof_valid=verify_result.verified
             )
+            # Track pair success/failure for future notary assignment
+            if selected_notary_uid is not None:
+                if verify_result.verified:
+                    miner_metrics.notary_pair_successes[selected_notary_uid] = \
+                        miner_metrics.notary_pair_successes.get(selected_notary_uid, 0) + 1
+                else:
+                    miner_metrics.notary_pair_failures[selected_notary_uid] = \
+                        miner_metrics.notary_pair_failures.get(selected_notary_uid, 0) + 1
 
         # Detect bot challenge / protection walls in the response
         is_blocked = _detect_bot_challenge(verify_result.response_body)

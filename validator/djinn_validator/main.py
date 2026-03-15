@@ -174,14 +174,18 @@ async def epoch_loop(
                             # The flag is only set after background TLSNotary
                             # verification succeeds in _verify_proactive_proof.
                             pp = data.get("proactive_proof")
-                            if (
-                                pp
-                                and pp.get("proof_age_s", 99999) < 86400
-                                and not metrics.proactive_proof_verified
-                            ):
-                                asyncio.create_task(
-                                    _verify_proactive_proof(ip, port, uid, metrics)
-                                )
+                            if pp:
+                                # Track binary hash for version-compatible notary pairing
+                                bh = pp.get("binary_hash", "")
+                                if bh:
+                                    metrics.tlsn_binary_hash = bh
+                                if (
+                                    pp.get("proof_age_s", 99999) < 86400
+                                    and not metrics.proactive_proof_verified
+                                ):
+                                    asyncio.create_task(
+                                        _verify_proactive_proof(ip, port, uid, metrics)
+                                    )
                         except Exception:
                             pass  # Old miners may not return JSON or capabilities
                 except httpx.HTTPError:

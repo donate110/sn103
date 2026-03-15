@@ -59,6 +59,11 @@ class MinerMetrics:
 
     # ── Proactive attestation (survives epoch resets) ──
     proactive_proof_verified: bool = False  # miner has a fresh, verified proactive proof
+    tlsn_binary_hash: str = ""  # SHA256 prefix of miner's TLSNotary binary (for version matching)
+
+    # ── Notary pair tracking (survives epoch resets) ──
+    notary_pair_successes: dict[int, int] = field(default_factory=dict)  # notary_uid -> success count
+    notary_pair_failures: dict[int, int] = field(default_factory=dict)  # notary_uid -> failure count
 
     # ── Notary service metrics (peer-to-peer notarization) ──
     notary_duties_assigned: int = 0  # times assigned as notary for another miner

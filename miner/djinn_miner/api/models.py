@@ -131,6 +131,7 @@ class ProactiveProof(BaseModel):
     proof_hex: str = ""
     proof_age_s: float = 0.0
     date_header: str = ""
+    binary_hash: str = ""  # SHA256 prefix of the TLSNotary binary (for version matching)
 
 
 class HealthResponse(BaseModel):

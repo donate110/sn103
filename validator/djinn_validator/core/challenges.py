@@ -169,6 +169,8 @@ def assign_peer_notary(
     max_per_notary: int = 4,
     exclude_uids: set[int] | None = None,
     ranked_uids: list[tuple[int, float]] | None = None,
+    pair_successes: dict[int, int] | None = None,
+    pair_failures: dict[int, int] | None = None,
 ) -> PeerNotary | None:
     """Assign a peer notary, preferring higher-ranked candidates.
 
@@ -227,7 +229,30 @@ def assign_peer_notary(
                 assignment_counts[chosen.uid] = assignment_counts.get(chosen.uid, 0) + 1
             return chosen
 
-    # Fallback: uniform random (no ranking data or no ranked UIDs matched)
+    # If pair history exists, prefer notaries that have succeeded with this prover.
+    # This learns from cross-version incompatibilities: notaries that failed
+    # MPC handshake with this prover are deprioritized.
+    if pair_successes or pair_failures:
+        pair_scores = []
+        for n in eligible:
+            s = (pair_successes or {}).get(n.uid, 0)
+            f = (pair_failures or {}).get(n.uid, 0)
+            # Thompson-like score: successes / (successes + failures + 1)
+            # Notaries with no history get 0.5 (neutral)
+            if s + f == 0:
+                pair_scores.append((n, 0.5))
+            else:
+                pair_scores.append((n, (s + 1) / (s + f + 2)))
+        # Sort by pair score descending, pick best
+        pair_scores.sort(key=lambda x: -x[1])
+        # Weighted random among top candidates
+        weights = [score + 0.01 for _, score in pair_scores]
+        chosen = random.choices([n for n, _ in pair_scores], weights=weights, k=1)[0]
+        if assignment_counts is not None:
+            assignment_counts[chosen.uid] = assignment_counts.get(chosen.uid, 0) + 1
+        return chosen
+
+    # Fallback: uniform random (no ranking data or pair history)
     chosen = random.choice(eligible)
     if assignment_counts is not None:
         assignment_counts[chosen.uid] = assignment_counts.get(chosen.uid, 0) + 1
