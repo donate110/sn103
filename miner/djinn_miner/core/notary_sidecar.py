@@ -298,31 +298,22 @@ class NotarySidecar:
         except (ConnectionRefusedError, TimeoutError, OSError):
             return False
 
-    # Maximum total sessions before the notary restarts to clear stale
-    # MPC state. The TLSNotary library accumulates internal state across
-    # sessions, causing later handshakes to fail with "connection is closed".
-    # After this many sessions, the watchdog waits for active sessions to
-    # finish and then restarts. Default: 50 sessions.
-    _MAX_SESSIONS = int(os.getenv("NOTARY_MAX_SESSIONS", "50"))
-
-    # Fallback max uptime in case sessions are infrequent. Default: 4 hours.
-    _MAX_UPTIME_S = int(os.getenv("NOTARY_MAX_UPTIME", "14400"))
-
     def record_session(self) -> None:
-        """Called by the WebSocket proxy after each session completes."""
+        """Called by the WebSocket proxy after each session completes.
+
+        The notary is restarted after every session (in server.py) to
+        clear accumulated MPC state. This counter is kept for telemetry.
+        """
         self._session_count += 1
 
     async def watchdog_loop(self, interval: float = 30.0) -> None:
-        """Periodically check sidecar health and restart if needed.
+        """Periodically check sidecar health and restart if crashed.
 
-        Restarts on:
-        - Process crash or zombie state
-        - TCP port not accepting connections
-        - Session count exceeds _MAX_SESSIONS (stale MPC state)
-        - Uptime exceeds _MAX_UPTIME_S (fallback for low-traffic miners)
+        The notary binary is restarted after every MPC session by the
+        WebSocket proxy handler (server.py). The watchdog only handles
+        crash recovery and port-death detection.
         """
         self._session_count = 0
-        _started_at = time.monotonic()
         while True:
             try:
                 await asyncio.sleep(interval)
@@ -338,21 +329,10 @@ class NotarySidecar:
                     needs_restart = True
                     reason = "port_dead"
                     log.warning("notary_watchdog_port_dead", port=self._port)
-                elif self._session_count >= self._MAX_SESSIONS:
-                    needs_restart = True
-                    reason = f"max_sessions ({self._session_count})"
-                    log.info("notary_watchdog_session_limit",
-                             sessions=self._session_count, max=self._MAX_SESSIONS)
-                elif time.monotonic() - _started_at > self._MAX_UPTIME_S:
-                    needs_restart = True
-                    reason = f"max_uptime ({round(time.monotonic() - _started_at)}s)"
-                    log.info("notary_watchdog_max_uptime",
-                             uptime_s=round(time.monotonic() - _started_at))
                 if needs_restart:
                     await self.stop()
                     restarted = await self.restart_if_needed()
                     if restarted:
-                        _started_at = time.monotonic()
                         self._session_count = 0
                         log.info("notary_watchdog_restarted", reason=reason)
                     else:
