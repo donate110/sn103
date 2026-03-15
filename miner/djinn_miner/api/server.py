@@ -237,6 +237,29 @@ def create_app(
         log.info("proof_generated", query_id=request.query_id, status=result.status, type=proof_type)
         return result
 
+    @app.get("/v1/attestation/latest")
+    async def attestation_latest() -> dict:
+        """Return the latest proactive attestation proof.
+
+        Miners periodically attest a simple URL using their own notary to
+        prove TLSNotary capability. Validators fetch and verify this proof
+        to credit miners without random dispatch.
+        """
+        if not hasattr(health_tracker, "_proactive_attester") or health_tracker._proactive_attester is None:
+            return {"available": False}
+        cached = health_tracker._proactive_attester.latest
+        if cached is None:
+            return {"available": False}
+        return {
+            "available": True,
+            "url": cached.url,
+            "server_name": cached.server_name,
+            "notary_pubkey": cached.notary_pubkey,
+            "proof_hex": cached.proof_hex,
+            "proof_age_s": round(cached.age_seconds, 1),
+            "date_header": cached.date_header,
+        }
+
     @app.get("/v1/notary/info", response_model=NotaryInfoResponse)
     async def notary_info() -> NotaryInfoResponse:
         """Return notary sidecar status for peer discovery.

@@ -44,6 +44,7 @@ class HealthTracker:
         self._tlsn_active_sessions = 0
         self._notary_max_concurrent = 0
         self._notary_active_sessions = 0
+        self._proactive_attester: object | None = None
 
     def record_ping(self) -> None:
         """Record a health check ping from a validator."""
@@ -148,6 +149,21 @@ class HealthTracker:
             status = "degraded"
         else:
             status = "degraded"
+        # Build proactive proof summary if available
+        proactive = None
+        if self._proactive_attester is not None:
+            cached = self._proactive_attester.latest
+            if cached:
+                from djinn_miner.api.models import ProactiveProof
+                proactive = ProactiveProof(
+                    url=cached.url,
+                    server_name=cached.server_name,
+                    notary_pubkey=cached.notary_pubkey,
+                    proof_hex="",  # Don't include full proof in health (too large)
+                    proof_age_s=round(cached.age_seconds, 1),
+                    date_header=cached.date_header,
+                )
+
         return HealthResponse(
             status=status,
             version=__version__,
@@ -156,6 +172,7 @@ class HealthTracker:
             bt_connected=self._bt_connected,
             uptime_seconds=round(uptime, 1),
             capabilities=self._collect_capabilities(),
+            proactive_proof=proactive,
         )
 
     @property

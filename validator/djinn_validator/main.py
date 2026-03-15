@@ -93,6 +93,47 @@ async def epoch_loop(
             # Prune deregistered miner UIDs from scorer
             scorer.prune_absent(set(miner_uids))
 
+            async def _verify_proactive_proof(
+                client: httpx.AsyncClient, ip: str, port: int, uid: int, metrics: object,
+            ) -> None:
+                """Fetch and verify a miner's proactive attestation proof."""
+                try:
+                    proof_resp = await client.get(
+                        f"http://{ip}:{port}/v1/attestation/latest",
+                        timeout=10.0,
+                    )
+                    if proof_resp.status_code != 200:
+                        return
+                    pdata = proof_resp.json()
+                    if not pdata.get("available") or not pdata.get("proof_hex"):
+                        return
+
+                    proof_bytes = bytes.fromhex(pdata["proof_hex"])
+                    notary_key = pdata.get("notary_pubkey", "")
+
+                    from djinn_validator.core import tlsn as tlsn_verifier
+                    if not tlsn_verifier.is_available():
+                        return
+                    verify_result = await asyncio.wait_for(
+                        tlsn_verifier.verify_proof(
+                            proof_bytes,
+                            expected_notary_key=notary_key or None,
+                        ),
+                        timeout=30.0,
+                    )
+                    if verify_result.verified:
+                        metrics.record_attestation(latency=pdata.get("proof_age_s", 0), proof_valid=True)
+                        log.info(
+                            "proactive_proof_verified",
+                            uid=uid,
+                            server=pdata.get("server_name", ""),
+                            age_s=round(pdata.get("proof_age_s", 0), 1),
+                        )
+                    else:
+                        log.debug("proactive_proof_invalid", uid=uid, error=verify_result.error)
+                except Exception as e:
+                    log.debug("proactive_proof_check_error", uid=uid, error=str(e))
+
             async def _check_health(client: httpx.AsyncClient, uid: int) -> None:
                 axon = neuron.get_axon_info(uid)
                 hotkey = axon.get("hotkey", f"uid-{uid}")
@@ -122,6 +163,15 @@ async def epoch_loop(
                                     notary_active_sessions=caps.get("notary_active_sessions", 0),
                                     disk_free_gb=caps.get("disk_free_gb", 0.0),
                                 )
+                            # Check proactive proof if present and we haven't
+                            # verified one for this miner this epoch yet
+                            pp = data.get("proactive_proof")
+                            if (
+                                pp
+                                and pp.get("proof_age_s", 99999) < 86400
+                                and metrics.attestations_valid == 0
+                            ):
+                                await _verify_proactive_proof(client, ip, port, uid, metrics)
                         except Exception:
                             pass  # Old miners may not return JSON or capabilities
                 except httpx.HTTPError:

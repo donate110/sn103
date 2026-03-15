@@ -122,6 +122,17 @@ class MinerCapabilities(BaseModel):
     disk_free_gb: float = 0.0
 
 
+class ProactiveProof(BaseModel):
+    """Cached proactive attestation proof for capability verification."""
+
+    url: str = ""
+    server_name: str = ""
+    notary_pubkey: str = ""
+    proof_hex: str = ""
+    proof_age_s: float = 0.0
+    date_header: str = ""
+
+
 class HealthResponse(BaseModel):
     """GET /health — Miner health check."""
 
@@ -132,6 +143,7 @@ class HealthResponse(BaseModel):
     bt_connected: bool = False
     uptime_seconds: float = 0.0
     capabilities: MinerCapabilities | None = None
+    proactive_proof: ProactiveProof | None = None
 
 
 class ReadinessResponse(BaseModel):

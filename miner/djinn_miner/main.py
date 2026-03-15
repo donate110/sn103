@@ -258,6 +258,17 @@ async def async_main() -> None:
     if notary_sidecar.enabled:
         running_tasks.append(asyncio.create_task(notary_sidecar.watchdog_loop()))
 
+    # Proactive attestation: periodically prove TLSNotary capability
+    # by attesting a simple URL using the local notary sidecar.
+    from djinn_miner.core.proactive_attest import ProactiveAttester
+    proactive = ProactiveAttester(
+        notary_port=notary_sidecar._port if notary_sidecar.enabled else 7047,
+        notary_pubkey=notary_sidecar._pubkey_hex if notary_sidecar.enabled else "",
+    )
+    health_tracker._proactive_attester = proactive
+    if notary_sidecar.enabled:
+        running_tasks.append(asyncio.create_task(proactive.run_loop()))
+
     shutdown_event = asyncio.Event()
 
     def _shutdown(sig: signal.Signals) -> None:
