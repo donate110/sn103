@@ -996,8 +996,6 @@ def create_app(
         )
 
         # Fan out to up to 5 miners in parallel, first success wins
-        _auth_hdrs: dict[str, str] = {}
-
         last_error = "No miners attempted"
         miner_data: dict | None = None
         selected: dict | None = None
@@ -1007,9 +1005,8 @@ def create_app(
         _failed_notary_uids: set[int] = set()
         _notary_assignment_counts: dict[int, int] = {}
 
-        async def _try_miner(axon: dict, tier: str) -> tuple[dict, dict, str, float] | None:
-            """Try one miner. Returns (axon, data, proof_hex, elapsed_s) on success, None on failure."""
-            nonlocal selected_notary_uid, selected_notary_pubkey
+        async def _try_miner(axon: dict, tier: str) -> tuple[dict, dict, str, float, int | None, str | None] | None:
+            """Try one miner. Returns (axon, data, proof_hex, elapsed_s, notary_uid, notary_pubkey) on success."""
             attempt_start = _t.perf_counter()
             miner_url = axon.get("_url") or f"http://{axon['ip']}:{axon['port']}/v1/attest"
             tier_timeout = 210.0 if tier == "proven" else 60.0 if tier == "redemption" else 120.0
@@ -1031,9 +1028,10 @@ def create_app(
                 payload["notary_ws"] = True
 
             _body = _json.dumps(payload).encode()
+            _auth_hdrs: dict[str, str] = {}
             if neuron and neuron.wallet:
                 from djinn_validator.api.middleware import create_signed_headers
-                _auth_hdrs.update(create_signed_headers("/v1/attest", _body, neuron.wallet))
+                _auth_hdrs = create_signed_headers("/v1/attest", _body, neuron.wallet)
 
             log.info(
                 "attest_dispatching",
@@ -1118,12 +1116,11 @@ def create_app(
             if breaker:
                 breaker.record_success()
 
-            # Store the assigned notary info for verification and logging
-            if assigned_notary:
-                selected_notary_uid = assigned_notary.uid
-                selected_notary_pubkey = assigned_notary.pubkey_hex
-
-            return (axon, data, phex, _t.perf_counter() - attempt_start)
+            return (
+                axon, data, phex, _t.perf_counter() - attempt_start,
+                assigned_notary.uid if assigned_notary else None,
+                assigned_notary.pubkey_hex if assigned_notary else None,
+            )
 
         # Launch parallel tasks for all candidates (up to 5)
         import asyncio as _aio
@@ -1163,6 +1160,8 @@ def create_app(
                 continue
             if result is not None:
                 selected, miner_data, proof_hex = result[0], result[1], result[2]
+                selected_notary_uid = result[4]
+                selected_notary_pubkey = result[5]
                 # Let remaining miners finish in background — they deserve credit
                 remaining = [t for t in tasks if not t.done()]
                 if remaining and scorer is not None:

@@ -1055,11 +1055,12 @@ async def challenge_miners_attestation(
         for axon in capable:
             uid = axon.get("uid")
             m = scorer._miners.get(uid) if uid is not None else None
-            if m and m.attestations_total >= 3 and m.attestations_valid == 0:
-                # Known-broken miner. Still record that it was challenged
-                # (so the penalty applies) but don't waste time on the
-                # full 60s timeout.
-                m.record_attestation(latency=0, proof_valid=False)
+            if m and m.attestations_total >= 3 and m.attestations_valid == 0 and not m.proactive_proof_verified:
+                # Known-broken miner with no valid proactive proof.
+                # Skip the full timeout. Don't inflate attestations_total
+                # further; the existing failures are sufficient for the
+                # penalty. The miner can recover via proactive attestation
+                # or the redemption slot in select_attest_miners.
                 skipped += 1
                 continue
             filtered.append(axon)

@@ -169,16 +169,19 @@ async def epoch_loop(
                                     disk_free_gb=caps.get("disk_free_gb", 0.0),
                                 )
                             # Check proactive proof if present.
-                            # Mark the miner as proof-capable immediately so
-                            # it enters the "proven" tier for attestation dispatch.
-                            # Full verification runs in background.
+                            # Do NOT set proactive_proof_verified here.
+                            # A malicious miner could fake this health field.
+                            # The flag is only set after background TLSNotary
+                            # verification succeeds in _verify_proactive_proof.
                             pp = data.get("proactive_proof")
-                            if pp and pp.get("proof_age_s", 99999) < 86400:
-                                metrics.proactive_proof_verified = True
-                                if metrics.attestations_valid == 0:
-                                    asyncio.create_task(
-                                        _verify_proactive_proof(ip, port, uid, metrics)
-                                    )
+                            if (
+                                pp
+                                and pp.get("proof_age_s", 99999) < 86400
+                                and not metrics.proactive_proof_verified
+                            ):
+                                asyncio.create_task(
+                                    _verify_proactive_proof(ip, port, uid, metrics)
+                                )
                         except Exception:
                             pass  # Old miners may not return JSON or capabilities
                 except httpx.HTTPError:
