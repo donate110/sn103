@@ -962,9 +962,9 @@ async def _request_and_verify_proof(
 # Known-good HTTPS URLs for attestation challenges. The validator
 # fetches these itself to confirm the miner's proof is for the correct server.
 _ATTESTATION_CHALLENGE_URLS = [
-    "https://www.example.com/",
     "https://httpbin.org/get",
     "https://api.github.com/zen",
+    "https://www.wikipedia.org/",
 ]
 
 
