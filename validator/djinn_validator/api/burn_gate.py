@@ -34,14 +34,18 @@ BURN_CACHE_PATH = Path(os.getenv(
 
 # Hardcoded constants (no .env override)
 MIN_BURN_ALPHA: float = 1.0  # Minimum alpha burned per tx
-BURN_WINDOW_SECONDS: int = 2_592_000  # 30 days
+BURN_WINDOW_SECONDS: int = 365 * 86400  # 1 year for initial on-chain verification
 BURN_NETUID: int = 103
 ALPHA_RAO_PER_TOKEN: int = 1_000_000_000  # 1 alpha = 1e9 rao
 
 # Cache: tx_hash -> {valid, error, coldkey, amount, block_ts, checked_at}
 _cache: dict[str, dict[str, Any]] = {}
 CACHE_TTL_SECONDS: int = 300  # 5 minutes for invalid/not-found entries
-CACHE_TTL_VALID_SECONDS: int = BURN_WINDOW_SECONDS  # 30 days for verified burns
+# Once a burn is verified and cached, it stays valid permanently.
+# The burn happened, the alpha is destroyed, re-verification is pointless.
+# Block state gets pruned from subtensor nodes, so re-checking on-chain
+# will fail for old burns even though they're perfectly valid.
+CACHE_TTL_VALID_SECONDS: int = 10 * 365 * 86400  # 10 years (effectively permanent)
 
 
 def _cache_ttl(entry: dict[str, Any]) -> int:
@@ -50,18 +54,19 @@ def _cache_ttl(entry: dict[str, Any]) -> int:
 
 
 def _load_cache() -> None:
-    """Load persisted valid burn entries from disk on startup."""
+    """Load persisted valid burn entries from disk on startup.
+
+    Valid burns are loaded regardless of age. The burn happened, the
+    alpha is destroyed. Re-verification would require on-chain lookup
+    which fails when block state is pruned.
+    """
     if not BURN_CACHE_PATH.exists():
         return
     try:
         data = json.loads(BURN_CACHE_PATH.read_text())
-        now = time.time()
         loaded = 0
         for tx_hash, entry in data.items():
             if not entry.get("valid"):
-                continue
-            age = now - entry.get("block_ts", 0)
-            if age > BURN_WINDOW_SECONDS:
                 continue
             _cache[tx_hash] = entry
             loaded += 1
@@ -133,15 +138,11 @@ def verify_burn_tx(
 
     Returns (valid, error_message).
     """
-    # Check cache first
+    # Check cache first. Once a burn is verified, it stays valid permanently.
     cached = _cache_get(tx_hash)
     if cached is not None:
         if not cached["valid"]:
             return False, cached["error"]
-        # Re-check recency (burn may have aged out since caching)
-        age = time.time() - cached["block_ts"]
-        if age > BURN_WINDOW_SECONDS:
-            return False, f"Burn too old ({int(age)}s > {BURN_WINDOW_SECONDS}s)"
         if cached["coldkey"] != expected_coldkey:
             return False, "Burn coldkey does not match request coldkey"
         return True, ""
