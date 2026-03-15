@@ -321,11 +321,11 @@ def _get_validator_hotkeys(neuron: Any) -> set[str] | None:
 
 
 def _get_registered_ips(neuron: Any) -> set[str] | None:
-    """Get set of all registered neuron IPs from the metagraph.
+    """Get set of validator IPs from the metagraph.
 
-    Includes both validators and miners — any IP that's registered on
-    the subnet is allowed to call. This is necessary because validators
-    may connect from a different outbound IP than their metagraph axon IP.
+    Only includes neurons with validator_permit=True. Miners are excluded
+    to prevent any registered miner from calling protected endpoints on
+    other miners (draining Odds API credits, consuming TLSNotary capacity).
 
     Returns None if metagraph is unavailable (disables auth in dev mode).
     """
@@ -337,6 +337,11 @@ def _get_registered_ips(neuron: Any) -> set[str] | None:
         if hasattr(n, "item"):
             n = n.item()
         for uid in range(int(n)):
+            permit = neuron.metagraph.validator_permit[uid]
+            if hasattr(permit, "item"):
+                permit = permit.item()
+            if not permit:
+                continue
             axon = neuron.metagraph.axons[uid]
             ip = getattr(axon, "ip", "")
             if ip and ip != "0.0.0.0":
