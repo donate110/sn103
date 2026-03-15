@@ -56,11 +56,14 @@ class CachedProof:
 class ProactiveAttester:
     """Background loop that periodically attests a URL using the local notary."""
 
+    _RETRY_INTERVAL = 300  # 5 minutes after failure
+
     def __init__(self, notary_port: int = 7047, notary_pubkey: str = "") -> None:
         self._notary_port = notary_port
         self._notary_pubkey = notary_pubkey
         self._cached: CachedProof | None = None
         self._running = False
+        self._consecutive_failures = 0
 
     @property
     def latest(self) -> CachedProof | None:
@@ -140,14 +143,28 @@ class ProactiveAttester:
                 proof = await self._generate_proof()
                 if proof:
                     self._cached = proof
+                    self._consecutive_failures = 0
+                    interval = PROACTIVE_INTERVAL
                 else:
-                    log.debug("proactive_attest_retry_later")
+                    self._consecutive_failures += 1
+                    interval = self._RETRY_INTERVAL
+                    log.debug(
+                        "proactive_attest_retry_later",
+                        consecutive_failures=self._consecutive_failures,
+                        retry_in_s=interval,
+                    )
             except asyncio.CancelledError:
                 return
             except Exception as e:
-                log.warning("proactive_attest_error", error=str(e))
+                self._consecutive_failures += 1
+                interval = self._RETRY_INTERVAL
+                log.warning(
+                    "proactive_attest_error",
+                    error=str(e),
+                    consecutive_failures=self._consecutive_failures,
+                )
 
-            await asyncio.sleep(PROACTIVE_INTERVAL)
+            await asyncio.sleep(interval)
 
     def stop(self) -> None:
         self._running = False

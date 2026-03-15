@@ -74,6 +74,7 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
     error InsufficientFreeCollateral(uint256 available, uint256 required);
     error InsufficientSignalLock(uint256 locked, uint256 requested);
     error WithdrawalExceedsAvailable(uint256 available, uint256 requested);
+    error CannotRescueUsdc();
 
     modifier onlyAuthorized() {
         if (!authorized[msg.sender]) revert Unauthorized();
@@ -235,6 +236,14 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
     function emergencyUnfreeze(address genius) external onlyOwner {
         withdrawalFreezeCount[genius] = 0;
         emit WithdrawalFreezeUpdated(genius, false);
+    }
+
+    /// @notice Rescue tokens accidentally sent to this contract. Cannot rescue USDC.
+    /// @param token Address of the ERC20 token to rescue
+    /// @param amount Amount of tokens to rescue
+    function rescueToken(address token, uint256 amount) external onlyOwner {
+        if (token == address(usdc)) revert CannotRescueUsdc();
+        IERC20(token).safeTransfer(owner(), amount);
     }
 
     /// @notice Set the emergency pauser address

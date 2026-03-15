@@ -204,7 +204,7 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
         if (p.decoyLines.length != 10) revert InvalidDecoyLinesLength(p.decoyLines.length);
         if (bytes(p.sport).length > MAX_SPORT_LENGTH) revert StringTooLong("sport", bytes(p.sport).length, MAX_SPORT_LENGTH);
         if (p.slaMultiplierBps < 10_000) revert SlaMultiplierTooLow(p.slaMultiplierBps);
-        if (p.slaMultiplierBps > 100_000) revert SlaMultiplierTooHigh(p.slaMultiplierBps);
+        if (p.slaMultiplierBps > 30_000) revert SlaMultiplierTooHigh(p.slaMultiplierBps);
         if (p.maxPriceBps == 0 || p.maxPriceBps > 5000) revert InvalidMaxPriceBps(p.maxPriceBps);
         if (p.expiresAt <= block.timestamp) revert ExpirationInPast(p.expiresAt, block.timestamp);
         // maxNotional = 0 means unlimited notional capacity per signal.

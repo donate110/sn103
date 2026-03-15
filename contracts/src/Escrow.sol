@@ -131,6 +131,8 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     error NotPauserOrOwner(address caller);
     error GeniusEqualsIdiot(address addr);
     error LengthMismatch();
+    error BatchTooLarge(uint256 provided, uint256 max);
+    error CannotRescueUsdc();
     /// @notice Minimum notional per purchase (1 USDC in 6 decimals — prevents dust griefing)
     uint256 public constant MIN_NOTIONAL = 1e6;
 
@@ -441,6 +443,7 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     /// @param idiots Array of Idiot addresses
     /// @param cycles Array of cycle numbers (must match idiots length)
     function claimFeesBatch(address[] calldata idiots, uint256[] calldata cycles) external whenNotPaused nonReentrant {
+        if (idiots.length > 100) revert BatchTooLarge(idiots.length, 100);
         if (auditContract == address(0)) revert ContractNotSet("Audit");
         if (idiots.length != cycles.length) revert LengthMismatch();
 
@@ -525,6 +528,18 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
             if (available < lockNeeded) return (false, "Insufficient genius collateral");
         }
         return (true, "");
+    }
+
+    // -------------------------------------------------------------------------
+    // Token rescue
+    // -------------------------------------------------------------------------
+
+    /// @notice Rescue tokens accidentally sent to this contract. Cannot rescue USDC.
+    /// @param token Address of the ERC20 token to rescue
+    /// @param amount Amount of tokens to rescue
+    function rescueToken(address token, uint256 amount) external onlyOwner {
+        if (token == address(usdc)) revert CannotRescueUsdc();
+        IERC20(token).safeTransfer(owner(), amount);
     }
 
     // -------------------------------------------------------------------------

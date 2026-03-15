@@ -192,7 +192,18 @@ class AttestRequest(BaseModel):
         if not parsed.hostname:
             raise ValueError("URL must have a valid hostname")
         hostname = parsed.hostname.lower()
-        _BLOCKED_HOSTS = {"localhost", "ip6-localhost", "ip6-loopback", "0.0.0.0", "[::]"}
+        # Block well-known internal hostnames. Note: DNS rebinding can still
+        # bypass the is_global check below because DNS may resolve differently
+        # between validation time and the prover binary's connection. The full
+        # fix requires passing the resolved IP to the Rust binary.
+        _BLOCKED_HOSTS = {
+            "localhost", "ip6-localhost", "ip6-loopback", "0.0.0.0", "[::]",
+            "metadata.google.internal",
+            "metadata.google.internal.",
+            "169.254.169.254",
+            "metadata",
+            "metadata.internal",
+        }
         if hostname in _BLOCKED_HOSTS:
             raise ValueError("URL must not point to private/internal addresses")
 

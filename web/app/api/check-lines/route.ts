@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
 
 /**
  * Server-side line availability check using the platform's Odds API key.
@@ -80,6 +81,10 @@ function lineMatches(candidateLine: number | null, point: number | null | undefi
 }
 
 export async function POST(request: NextRequest) {
+  if (isRateLimited("check-lines", getIp(request), 10)) {
+    return rateLimitResponse();
+  }
+
   const apiKey = process.env.ODDS_API_KEY;
   if (!apiKey) {
     return NextResponse.json(

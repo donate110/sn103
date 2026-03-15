@@ -1,11 +1,17 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { verifyAdminRequest } from "@/lib/admin-auth";
 import { discoverMetagraph, discoverMinerUrl } from "@/lib/bt-metagraph";
 
 /**
  * GET /api/debug/metagraph — diagnostic endpoint for metagraph discovery.
  * Returns what the server sees when discovering miners and validators.
+ * Protected by admin session cookie (set via POST /api/admin/auth).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  if (!(await verifyAdminRequest(request))) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const env = {
     BT_NETUID: process.env.BT_NETUID ?? "(unset)",
     BT_NETWORK: process.env.BT_NETWORK ?? "(unset)",

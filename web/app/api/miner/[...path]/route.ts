@@ -29,7 +29,7 @@ function isValidOrigin(request: NextRequest): boolean {
     "https://www.djinn.gg",
     ...(process.env.NODE_ENV !== "production" ? ["http://localhost:3000"] : []),
   ];
-  return allowed.includes(origin) || origin.endsWith(".djinn.vercel.app");
+  return allowed.includes(origin) || origin.endsWith(".djinn-inc-djinn.vercel.app");
 }
 
 async function proxy(
@@ -70,7 +70,7 @@ async function proxy(
     return new NextResponse(body, {
       status: res.status,
       headers: {
-        "Content-Type": res.headers.get("Content-Type") || "application/json",
+        "Content-Type": "application/json",
       },
     });
   } catch {

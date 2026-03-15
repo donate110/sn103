@@ -159,16 +159,16 @@ contract SignalCommitmentTest is Test {
 
     function test_commit_revertOnSlaMultiplierTooHigh() public {
         SignalCommitment.CommitParams memory p = _defaultParams(202);
-        p.slaMultiplierBps = 100_001;
+        p.slaMultiplierBps = 30_001;
 
-        vm.expectRevert(abi.encodeWithSelector(SignalCommitment.SlaMultiplierTooHigh.selector, 100_001));
+        vm.expectRevert(abi.encodeWithSelector(SignalCommitment.SlaMultiplierTooHigh.selector, 30_001));
         vm.prank(genius);
         sc.commit(p);
     }
 
     function test_commit_slaMultiplierExactMaximum() public {
         SignalCommitment.CommitParams memory p = _defaultParams(203);
-        p.slaMultiplierBps = 100_000;
+        p.slaMultiplierBps = 30_000;
 
         vm.prank(genius);
         sc.commit(p);

@@ -466,7 +466,7 @@ class MinerScorer:
             elif m.capabilities_reported:
                 score += 0.1  # No TLSNotary info but reports other caps
 
-            scores[uid] = min(1.0, score)
+            scores[uid] = min(0.5, score)
 
         return scores
 

@@ -17,7 +17,8 @@ use clap::Parser;
 use futures::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use k256::ecdsa::SigningKey;
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::{error, info};
+use std::sync::Arc;
+use tracing::{error, info, warn};
 
 use tlsn::{
     attestation::{
@@ -68,14 +69,26 @@ async fn main() -> Result<()> {
     let listener = socket.listen(64)?;
     info!(bind = %args.bind, port = args.port, "Listening for connections");
 
+    // Limit concurrent connections to prevent resource exhaustion
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
+
     loop {
         let (socket, addr) = listener.accept().await?;
+        let permit = match semaphore.clone().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                warn!(%addr, "Connection rejected: max concurrent connections reached");
+                drop(socket);
+                continue;
+            }
+        };
         info!(%addr, "New connection");
         let key = signing_key.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_connection(socket, &key).await {
                 error!(%addr, error = %e, "Connection failed");
             }
+            drop(permit); // release semaphore slot when handler completes
         });
     }
 }
@@ -241,6 +254,15 @@ fn load_or_generate_key(path: &PathBuf) -> Result<SigningKey> {
     } else {
         let key = SigningKey::random(&mut k256::elliptic_curve::rand_core::OsRng);
         std::fs::write(path, key.to_bytes()).context("failed to write signing key")?;
+
+        // Restrict key file to owner-only read/write (0600) on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .context("failed to set key file permissions")?;
+        }
+
         info!(path = %path.display(), "Generated new signing key");
         Ok(key)
     }

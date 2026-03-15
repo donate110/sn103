@@ -18,9 +18,11 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::Parser;
 use futures::io::{AsyncReadExt as _, AsyncWriteExt as _};
-use http_body_util::Empty;
-use hyper::{body::Bytes, Request, StatusCode};
+use http_body_util::{BodyExt, Full};
+use hyper::{body::Bytes, Method, Request, StatusCode};
 use hyper_util::rt::TokioIo;
+use tokio::io::{AsyncReadExt as TokioAsyncReadExt, AsyncWriteExt as TokioAsyncWriteExt};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 use tracing::info;
 
@@ -55,13 +57,18 @@ struct Args {
     #[arg(long)]
     url: String,
 
-    /// Notary server hostname
+    /// Notary server hostname (for direct TCP connection)
     #[arg(long, default_value = "127.0.0.1")]
     notary_host: String,
 
-    /// Notary server port
+    /// Notary server port (for direct TCP connection)
     #[arg(long, default_value_t = 7047)]
     notary_port: u16,
+
+    /// WebSocket URL for a remote notary (e.g. ws://1.2.3.4:8080/prover).
+    /// When set, overrides --notary-host/--notary-port and connects via WebSocket.
+    #[arg(long)]
+    notary_ws_url: Option<String>,
 
     /// Output file path for the serialized presentation
     #[arg(long)]
@@ -71,11 +78,36 @@ struct Args {
     #[arg(long, default_value = "authorization,apikey,x-api-key")]
     redact_headers: String,
 
+    /// Max bytes the MPC circuit allocates for sent data (request body + headers).
+    /// Must match or exceed the actual request size.
+    #[arg(long, default_value_t = MAX_SENT_DATA)]
+    max_sent_data: usize,
+
     /// Max bytes the MPC circuit allocates for received data.
-    /// Smaller values produce faster proofs for small responses (e.g. API JSON).
     /// Must match or exceed the actual response size.
     #[arg(long, default_value_t = MAX_RECV_DATA)]
     max_recv_data: usize,
+
+    /// HTTP method (GET, POST, PUT, etc.)
+    #[arg(long, default_value = "GET")]
+    method: String,
+
+    /// Request body (for POST/PUT). Can also be read from --body-file.
+    #[arg(long)]
+    body: Option<String>,
+
+    /// Path to a file containing the request body
+    #[arg(long)]
+    body_file: Option<PathBuf>,
+
+    /// Extra headers to include (comma-separated key:value pairs)
+    /// e.g. "Content-Type:application/json,x-api-key:sk-ant-..."
+    #[arg(long)]
+    headers: Option<String>,
+
+    /// Path to save the HTTP response body (for extracting API results)
+    #[arg(long)]
+    response_output: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -100,16 +132,81 @@ async fn main() -> Result<()> {
         .map(|s| s.trim().to_lowercase())
         .collect();
 
-    info!("Connecting to notary at {}:{}", args.notary_host, args.notary_port);
+    // Connect to the Notary server via WebSocket or TCP.
+    // Both paths produce a DuplexStream so the Session type is uniform.
+    let (local, remote) = tokio::io::duplex(256 * 1024);
 
-    // Connect to the Notary server via TCP.
-    let notary_socket =
-        tokio::net::TcpStream::connect((args.notary_host.as_str(), args.notary_port))
+    if let Some(ref ws_url) = args.notary_ws_url {
+        info!("Connecting to notary via WebSocket: {}", ws_url);
+
+        let (ws_stream, _) = connect_async(ws_url)
             .await
-            .context("failed to connect to notary server")?;
+            .context("failed to connect to notary WebSocket")?;
 
-    // Create a session with the notary.
-    let session = Session::new(notary_socket.compat());
+        let (remote_read, remote_write) = tokio::io::split(remote);
+        let (ws_sink, ws_recv) = futures::StreamExt::split(ws_stream);
+
+        // WS recv -> remote_write (what Session reads)
+        tokio::spawn({
+            let mut ws_recv = ws_recv;
+            let mut remote_write = remote_write;
+            async move {
+                use futures::StreamExt;
+                while let Some(msg) = ws_recv.next().await {
+                    match msg {
+                        Ok(Message::Binary(data)) => {
+                            if remote_write.write_all(&data).await.is_err() {
+                                break;
+                            }
+                        }
+                        Ok(Message::Close(_)) | Err(_) => break,
+                        _ => {}
+                    }
+                }
+            }
+        });
+
+        // remote_read -> WS sink (what Session writes)
+        tokio::spawn({
+            let mut remote_read = remote_read;
+            let mut ws_sink = ws_sink;
+            async move {
+                use futures::SinkExt;
+                let mut buf = vec![0u8; 64 * 1024];
+                loop {
+                    match remote_read.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            if ws_sink
+                                .send(Message::Binary(buf[..n].to_vec().into()))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+        });
+    } else {
+        info!("Connecting to notary at {}:{}", args.notary_host, args.notary_port);
+
+        let notary_socket =
+            tokio::net::TcpStream::connect((args.notary_host.as_str(), args.notary_port))
+                .await
+                .context("failed to connect to notary server")?;
+
+        // Bridge TCP <-> DuplexStream bidirectionally
+        let mut notary_socket = notary_socket;
+        let mut remote = remote;
+        tokio::spawn(async move {
+            tokio::io::copy_bidirectional(&mut notary_socket, &mut remote).await.ok();
+        });
+    }
+
+    let session = Session::new(local.compat());
     let (driver, mut handle) = session.split();
     let driver_task = tokio::spawn(driver);
 
@@ -120,7 +217,7 @@ async fn main() -> Result<()> {
             TlsCommitConfig::builder()
                 .protocol(
                     MpcTlsConfig::builder()
-                        .max_sent_data(MAX_SENT_DATA)
+                        .max_sent_data(args.max_sent_data)
                         .max_recv_data(args.max_recv_data)
                         .build()?,
                 )
@@ -153,20 +250,47 @@ async fn main() -> Result<()> {
 
     // HTTP handshake over the TLS connection.
     let (mut request_sender, connection): (
-        hyper::client::conn::http1::SendRequest<Empty<Bytes>>,
+        hyper::client::conn::http1::SendRequest<Full<Bytes>>,
         _,
     ) = hyper::client::conn::http1::handshake(tls_connection).await?;
     tokio::spawn(connection);
 
+    // Read body from file or CLI arg
+    let body_bytes: Bytes = if let Some(ref body_path) = args.body_file {
+        Bytes::from(std::fs::read(body_path).context("failed to read body file")?)
+    } else if let Some(ref body_str) = args.body {
+        Bytes::from(body_str.clone())
+    } else {
+        Bytes::new()
+    };
+
+    let method: Method = args.method.parse().context("invalid HTTP method")?;
+
     // Build the HTTP request.
-    let request = Request::builder()
+    let mut req_builder = Request::builder()
         .uri(&path)
+        .method(&method)
         .header("Host", &host)
         .header("Accept", "*/*")
         .header("Accept-Encoding", "identity")
         .header("Connection", "close")
-        .header("User-Agent", USER_AGENT)
-        .body(Empty::<Bytes>::new())?;
+        .header("User-Agent", USER_AGENT);
+
+    // Add custom headers
+    if let Some(ref header_str) = args.headers {
+        for pair in header_str.split(',') {
+            if let Some((key, value)) = pair.split_once(':') {
+                req_builder = req_builder.header(key.trim(), value.trim());
+            }
+        }
+    }
+
+    // Add Content-Length for non-empty bodies
+    if !body_bytes.is_empty() {
+        req_builder = req_builder.header("Content-Length", body_bytes.len().to_string());
+    }
+
+    let request = req_builder.body(Full::new(body_bytes))?;
 
     info!("Sending request to {}", host);
 
@@ -178,6 +302,18 @@ async fn main() -> Result<()> {
 
     if status != StatusCode::OK {
         tracing::warn!("server returned non-200 status: {status}");
+    }
+
+    // Consume the response body so it's captured in the TLS transcript.
+    let response_body_bytes = response.into_body().collect().await?.to_bytes();
+    let response_body = String::from_utf8_lossy(&response_body_bytes).to_string();
+
+    info!("Response body length: {} bytes", response_body.len());
+
+    // Save response body to file if requested.
+    if let Some(ref resp_path) = args.response_output {
+        tokio::fs::write(resp_path, &response_body).await?;
+        info!("Response body saved to {}", resp_path.display());
     }
 
     // Finalize prover.
@@ -274,9 +410,10 @@ async fn main() -> Result<()> {
     socket.write_all(&request_bytes).await?;
     socket.close().await?;
 
-    // Receive attestation from notary.
+    // Receive attestation from notary (capped at 10 MB to prevent unbounded allocation).
     let mut attestation_bytes = Vec::new();
-    socket.read_to_end(&mut attestation_bytes).await?;
+    const MAX_ATTESTATION_SIZE: u64 = 10 * 1024 * 1024;
+    (&mut socket).take(MAX_ATTESTATION_SIZE).read_to_end(&mut attestation_bytes).await?;
     let attestation: Attestation = bincode::deserialize(&attestation_bytes)?;
 
     // Validate attestation.
@@ -331,12 +468,13 @@ async fn main() -> Result<()> {
     // Write presentation to output file.
     tokio::fs::write(&args.output, bincode::serialize(&presentation)?).await?;
 
-    // Output JSON summary to stdout for the Python wrapper to parse.
+    // Output JSON summary to stdout.
     let summary = serde_json::json!({
         "status": "success",
         "output": args.output.to_string_lossy(),
         "server": url.host().unwrap_or_default(),
         "response_status": status.as_u16(),
+        "response_body_length": response_body.len(),
     });
     println!("{}", serde_json::to_string(&summary)?);
 

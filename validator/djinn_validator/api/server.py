@@ -817,14 +817,21 @@ def create_app(
 
     import os as _os
     _ATTEST_MAX_CONCURRENT = int(_os.environ.get("ATTEST_MAX_CONCURRENT", "15"))
-    _attest_inflight = 0
+    _attest_semaphore = asyncio.Semaphore(_ATTEST_MAX_CONCURRENT)
 
     # Per-miner circuit breakers: 3 consecutive failures -> open for 60s.
     # Prevents wasting parallel fan-out slots on miners whose sidecar is down.
     _miner_breakers: dict[int, CircuitBreaker] = {}
 
-    def _get_miner_breaker(uid: int) -> CircuitBreaker:
+    def _get_miner_breaker(uid: int, _active_uids: set[int] | None = None) -> CircuitBreaker:
         if uid not in _miner_breakers:
+            # Prune stale entries when dict grows too large
+            if len(_miner_breakers) > 500 and _active_uids:
+                stale = [u for u in _miner_breakers if u not in _active_uids]
+                for u in stale:
+                    del _miner_breakers[u]
+                if stale:
+                    log.info("miner_breakers_pruned", count=len(stale))
             _miner_breakers[uid] = CircuitBreaker(
                 name=f"miner_{uid}",
                 failure_threshold=3,
@@ -835,10 +842,11 @@ def create_app(
     @app.get("/v1/attest/capacity")
     async def attest_capacity() -> dict:
         """Return current attestation capacity for admission control."""
+        inflight = _ATTEST_MAX_CONCURRENT - _attest_semaphore._value
         return {
-            "inflight": _attest_inflight,
+            "inflight": inflight,
             "max": _ATTEST_MAX_CONCURRENT,
-            "available": max(0, _ATTEST_MAX_CONCURRENT - _attest_inflight),
+            "available": _attest_semaphore._value,
         }
 
     @app.post("/v1/attest", response_model=AttestResponse)
@@ -856,24 +864,19 @@ def create_app(
         import time as _t
         import httpx
 
-        nonlocal _attest_inflight
-
         # Admission control: reject immediately if at capacity
-        if _attest_inflight >= _ATTEST_MAX_CONCURRENT:
+        if _attest_semaphore._value <= 0:
             return AttestResponse(
                 request_id=req.request_id,
                 url=req.url,
                 success=False,
-                error="Validator at capacity — try another validator",
+                error="Validator at capacity -- try another validator",
                 busy=True,
                 retry_after=30,
             )
 
-        _attest_inflight += 1
-        try:
+        async with _attest_semaphore:
             return await _attest_url_inner(req)
-        finally:
-            _attest_inflight -= 1
 
     async def _attest_url_inner(req: AttestRequest) -> AttestResponse:
         import json as _json
@@ -2603,13 +2606,13 @@ def create_app(
             reliability_score=chosen_score,
         )
 
-    @app.post("/v1/notary/session/feedback")
+    @app.post("/v1/notary/session/feedback", dependencies=[_admin_auth])
     async def notary_session_feedback(request: Request) -> dict:
         """Report success or failure of a notary session back to the validator.
 
         Feeds the circuit breaker so future assignments skip broken miners.
-        No auth required (feedback is cheap, and bad feedback just degrades
-        the reporter's own future assignments via weighted selection).
+        Requires admin auth to prevent unauthenticated users from sending
+        fake feedback that trips circuit breakers.
 
         Body: {"session_id": str, "miner_uid": int, "success": bool, "error": str}
         """

@@ -462,6 +462,10 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
             totalUsdcFeesPaid += p.usdcPaid;
         }
 
+        if (totalNotional > MAX_CYCLE_NOTIONAL) {
+            revert TotalNotionalOutOfBounds(totalNotional, MAX_CYCLE_NOTIONAL);
+        }
+
         // Use full settlement (Tranche A USDC) when audit-ready, early exit otherwise
         bool isEarlyExit = !account.isAuditReady(genius, idiot);
 

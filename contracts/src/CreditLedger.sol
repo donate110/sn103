@@ -54,8 +54,14 @@ contract CreditLedger is Initializable, OwnableUpgradeable, PausableUpgradeable,
     /// @notice Cannot mint to the zero address
     error MintToZeroAddress();
 
+    /// @notice Minting would exceed the maximum supply cap
+    error MaxSupplyExceeded(uint256 totalSupply, uint256 amount, uint256 maxSupply);
+
     /// @notice Address must not be zero
     error ZeroAddress();
+
+    /// @notice Maximum total supply of credits (1 billion USDC-equivalent, 6 decimals)
+    uint256 public constant MAX_SUPPLY = 1_000_000_000e6;
 
     // ─── Modifiers
     // ──────────────────────────────────────────────────────
@@ -93,6 +99,7 @@ contract CreditLedger is Initializable, OwnableUpgradeable, PausableUpgradeable,
     function mint(address to, uint256 amount) external onlyAuthorized {
         if (to == address(0)) revert MintToZeroAddress();
         if (amount == 0) revert MintAmountZero();
+        if (_totalSupply + amount > MAX_SUPPLY) revert MaxSupplyExceeded(_totalSupply, amount, MAX_SUPPLY);
 
         _balances[to] += amount;
         _totalSupply += amount;

@@ -141,10 +141,10 @@ class NotarySidecar:
                 log.warning("notary_binary_not_found", binary=resolved)
                 return False
 
-        # Ensure key directory exists
+        # Ensure key directory exists with restrictive permissions (owner-only)
         key_dir = os.path.dirname(self._key_path)
         if key_dir:
-            os.makedirs(key_dir, exist_ok=True)
+            os.makedirs(key_dir, mode=0o700, exist_ok=True)
 
         cmd = [
             binary,

@@ -292,6 +292,10 @@ def _check_nonce(nonce: str) -> bool:
             _NONCE_LAST_CLEANUP = now
         if nonce in _NONCE_CACHE:
             return False
+        # After cleanup, if cache is still at capacity, reject to prevent
+        # unbounded growth (possible under sustained high-rate traffic).
+        if len(_NONCE_CACHE) >= _NONCE_CACHE_MAX:
+            return False
         _NONCE_CACHE[nonce] = now
         return True
 

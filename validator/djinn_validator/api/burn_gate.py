@@ -266,11 +266,21 @@ async def verify_burn_via_peers(
     """Ask peer validators if they have a verified burn in their cache.
 
     Falls back to this when on-chain lookup fails (block state pruned).
+
+    SECURITY NOTE: Peer responses are plain unsigned HTTP JSON. A malicious
+    peer (or MITM) could forge a positive response to bypass the burn gate.
+    Until a protocol-level signing mechanism is added, we mitigate this by
+    requiring at least 2 independent peers to confirm the burn (quorum of 2).
     """
     if not peer_urls:
         return False, "No peer validators to query"
 
+    _PEER_QUORUM = 2  # minimum confirmations required
+
     import httpx
+
+    confirming_peers: list[str] = []
+    last_data: dict | None = None
 
     async with httpx.AsyncClient(timeout=5.0) as client:
         for url in peer_urls:
@@ -283,25 +293,31 @@ async def verify_burn_via_peers(
                     continue
                 data = resp.json()
                 if data.get("valid"):
-                    log.info(
-                        "burn_verified_via_peer",
-                        tx_hash=tx_hash[:16] + "...",
-                        peer=url,
-                    )
-                    entry = {
-                        "valid": True,
-                        "error": "",
-                        "coldkey": expected_coldkey,
-                        "amount": data.get("amount", 0),
-                        "block_ts": data.get("block_ts", 0),
-                    }
-                    _cache_set(tx_hash, entry)
-                    _persist_cache()
-                    return True, ""
+                    confirming_peers.append(url)
+                    last_data = data
+                    if len(confirming_peers) >= _PEER_QUORUM:
+                        log.info(
+                            "burn_verified_via_peers",
+                            tx_hash=tx_hash[:16] + "...",
+                            peers=confirming_peers,
+                            quorum=_PEER_QUORUM,
+                        )
+                        entry = {
+                            "valid": True,
+                            "error": "",
+                            "coldkey": expected_coldkey,
+                            "amount": last_data.get("amount", 0),
+                            "block_ts": last_data.get("block_ts", 0),
+                        }
+                        _cache_set(tx_hash, entry)
+                        _persist_cache()
+                        return True, ""
             except Exception as e:
                 log.debug("burn_peer_query_failed", peer=url, error=str(e))
                 continue
 
+    if confirming_peers:
+        return False, f"Only {len(confirming_peers)} peer(s) confirmed (need {_PEER_QUORUM})"
     return False, "No peer validators could verify this burn"
 
 

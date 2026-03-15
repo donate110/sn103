@@ -70,7 +70,7 @@ def create_app(
 
     app = FastAPI(title="Djinn Miner", version=__version__)
 
-    _attest_inflight = 0
+    _attest_sem = asyncio.Semaphore(_ATTEST_MAX_CONCURRENT)
 
     # Catch unhandled exceptions — never leak stack traces to clients
     @app.exception_handler(Exception)
@@ -360,11 +360,11 @@ def create_app(
     @app.get("/v1/attest/capacity")
     async def attest_miner_capacity() -> dict:
         """Return current attestation capacity so validators can route around busy miners."""
-        nonlocal _attest_inflight
+        inflight = _ATTEST_MAX_CONCURRENT - _attest_sem._value
         return {
-            "inflight": _attest_inflight,
+            "inflight": inflight,
             "max": _ATTEST_MAX_CONCURRENT,
-            "available": max(0, _ATTEST_MAX_CONCURRENT - _attest_inflight),
+            "available": _attest_sem._value,
         }
 
     @app.post("/v1/attest", response_model=AttestResponse)
@@ -381,8 +381,6 @@ def create_app(
         """
         from djinn_miner.core import tlsn as tlsn_module
         from djinn_miner.utils.watchtower import task_started, task_finished
-
-        nonlocal _attest_inflight
 
         start = time.perf_counter()
         timestamp = int(time.time())
@@ -401,9 +399,10 @@ def create_app(
             )
 
         # Admission control: reject immediately if at capacity
-        if _attest_inflight >= _ATTEST_MAX_CONCURRENT:
+        if _attest_sem.locked():
             ATTESTATION_REQUESTS.labels(status="busy").inc()
-            log.info("attest_busy", url=request.url, request_id=request.request_id, inflight=_attest_inflight)
+            inflight = _ATTEST_MAX_CONCURRENT - _attest_sem._value
+            log.info("attest_busy", url=request.url, request_id=request.request_id, inflight=inflight)
             return AttestResponse(
                 request_id=request.request_id,
                 url=request.url,
@@ -414,7 +413,7 @@ def create_app(
                 retry_after=30,
             )
 
-        _attest_inflight += 1
+        await _attest_sem.acquire()
         task_started()
         try:
             result = await asyncio.wait_for(
@@ -447,7 +446,7 @@ def create_app(
                 content={"detail": "Service shutting down"},
             )
         finally:
-            _attest_inflight -= 1
+            _attest_sem.release()
             task_finished()
 
         elapsed = time.perf_counter() - start
@@ -498,7 +497,7 @@ def create_app(
         """Health check endpoint for validator pings."""
         health_tracker.record_ping()
         # Update live session counts for capability reporting
-        health_tracker.set_tlsn_capacity(_ATTEST_MAX_CONCURRENT, _attest_inflight)
+        health_tracker.set_tlsn_capacity(_ATTEST_MAX_CONCURRENT, _ATTEST_MAX_CONCURRENT - _attest_sem._value)
         notary_active = _notary_max_concurrent - _notary_sem._value
         health_tracker.set_notary_capacity(_notary_max_concurrent, notary_active)
         return health_tracker.get_status()
@@ -523,7 +522,7 @@ def create_app(
         ready = all(checks.values())
         return ReadinessResponse(ready=ready, checks=checks)
 
-    @app.get("/metrics")
+    @app.get("/metrics", dependencies=[_admin_auth])
     async def metrics() -> bytes:
         """Prometheus metrics endpoint."""
         from fastapi.responses import Response

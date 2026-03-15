@@ -25,7 +25,24 @@ log = structlog.get_logger()
 # Resolve binary: env override → PATH → ~/.local/bin → auto-download
 from djinn_miner.core.tlsn_bootstrap import ensure_binary
 
-PROVER_BINARY = ensure_binary("djinn-tlsn-prover")
+_prover_binary_cache: str | None = None
+
+
+def _get_prover_binary() -> str:
+    """Lazily resolve and cache the prover binary path on first call."""
+    global _prover_binary_cache
+    if _prover_binary_cache is None:
+        _prover_binary_cache = ensure_binary("djinn-tlsn-prover")
+    return _prover_binary_cache
+
+
+# Keep PROVER_BINARY as a lazy property for backward compat. All internal
+# usage goes through _get_prover_binary() so the network call only happens
+# on first actual use, not at import time.
+def __getattr__(name: str) -> object:
+    if name == "PROVER_BINARY":
+        return _get_prover_binary()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # Max age (seconds) before a prover process is considered stuck and killed.
 _PROVER_MAX_AGE = int(os.getenv("TLSN_PROVER_MAX_AGE", "300"))
@@ -54,11 +71,12 @@ class TLSNProofResult:
 
 def is_available() -> bool:
     """Check if the TLSNotary prover binary is available."""
-    binary = shutil.which(PROVER_BINARY)
+    binary_path = _get_prover_binary()
+    binary = shutil.which(binary_path)
     if binary:
         return True
     # Check if the configured path exists directly
-    return os.path.isfile(PROVER_BINARY) and os.access(PROVER_BINARY, os.X_OK)
+    return os.path.isfile(binary_path) and os.access(binary_path, os.X_OK)
 
 
 async def generate_proof(
@@ -176,8 +194,9 @@ async def _run_prover(
     sanitized_query = urlencode({k: v[0] for k, v in query_params.items()}, doseq=False)
     sanitized_url = urlunparse(parsed._replace(query=sanitized_query))
 
+    prover_bin = _get_prover_binary()
     cmd = [
-        PROVER_BINARY,
+        prover_bin,
         "--url",
         sanitized_url,
         "--notary-host",
@@ -229,11 +248,11 @@ async def _run_prover(
             error=f"proof generation timed out after {timeout}s",
         )
     except FileNotFoundError:
-        log.error("tlsn_binary_not_found", binary=PROVER_BINARY)
+        log.error("tlsn_binary_not_found", binary=prover_bin)
         _cleanup_dir(output_path)
         return TLSNProofResult(
             success=False,
-            error=f"TLSNotary binary not found: {PROVER_BINARY}",
+            error=f"TLSNotary binary not found: {prover_bin}",
         )
 
     if proc.returncode != 0:
