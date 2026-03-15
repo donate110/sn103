@@ -1008,7 +1008,16 @@ async def challenge_miners_attestation(
             discover_peer_notaries(client, reachable)
         )
         capable = await capable_task
-        peer_notaries = await notary_task
+        all_notaries = await notary_task
+
+        # Prefer notaries from miners with verified proactive proofs
+        verified_notaries = [
+            n for n in all_notaries
+            if (m := scorer.get(n.uid)) is not None and m.proactive_proof_verified
+        ]
+        peer_notaries = verified_notaries if verified_notaries else all_notaries
+        if verified_notaries:
+            log.info("attest_challenge_notaries_filtered", verified=len(verified_notaries), total=len(all_notaries))
 
         ar.capable = len(capable)
 

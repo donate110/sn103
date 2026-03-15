@@ -915,13 +915,31 @@ def create_app(
                 except (IndexError, KeyError, AttributeError) as exc:
                     log.warning("attest_axon_lookup_failed", uid=uid, error=str(exc))
 
-        # Discover peer notaries from the metagraph
+        # Discover peer notaries from the metagraph, then filter to only
+        # notaries whose miners have a verified proactive proof. This ensures
+        # we only assign notaries with working TLSNotary binaries, not v726
+        # miners that pass WebSocket handshake but have broken MPC.
         peer_notaries = []
         if axon_by_uid:
             try:
-                peer_notaries = await discover_peer_notaries(
+                all_notaries = await discover_peer_notaries(
                     _attest_client, list(axon_by_uid.values())
                 )
+                # Prefer notaries from miners with verified proactive proofs
+                if scorer is not None:
+                    verified = [
+                        n for n in all_notaries
+                        if (m := scorer.get(n.uid)) is not None and m.proactive_proof_verified
+                    ]
+                    if verified:
+                        peer_notaries = verified
+                        log.info("attest_peer_notaries_filtered", verified=len(verified), total=len(all_notaries))
+                    else:
+                        # No verified notaries; fall back to all discovered
+                        peer_notaries = all_notaries
+                        log.info("attest_peer_notaries_no_verified", total=len(all_notaries))
+                else:
+                    peer_notaries = all_notaries
                 log.info("attest_peer_notaries_discovered", count=len(peer_notaries))
             except Exception as e:
                 log.warning("attest_peer_notary_discovery_failed", error=str(e))
