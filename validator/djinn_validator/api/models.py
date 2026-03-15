@@ -480,6 +480,12 @@ class AttestRequest(BaseModel):
         None, ge=30, le=600,
         description="Max seconds to wait for proof. Overrides the default tier-based timeout (30-600s).",
     )
+    min_memory_gb: float | None = Field(
+        None, ge=0, le=1024,
+        description="Minimum available RAM (GB) required on the miner. "
+        "Large pages or API responses may need miners with 32GB+ RAM. "
+        "When set, only miners reporting sufficient available memory are selected.",
+    )
 
     @field_validator("url")
     @classmethod

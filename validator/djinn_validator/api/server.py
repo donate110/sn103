@@ -979,12 +979,19 @@ def create_app(
 
         # Smart miner selection: proven miners first, then unproven.
         # Skip miners whose circuit breaker is open (known-down sidecars).
+        # When min_memory_gb is set, filter to miners with sufficient available RAM.
+        _min_mem_mb = int((req.min_memory_gb or 0) * 1024)
         candidates: list[tuple[dict, str]] = []  # (axon_info, tier)
         breaker_deferred: list[tuple[dict, str]] = []  # circuit-broken, appended last
         if scorer is not None and axon_by_uid:
             ranked = scorer.select_attest_miners(list(axon_by_uid.keys()))
             for uid, tier in ranked:
                 if uid in axon_by_uid:
+                    # Filter by memory requirement if specified
+                    if _min_mem_mb > 0:
+                        m = scorer.get(uid)
+                        if m and m.capabilities_reported and m.memory_available_mb < _min_mem_mb:
+                            continue
                     breaker = _get_miner_breaker(uid)
                     if breaker.allow_request():
                         candidates.append((axon_by_uid[uid], tier))

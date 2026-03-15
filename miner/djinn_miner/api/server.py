@@ -356,6 +356,9 @@ def create_app(
                     await ws.close()
                 except Exception:
                     pass
+                # Track session count for graceful restart scheduling
+                if notary_sidecar is not None:
+                    notary_sidecar.record_session()
 
     @app.get("/v1/attest/capacity")
     async def attest_miner_capacity() -> dict:
