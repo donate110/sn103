@@ -126,6 +126,7 @@ async def epoch_loop(
                         timeout=30.0,
                     )
                     if verify_result.verified:
+                        metrics.proactive_proof_verified = True
                         metrics.record_attestation(latency=pdata.get("proof_age_s", 0), proof_valid=True)
                         log.info(
                             "proactive_proof_verified",
@@ -167,18 +168,17 @@ async def epoch_loop(
                                     notary_active_sessions=caps.get("notary_active_sessions", 0),
                                     disk_free_gb=caps.get("disk_free_gb", 0.0),
                                 )
-                            # Check proactive proof if present and we haven't
-                            # verified one for this miner this epoch yet.
-                            # Runs in background so it doesn't block health checks.
+                            # Check proactive proof if present.
+                            # Mark the miner as proof-capable immediately so
+                            # it enters the "proven" tier for attestation dispatch.
+                            # Full verification runs in background.
                             pp = data.get("proactive_proof")
-                            if (
-                                pp
-                                and pp.get("proof_age_s", 99999) < 86400
-                                and metrics.attestations_valid == 0
-                            ):
-                                asyncio.create_task(
-                                    _verify_proactive_proof(ip, port, uid, metrics)
-                                )
+                            if pp and pp.get("proof_age_s", 99999) < 86400:
+                                metrics.proactive_proof_verified = True
+                                if metrics.attestations_valid == 0:
+                                    asyncio.create_task(
+                                        _verify_proactive_proof(ip, port, uid, metrics)
+                                    )
                         except Exception:
                             pass  # Old miners may not return JSON or capabilities
                 except httpx.HTTPError:

@@ -1608,6 +1608,7 @@ def create_app(
             "notary_duties_assigned": m.notary_duties_assigned,
             "notary_duties_completed": m.notary_duties_completed,
             "notary_reliability": round(m.notary_reliability(), 4),
+            "proactive_proof_verified": m.proactive_proof_verified,
         }
 
     # ------------------------------------------------------------------

@@ -57,6 +57,9 @@ class MinerMetrics:
     # ── Proof-request tracking ──
     proofs_requested: int = 0  # times miner was asked to submit proof
 
+    # ── Proactive attestation (survives epoch resets) ──
+    proactive_proof_verified: bool = False  # miner has a fresh, verified proactive proof
+
     # ── Notary service metrics (peer-to-peer notarization) ──
     notary_duties_assigned: int = 0  # times assigned as notary for another miner
     notary_duties_completed: int = 0  # times the proof using this notary verified
@@ -315,7 +318,7 @@ class MinerScorer:
             # a valid proof are penalized heavily. Being online isn't enough;
             # you must be able to do the work when asked. Miners that haven't
             # been challenged yet (attestations_total == 0) are unaffected.
-            if m.attestations_total > 0 and m.attestations_valid == 0:
+            if m.attestations_total > 0 and m.attestations_valid == 0 and not m.proactive_proof_verified:
                 score *= 0.05  # 95% penalty
 
             raw[m.uid] = score
@@ -497,7 +500,7 @@ class MinerScorer:
                 score = self.W_EMPTY_UPTIME * m.uptime_score() + self.W_EMPTY_HISTORY * history
 
             # Same penalty as active epochs: challenged but never verified = near zero
-            if m.attestations_total > 0 and m.attestations_valid == 0:
+            if m.attestations_total > 0 and m.attestations_valid == 0 and not m.proactive_proof_verified:
                 score *= 0.05
 
             raw[m.uid] = score
@@ -605,8 +608,8 @@ class MinerScorer:
                 unproven.append(uid)
                 continue
 
-            if m.attestations_valid > 0:
-                # Tier 1: has produced valid proofs
+            if m.attestations_valid > 0 or m.proactive_proof_verified:
+                # Tier 1: has produced valid proofs (challenge or proactive)
                 med_lat = sorted(m.attestation_latencies)[len(m.attestation_latencies) // 2] if m.attestation_latencies else 999.0
                 proven.append((uid, m.attestation_validity_score(), med_lat))
             elif m.attestations_total > 0:
