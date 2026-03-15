@@ -164,14 +164,17 @@ async def epoch_loop(
                                     disk_free_gb=caps.get("disk_free_gb", 0.0),
                                 )
                             # Check proactive proof if present and we haven't
-                            # verified one for this miner this epoch yet
+                            # verified one for this miner this epoch yet.
+                            # Runs in background so it doesn't block health checks.
                             pp = data.get("proactive_proof")
                             if (
                                 pp
                                 and pp.get("proof_age_s", 99999) < 86400
                                 and metrics.attestations_valid == 0
                             ):
-                                await _verify_proactive_proof(client, ip, port, uid, metrics)
+                                asyncio.create_task(
+                                    _verify_proactive_proof(client, ip, port, uid, metrics)
+                                )
                         except Exception:
                             pass  # Old miners may not return JSON or capabilities
                 except httpx.HTTPError:
