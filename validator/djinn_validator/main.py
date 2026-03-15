@@ -94,14 +94,18 @@ async def epoch_loop(
             scorer.prune_absent(set(miner_uids))
 
             async def _verify_proactive_proof(
-                client: httpx.AsyncClient, ip: str, port: int, uid: int, metrics: object,
+                ip: str, port: int, uid: int, metrics: object,
             ) -> None:
-                """Fetch and verify a miner's proactive attestation proof."""
+                """Fetch and verify a miner's proactive attestation proof.
+
+                Uses its own httpx client because the health check client
+                may close before this background task runs.
+                """
                 try:
-                    proof_resp = await client.get(
-                        f"http://{ip}:{port}/v1/attestation/latest",
-                        timeout=10.0,
-                    )
+                    async with httpx.AsyncClient(timeout=30.0) as proof_client:
+                        proof_resp = await proof_client.get(
+                            f"http://{ip}:{port}/v1/attestation/latest",
+                        )
                     if proof_resp.status_code != 200:
                         return
                     pdata = proof_resp.json()
@@ -173,7 +177,7 @@ async def epoch_loop(
                                 and metrics.attestations_valid == 0
                             ):
                                 asyncio.create_task(
-                                    _verify_proactive_proof(client, ip, port, uid, metrics)
+                                    _verify_proactive_proof(ip, port, uid, metrics)
                                 )
                         except Exception:
                             pass  # Old miners may not return JSON or capabilities
