@@ -73,7 +73,7 @@ class Config:
         "COLLATERAL_ADDRESS", "0x47bcae6055dff70137336211be22f34c7a631626"
     )
     outcome_voting_address: str = os.getenv(
-        "OUTCOME_VOTING_ADDRESS", "0x28b5738ff35E207E90b2974cbfae2BdC556acAf6"
+        "OUTCOME_VOTING_ADDRESS", "0x4b140aA4BfB080337EE746f4Ec9e07ef660d80CF"
     )
 
     # Validator API
