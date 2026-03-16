@@ -586,7 +586,10 @@ async def async_main() -> None:
     attestation_log = AttestationLog(db_path=str(data_dir / "attestations.db"))
     purchase_orch = PurchaseOrchestrator(share_store, db_path=str(data_dir / "purchases.db"))
     espn_client = ESPNClient()
-    outcome_attestor = OutcomeAttestor(espn_client=espn_client)
+    outcome_attestor = OutcomeAttestor(
+        espn_client=espn_client,
+        db_path=str(data_dir / "signal_registrations.db"),
+    )
     audit_set_store = AuditSetStore()
     scorer = MinerScorer()
     activity = ActivityBuffer()
@@ -673,6 +676,20 @@ async def async_main() -> None:
         settlement_address=chain_client.validator_address or "none",
         log_format=os.getenv("LOG_FORMAT", "console"),
     )
+
+    # Bootstrap audit sets from on-chain state (survives validator restarts)
+    try:
+        from djinn_validator.core.audit_bootstrap import bootstrap_audit_sets
+
+        pairs_loaded = await bootstrap_audit_sets(
+            chain_client=chain_client,
+            share_store=share_store,
+            audit_set_store=audit_set_store,
+        )
+        if pairs_loaded:
+            log.info("audit_bootstrap_done", pairs=pairs_loaded)
+    except Exception as e:
+        log.warning("audit_bootstrap_failed", err=str(e)[:200])
 
     # Run API server, epoch loop, MPC cleanup, watchtower, and validator sync concurrently
     running_tasks = [

@@ -13,8 +13,10 @@ Outcome determination logic:
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import re
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from enum import IntEnum
@@ -337,6 +339,7 @@ class OutcomeAttestor:
         self,
         espn_client: ESPNClient | None = None,
         sports_api_key: str = "",  # Deprecated, kept for backwards compat
+        db_path: str | None = None,
     ) -> None:
         if espn_client is not None:
             self._espn = espn_client
@@ -345,10 +348,97 @@ class OutcomeAttestor:
             self._espn = _ESPNClient()
         if sports_api_key:
             log.warning("sports_api_key_deprecated",
-                        msg="SPORTS_API_KEY is no longer used — validator uses ESPN for scores")
+                        msg="SPORTS_API_KEY is no longer used; validator uses ESPN for scores")
         self._attestations: dict[str, list[OutcomeAttestation]] = {}
         self._pending_signals: dict[str, SignalMetadata] = {}
         self._lock = asyncio.Lock()
+
+        # Optional SQLite persistence for signal registrations
+        self._db: sqlite3.Connection | None = None
+        if db_path:
+            import sqlite3 as _sqlite3
+            from pathlib import Path as _Path
+            _Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            self._db = _sqlite3.connect(db_path, check_same_thread=False)
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA busy_timeout=5000")
+            self._db.execute("""
+                CREATE TABLE IF NOT EXISTS signal_registrations (
+                    signal_id TEXT PRIMARY KEY,
+                    sport TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    home_team TEXT NOT NULL,
+                    away_team TEXT NOT NULL,
+                    lines_json TEXT NOT NULL,
+                    registered_at REAL NOT NULL,
+                    resolved INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            self._db.commit()
+            self._load_persisted_signals()
+
+    def _load_persisted_signals(self) -> None:
+        """Load persisted signal registrations from SQLite on startup."""
+        if not self._db:
+            return
+        try:
+            cursor = self._db.execute(
+                "SELECT signal_id, sport, event_id, home_team, away_team, "
+                "lines_json, registered_at, resolved FROM signal_registrations"
+            )
+            loaded = 0
+            for row in cursor:
+                signal_id, sport, event_id, home_team, away_team, lines_json, registered_at, resolved = row
+                try:
+                    raw_lines = json.loads(lines_json)
+                    parsed_lines = [parse_pick(line) for line in raw_lines]
+                    meta = SignalMetadata(
+                        signal_id=signal_id,
+                        sport=sport,
+                        event_id=event_id,
+                        home_team=home_team,
+                        away_team=away_team,
+                        lines=parsed_lines,
+                        purchased_at=registered_at,
+                        resolved=bool(resolved),
+                    )
+                    self._pending_signals[signal_id] = meta
+                    loaded += 1
+                except Exception as e:
+                    log.debug("signal_load_skip", signal_id=signal_id, err=str(e)[:80])
+            if loaded:
+                log.info("signals_loaded_from_db", count=loaded)
+        except Exception as e:
+            log.error("signal_db_load_failed", err=str(e))
+
+    def _persist_signal(self, metadata: SignalMetadata) -> None:
+        """Persist a signal registration to SQLite."""
+        if not self._db:
+            return
+        try:
+            lines_raw = [
+                f"{p.team or p.side} {p.line or ''} ({p.odds})" if p.odds
+                else f"{p.team or p.side} {p.line or ''}"
+                for p in metadata.lines
+            ]
+            self._db.execute(
+                "INSERT OR REPLACE INTO signal_registrations "
+                "(signal_id, sport, event_id, home_team, away_team, lines_json, registered_at, resolved) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    metadata.signal_id,
+                    metadata.sport,
+                    metadata.event_id,
+                    metadata.home_team,
+                    metadata.away_team,
+                    json.dumps(lines_raw),
+                    metadata.purchased_at,
+                    int(metadata.resolved),
+                ),
+            )
+            self._db.commit()
+        except Exception as e:
+            log.debug("signal_persist_failed", signal_id=metadata.signal_id, err=str(e)[:80])
 
     def register_signal(self, metadata: SignalMetadata) -> None:
         """Register a purchased signal for outcome tracking."""
@@ -365,6 +455,7 @@ class OutcomeAttestor:
             if not stale:
                 log.warning("pending_signals_at_capacity", max=self.MAX_PENDING_SIGNALS)
         self._pending_signals[metadata.signal_id] = metadata
+        self._persist_signal(metadata)
         log.info(
             "signal_registered_for_outcome",
             signal_id=metadata.signal_id,
