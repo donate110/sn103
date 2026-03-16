@@ -371,9 +371,15 @@ class ValidatorAuthMiddleware(BaseHTTPMiddleware):
     validators that adopt the signed request protocol.
     """
 
+    # Allow unauthenticated requests for this many seconds after startup
+    # so the metagraph has time to sync. Without this, miners reject all
+    # challenges immediately after restart until the metagraph loads.
+    STARTUP_GRACE_SECONDS = 180  # 3 minutes
+
     def __init__(self, app: object, neuron: Any = None) -> None:
         super().__init__(app)  # type: ignore[arg-type]
         self._neuron = neuron
+        self._start_time = time.time()
         import os
         env_val = os.getenv("REQUIRE_VALIDATOR_AUTH", "").lower()
         bt_network = os.getenv("BT_NETWORK", "").lower()
@@ -382,9 +388,9 @@ class ValidatorAuthMiddleware(BaseHTTPMiddleware):
         elif env_val in ("0", "false", "no"):
             self._enabled = False
             if bt_network in ("finney", "mainnet"):
-                log.warning("validator_auth_disabled_production", msg="REQUIRE_VALIDATOR_AUTH=false on production network — miners are exposed to unauthenticated queries")
+                log.warning("validator_auth_disabled_production", msg="REQUIRE_VALIDATOR_AUTH=false on production network. Miners are exposed to unauthenticated queries.")
         else:
-            # Not explicitly set — default to on for production
+            # Not explicitly set: default to on for production
             self._enabled = bt_network in ("finney", "mainnet")
             if self._enabled:
                 log.info("validator_auth_auto_enabled", msg="REQUIRE_VALIDATOR_AUTH defaulting to true on production network")
@@ -398,6 +404,13 @@ class ValidatorAuthMiddleware(BaseHTTPMiddleware):
         if not self._enabled:
             return await call_next(request)
 
+        # Startup grace period: allow all requests while metagraph syncs.
+        # Without this, miners reject legitimate validators right after restart.
+        elapsed = time.time() - self._start_time
+        if elapsed < self.STARTUP_GRACE_SECONDS:
+            log.debug("auth_grace_period", elapsed_s=round(elapsed, 1), path=path)
+            return await call_next(request)
+
         # In dev mode (no metagraph), skip auth
         registered_ips = _get_registered_ips(self._neuron)
         if registered_ips is None:
@@ -405,12 +418,12 @@ class ValidatorAuthMiddleware(BaseHTTPMiddleware):
 
         client_ip = request.client.host if request.client else "unknown"
 
-        # Auth mode 1: IP-based — caller IP matches any registered neuron on the subnet
+        # Auth mode 1: IP-based. Caller IP matches a registered validator on the subnet.
         if client_ip in registered_ips:
             log.debug("auth_ok_ip", client=client_ip, path=path)
             return await call_next(request)
 
-        # Auth mode 2: Signature-based — signed headers from a validator hotkey
+        # Auth mode 2: Signature-based. Signed headers from a validator hotkey.
         hotkey = request.headers.get("X-Hotkey")
         signature = request.headers.get("X-Signature")
         timestamp_str = request.headers.get("X-Timestamp")
@@ -435,7 +448,7 @@ class ValidatorAuthMiddleware(BaseHTTPMiddleware):
                     return JSONResponse(status_code=401, content={"detail": "Nonce already used"})
 
                 if hotkey not in allowed_hotkeys:
-                    log.warning("auth_forbidden", hotkey=hotkey, path=path)
+                    log.warning("auth_forbidden", hotkey=hotkey, path=path, allowed_count=len(allowed_hotkeys))
                     return JSONResponse(status_code=403, content={"detail": "Hotkey not authorized"})
 
                 body = await request.body()
@@ -450,8 +463,13 @@ class ValidatorAuthMiddleware(BaseHTTPMiddleware):
                     return JSONResponse(status_code=401, content={"detail": "Invalid signature"})
 
         # Neither IP nor signature matched
-        log.warning("auth_rejected", path=path, client=client_ip)
+        has_sig_headers = bool(hotkey and signature)
+        log.warning(
+            "auth_rejected", path=path, client=client_ip,
+            registered_ip_count=len(registered_ips),
+            has_sig_headers=has_sig_headers,
+        )
         return JSONResponse(
             status_code=403,
-            content={"detail": "Not authorized — caller IP is not registered on subnet"},
+            content={"detail": "Not authorized. Caller IP is not registered on subnet."},
         )
