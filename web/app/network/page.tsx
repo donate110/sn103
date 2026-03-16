@@ -70,8 +70,15 @@ interface MinerScores {
   health_checks_responded?: number;
   attestations_total?: number;
   attestations_valid?: number;
+  proofs_submitted?: number;
+  proofs_verified?: number;
+  proofs_requested?: number;
   notary_reliability?: number;
+  notary_duties_assigned?: number;
+  notary_duties_completed?: number;
   proactive_proof_verified?: boolean;
+  weight?: number;
+  weight_breakdown?: Record<string, number | boolean | string>;
   error?: string;
 }
 
@@ -435,49 +442,98 @@ function MinerLookup() {
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
       {results.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-slate-400 uppercase tracking-wide border-b">
-                <th className="px-3 py-2">Validator</th>
-                <th className="px-3 py-2 text-right">Uptime</th>
-                <th className="px-3 py-2 text-right">Health</th>
-                <th className="px-3 py-2 text-right">Challenges</th>
-                <th className="px-3 py-2 text-right">Attestations</th>
-                <th className="px-3 py-2 text-right">Notary</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((r) => (
-                <tr key={r.validatorUid} className="border-b border-slate-100">
-                  <td className="px-3 py-2 font-mono">UID {r.validatorUid}</td>
-                  <td className="px-3 py-2 text-right">
+        <div className="space-y-4">
+          {results.map((r) => (
+            <div key={r.validatorUid} className="border border-slate-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="font-mono text-sm font-medium">Validator UID {r.validatorUid}</span>
+                {r.weight !== undefined && (
+                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full font-mono">
+                    weight: {r.weight.toFixed(6)}
+                  </span>
+                )}
+              </div>
+
+              {/* Line Verification (the core problem miners solve) */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                <div>
+                  <p className="text-[11px] text-slate-400 uppercase">Line Challenges</p>
+                  <p className="text-lg font-semibold font-mono">
+                    {r.queries_correct ?? 0}/{r.queries_total ?? 0}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    {(r.queries_total ?? 0) > 0
+                      ? `${((r.accuracy ?? 0) * 100).toFixed(0)}% accuracy`
+                      : "no challenges yet"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-slate-400 uppercase">Uptime</p>
+                  <p className="text-lg font-semibold">
                     {r.uptime !== undefined ? `${(r.uptime * 100).toFixed(1)}%` : "-"}
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono">
-                    {r.health_checks_responded !== undefined
-                      ? `${r.health_checks_responded}/${r.health_checks_total}`
-                      : "-"}
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono">
-                    {r.queries_total !== undefined
-                      ? `${r.queries_correct}/${r.queries_total}`
-                      : "-"}
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono">
-                    {r.attestations_total !== undefined
-                      ? `${r.attestations_valid}/${r.attestations_total}`
-                      : "-"}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {r.notary_reliability !== undefined
-                      ? `${(r.notary_reliability * 100).toFixed(0)}%`
-                      : "-"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </p>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    {r.health_checks_responded ?? 0}/{r.health_checks_total ?? 0} checks
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-slate-400 uppercase">Attestations</p>
+                  <p className="text-lg font-semibold font-mono">
+                    {r.attestations_valid ?? 0}/{r.attestations_total ?? 0}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    {r.proactive_proof_verified ? "proactive proof verified" : "no proactive proof"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-slate-400 uppercase">Notary Service</p>
+                  <p className="text-lg font-semibold font-mono">
+                    {r.notary_duties_completed ?? 0}/{r.notary_duties_assigned ?? 0}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    {(r.notary_reliability ?? 0) > 0
+                      ? `${((r.notary_reliability ?? 0) * 100).toFixed(0)}% reliability`
+                      : "no duties yet"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Weight Breakdown */}
+              {r.weight_breakdown && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer text-slate-400 hover:text-slate-600">
+                    Weight breakdown
+                  </summary>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2 bg-slate-50 rounded-lg p-3">
+                    {r.weight_breakdown.sports_score !== undefined && (
+                      <div>
+                        <span className="text-slate-400">Sports Score</span>
+                        <p className="font-mono">{Number(r.weight_breakdown.sports_score).toFixed(4)}</p>
+                      </div>
+                    )}
+                    {r.weight_breakdown.attestation_score !== undefined && (
+                      <div>
+                        <span className="text-slate-400">Attestation Score</span>
+                        <p className="font-mono">{Number(r.weight_breakdown.attestation_score).toFixed(4)}</p>
+                      </div>
+                    )}
+                    {r.weight_breakdown.capability_score !== undefined && (
+                      <div>
+                        <span className="text-slate-400">Capability</span>
+                        <p className="font-mono">{Number(r.weight_breakdown.capability_score).toFixed(4)}</p>
+                      </div>
+                    )}
+                    {r.weight_breakdown.raw_score !== undefined && (
+                      <div>
+                        <span className="text-slate-400">Raw Score</span>
+                        <p className="font-mono">{Number(r.weight_breakdown.raw_score).toFixed(4)}</p>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

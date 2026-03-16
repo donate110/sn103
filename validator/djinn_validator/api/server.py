@@ -1655,18 +1655,30 @@ def create_app(
     # Miner score lookup
     # ------------------------------------------------------------------
 
-    @app.get("/v1/miner/{uid}/scores", dependencies=[_admin_auth])
+    @app.get("/v1/miner/{uid}/scores")
     async def miner_scores(uid: int) -> dict:
-        """Return current live scoring metrics for a specific miner UID."""
+        """Return current live scoring metrics for a specific miner UID.
+
+        Public endpoint (no auth). Miners and operators need visibility
+        into how validators are scoring them.
+        """
         if scorer is None:
             return {"uid": uid, "found": False}
         m = scorer.get(uid)
         if m is None:
             return {"uid": uid, "found": False}
+
+        # Compute the weight breakdown so miners can see exactly why
+        # they're getting the weight they're getting.
+        weights, breakdowns = scorer.compute_weights_detailed(is_active_epoch=True)
+        breakdown = breakdowns.get(uid, {})
+        weight = weights.get(uid, 0.0)
+
         return {
             "uid": uid,
             "found": True,
             "hotkey": m.hotkey,
+            # Raw metrics
             "accuracy": round(m.accuracy_score(), 4),
             "coverage": round(m.coverage_score(), 4),
             "uptime": round(m.uptime_score(), 4),
@@ -1685,6 +1697,12 @@ def create_app(
             "notary_duties_completed": m.notary_duties_completed,
             "notary_reliability": round(m.notary_reliability(), 4),
             "proactive_proof_verified": m.proactive_proof_verified,
+            # Weight breakdown: how the final weight is computed
+            "weight": round(weight, 8),
+            "weight_breakdown": {
+                k: round(v, 6) if isinstance(v, float) else v
+                for k, v in breakdown.items()
+            } if breakdown else None,
         }
 
     # ------------------------------------------------------------------
