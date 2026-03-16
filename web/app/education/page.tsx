@@ -100,10 +100,14 @@ export default function Education() {
         <div className="grid gap-6">
           {RESOURCES.map((resource) => {
             const isExternal = resource.url.startsWith("http");
-            const Wrapper = isExternal ? "a" : Link;
+            const isStaticFile = resource.url.match(/\.\w+$/);
+            const useAnchor = isExternal || isStaticFile;
+            const Wrapper = useAnchor ? "a" : Link;
             const linkProps = isExternal
               ? { href: resource.url, target: "_blank" as const, rel: "noopener noreferrer" }
-              : { href: resource.url };
+              : isStaticFile
+                ? { href: resource.url, target: "_blank" as const }
+                : { href: resource.url };
             return (
             <Wrapper
               key={resource.url}

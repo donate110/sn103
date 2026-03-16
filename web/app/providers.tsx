@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { WagmiProvider, createConfig, http, useConnect } from "wagmi";
 import { base, baseSepolia } from "wagmi/chains";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -11,6 +11,10 @@ import {
   walletConnectWallet,
 } from "@rainbow-me/rainbowkit/wallets";
 import { mock } from "wagmi/connectors";
+import {
+  testWalletConnector,
+  getTestKey,
+} from "@/lib/test-wallet-connector";
 import "@rainbow-me/rainbowkit/styles.css";
 
 const IS_E2E = process.env.NEXT_PUBLIC_E2E_TEST === "true";
@@ -59,6 +63,21 @@ const e2eConfig = IS_E2E
     })
   : null;
 
+// Testnet QA config: uses a real private key from sessionStorage for signing.
+// Only created on Base Sepolia when djinn_test_key is set.
+function buildTestnetQAConfig() {
+  if (typeof window === "undefined") return null;
+  if (CHAIN_ID !== 84532) return null;
+  if (!getTestKey()) return null;
+  return createConfig({
+    chains: [baseSepolia],
+    connectors: [testWalletConnector()],
+    transports: {
+      [baseSepolia.id]: http(RPC_URL),
+    },
+  });
+}
+
 export const wagmiConfig = e2eConfig ?? prodConfig;
 
 const queryClient = new QueryClient();
@@ -75,7 +94,29 @@ function E2EAutoConnect({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Auto-connect the test wallet on mount in QA mode. */
+function QAAutoConnect({ children }: { children: React.ReactNode }) {
+  const { connect, connectors } = useConnect();
+  useEffect(() => {
+    const testConnector = connectors.find((c) => c.id === "testWallet");
+    if (testConnector) {
+      connect({ connector: testConnector });
+    }
+  }, [connect, connectors]);
+  return <>{children}</>;
+}
+
 export default function Providers({ children }: { children: React.ReactNode }) {
+  const [qaConfig, setQaConfig] = useState<ReturnType<
+    typeof createConfig
+  > | null>(null);
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    setQaConfig(buildTestnetQAConfig());
+    setChecked(true);
+  }, []);
+
   if (IS_E2E) {
     return (
       <WagmiProvider config={wagmiConfig}>
@@ -88,8 +129,21 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // Testnet QA mode: real signing with private key from sessionStorage
+  if (checked && qaConfig) {
+    return (
+      <WagmiProvider config={qaConfig}>
+        <QueryClientProvider client={queryClient}>
+          <QAAutoConnect>
+            {children}
+          </QAAutoConnect>
+        </QueryClientProvider>
+      </WagmiProvider>
+    );
+  }
+
   return (
-    <WagmiProvider config={wagmiConfig}>
+    <WagmiProvider config={checked ? wagmiConfig : wagmiConfig}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider
           modalSize="compact"
