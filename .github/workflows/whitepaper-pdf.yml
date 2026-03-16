@@ -36,8 +36,9 @@ jobs:
 
       - name: Commit PDF
         run: |
+          cp docs/whitepaper.pdf web/public/whitepaper.pdf
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/whitepaper.pdf
+          git add docs/whitepaper.pdf web/public/whitepaper.pdf
           git diff --staged --quiet || git commit -m "Auto-generate whitepaper PDF"
           git push
