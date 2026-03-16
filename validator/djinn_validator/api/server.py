@@ -1697,6 +1697,11 @@ def create_app(
             "notary_duties_completed": m.notary_duties_completed,
             "notary_reliability": round(m.notary_reliability(), 4),
             "proactive_proof_verified": m.proactive_proof_verified,
+            # Lifetime counters (never reset, for dashboard display)
+            "lifetime_queries": m.lifetime_queries,
+            "lifetime_correct": m.lifetime_correct,
+            "lifetime_attestations": m.lifetime_attestations,
+            "lifetime_attestations_valid": m.lifetime_attestations_valid,
             # Weight breakdown: how the final weight is computed
             "weight": round(weight, 8),
             "weight_breakdown": {
@@ -1738,6 +1743,10 @@ def create_app(
                 "notary_duties_completed": m.notary_duties_completed,
                 "notary_reliability": round(m.notary_reliability(), 4),
                 "weight": round(weights.get(uid, 0.0), 8),
+                "lifetime_queries": m.lifetime_queries,
+                "lifetime_correct": m.lifetime_correct,
+                "lifetime_attestations": m.lifetime_attestations,
+                "lifetime_attestations_valid": m.lifetime_attestations_valid,
                 "capabilities_reported": m.capabilities_reported,
                 "memory_total_mb": m.memory_total_mb,
                 "cpu_cores": m.cpu_cores,

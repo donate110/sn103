@@ -91,6 +91,12 @@ class MinerMetrics:
     health_checks_responded: int = 0
     consecutive_epochs: int = 0
 
+    # ── Lifetime counters (never reset, for dashboard display) ──
+    lifetime_queries: int = 0
+    lifetime_correct: int = 0
+    lifetime_attestations: int = 0
+    lifetime_attestations_valid: int = 0
+
     def accuracy_score(self) -> float:
         """Fraction of sports queries where Phase 1 result matched ground truth."""
         if self.queries_total == 0:
@@ -133,6 +139,7 @@ class MinerMetrics:
         cannot be trusted for accuracy scoring (R25-18).
         """
         self.queries_total += 1
+        self.lifetime_queries += 1
         if proof_status == "unverified":
             log.warning(
                 "unverified_proof_zero_accuracy",
@@ -141,6 +148,7 @@ class MinerMetrics:
             )
         elif correct:
             self.queries_correct += 1
+            self.lifetime_correct += 1
         self.latencies.append(latency)
         if proof_submitted:
             self.proofs_submitted += 1
@@ -154,8 +162,10 @@ class MinerMetrics:
     def record_attestation(self, latency: float, proof_valid: bool) -> None:
         """Record a web attestation challenge result (separate from sports)."""
         self.attestations_total += 1
+        self.lifetime_attestations += 1
         if proof_valid:
             self.attestations_valid += 1
+            self.lifetime_attestations_valid += 1
         # Only record real latencies (skip latency=0 from known-broken miner
         # auto-scoring, which would pollute speed normalization)
         if latency > 0:
@@ -289,6 +299,10 @@ class MinerScorer:
                     m.capabilities_reported = d.get("capabilities_reported", False)
                     m.memory_total_mb = d.get("memory_total_mb", 0)
                     m.cpu_cores = d.get("cpu_cores", 0)
+                    m.lifetime_queries = d.get("lifetime_queries", 0)
+                    m.lifetime_correct = d.get("lifetime_correct", 0)
+                    m.lifetime_attestations = d.get("lifetime_attestations", 0)
+                    m.lifetime_attestations_valid = d.get("lifetime_attestations_valid", 0)
                     self._miners[uid] = m
                     loaded += 1
                 except Exception:
@@ -325,6 +339,10 @@ class MinerScorer:
             "capabilities_reported": m.capabilities_reported,
             "memory_total_mb": m.memory_total_mb,
             "cpu_cores": m.cpu_cores,
+            "lifetime_queries": m.lifetime_queries,
+            "lifetime_correct": m.lifetime_correct,
+            "lifetime_attestations": m.lifetime_attestations,
+            "lifetime_attestations_valid": m.lifetime_attestations_valid,
         })
         try:
             with self._db_lock:

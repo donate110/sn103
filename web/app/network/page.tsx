@@ -31,6 +31,10 @@ interface ScoringData {
   attestations_valid: number;
   proactive_proof_verified: boolean;
   weight: number;
+  lifetime_queries?: number;
+  lifetime_correct?: number;
+  lifetime_attestations?: number;
+  lifetime_attestations_valid?: number;
 }
 
 interface NodeWithHealth {
@@ -93,6 +97,10 @@ interface MinerScores {
   notary_duties_assigned?: number;
   notary_duties_completed?: number;
   proactive_proof_verified?: boolean;
+  lifetime_queries?: number;
+  lifetime_correct?: number;
+  lifetime_attestations?: number;
+  lifetime_attestations_valid?: number;
   weight?: number;
   weight_breakdown?: Record<string, number | boolean | string>;
   error?: string;
@@ -372,11 +380,11 @@ function MinerTable({ miners, onLookup }: { miners: NodeWithHealth[]; onLookup?:
                   {s ? `${(s.uptime * 100).toFixed(0)}%` : "-"}
                 </td>
                 <td className="px-3 py-2 text-right font-mono">
-                  {s ? `${s.queries_correct}/${s.queries_total}` : "-"}
+                  {s ? `${s.lifetime_correct ?? s.queries_correct}/${s.lifetime_queries ?? s.queries_total}` : "-"}
                 </td>
                 <td className="px-3 py-2 text-right">
-                  {s && s.queries_total > 0
-                    ? `${(s.accuracy * 100).toFixed(0)}%`
+                  {s && (s.lifetime_queries ?? s.queries_total) > 0
+                    ? `${(((s.lifetime_correct ?? 0) / (s.lifetime_queries ?? 1)) * 100).toFixed(0)}%`
                     : s ? "n/a" : "-"}
                 </td>
                 <td className="px-3 py-2 text-right">
@@ -483,11 +491,11 @@ function MinerLookup({ initialUid }: { initialUid?: string }) {
                 <div>
                   <p className="text-[11px] text-slate-400 uppercase">Line Challenges</p>
                   <p className="text-lg font-semibold font-mono">
-                    {r.queries_correct ?? 0}/{r.queries_total ?? 0}
+                    {r.lifetime_correct ?? r.queries_correct ?? 0}/{r.lifetime_queries ?? r.queries_total ?? 0}
                   </p>
                   <p className="text-[11px] text-slate-400">
-                    {(r.queries_total ?? 0) > 0
-                      ? `${((r.accuracy ?? 0) * 100).toFixed(0)}% accuracy`
+                    {(r.lifetime_queries ?? r.queries_total ?? 0) > 0
+                      ? `${(((r.lifetime_correct ?? 0) / (r.lifetime_queries ?? 1)) * 100).toFixed(0)}% accuracy (lifetime)`
                       : "no challenges yet"}
                   </p>
                 </div>
@@ -503,7 +511,7 @@ function MinerLookup({ initialUid }: { initialUid?: string }) {
                 <div>
                   <p className="text-[11px] text-slate-400 uppercase">Attestations</p>
                   <p className="text-lg font-semibold font-mono">
-                    {r.attestations_valid ?? 0}/{r.attestations_total ?? 0}
+                    {r.lifetime_attestations_valid ?? r.attestations_valid ?? 0}/{r.lifetime_attestations ?? r.attestations_total ?? 0}
                   </p>
                   <p className="text-[11px] text-slate-400">
                     {r.proactive_proof_verified ? "proactive proof verified" : "no proactive proof"}
