@@ -13,6 +13,7 @@ const NAV_LINKS = [
   { href: "/genius", label: "Genius" },
   { href: "/idiot", label: "Idiot" },
   { href: "/leaderboard", label: "Leaderboard" },
+  { href: "/network", label: "Network" },
   { href: "/attest", label: "Attest" },
   { href: "/about", label: "About" },
   { href: "/education", label: "Education" },
@@ -232,6 +233,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <li><Link href="/genius" className="hover:text-slate-700 transition-colors">Genius Dashboard</Link></li>
                 <li><Link href="/idiot" className="hover:text-slate-700 transition-colors">Browse Signals</Link></li>
                 <li><Link href="/leaderboard" className="hover:text-slate-700 transition-colors">Leaderboard</Link></li>
+                <li><Link href="/network" className="hover:text-slate-700 transition-colors">Network Status</Link></li>
                 <li><Link href="/attest" className="hover:text-slate-700 transition-colors">Web Attestation</Link></li>
               </ul>
             </div>
