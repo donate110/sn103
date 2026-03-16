@@ -40,7 +40,7 @@ export default function Home() {
           Sell analysis you can <span className="font-semibold text-slate-900">prove</span>.
         </p>
         <p className="text-sm text-slate-400 italic mt-3">
-          Signals stay secret forever &mdash; even from us.
+          Signals stay secret forever. Even from us.
         </p>
       </div>
 

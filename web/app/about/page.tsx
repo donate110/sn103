@@ -123,7 +123,7 @@ export default function About() {
                 <svg className="w-5 h-5 text-genius-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
-                Predictions stay encrypted forever &mdash; no front-running
+                Predictions stay encrypted forever. No front-running
               </li>
               <li className="flex items-start gap-3">
                 <svg className="w-5 h-5 text-genius-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -135,7 +135,7 @@ export default function About() {
                 <svg className="w-5 h-5 text-genius-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
-                Earn USDC fees directly &mdash; 0.5% protocol fee only
+                Earn USDC fees directly (0.5% protocol fee only)
               </li>
             </ul>
           </div>
@@ -164,7 +164,7 @@ export default function About() {
                 <svg className="w-5 h-5 text-idiot-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
-                Quality Scores are validator-audited &mdash; no one can fake their record
+                Quality Scores are validator-audited. No one can fake their record
               </li>
             </ul>
           </div>

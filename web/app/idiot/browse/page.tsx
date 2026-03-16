@@ -185,7 +185,7 @@ export default function BrowseSignals() {
             <p className="text-sm text-slate-500 text-center max-w-sm">
               {sportFilter
                 ? `No active signals for ${sportFilter} right now. Try selecting a different sport or check back later.`
-                : "No signals available right now. Check back soon — new signals are committed as Geniuses publish their analysis."}
+                : "No signals available right now. Check back soon; new signals are committed as Geniuses publish their analysis."}
             </p>
           </div>
         </div>

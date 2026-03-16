@@ -17,6 +17,9 @@ import {
 } from "@/lib/test-wallet-connector";
 import "@rainbow-me/rainbowkit/styles.css";
 
+const WALLETCONNECT_PROJECT_ID =
+  process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "";
+
 const IS_E2E = process.env.NEXT_PUBLIC_E2E_TEST === "true";
 const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "84532");
 const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL ?? "https://sepolia.base.org";
@@ -29,7 +32,7 @@ coinbaseWallet.preference = "smartWalletOnly";
 
 const prodConfig = getDefaultConfig({
   appName: "Djinn",
-  projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "djinn-dev",
+  projectId: WALLETCONNECT_PROJECT_ID || "unused",
   chains: [activeChain],
   transports: {
     [activeChain.id]: http(RPC_URL),
@@ -42,7 +45,9 @@ const prodConfig = getDefaultConfig({
     },
     {
       groupName: "I already have a wallet",
-      wallets: [metaMaskWallet, walletConnectWallet],
+      wallets: WALLETCONNECT_PROJECT_ID
+        ? [metaMaskWallet, walletConnectWallet]
+        : [metaMaskWallet],
     },
   ],
 });
