@@ -60,10 +60,18 @@ interface NetworkData {
 
 interface MinerScores {
   validatorUid: number;
-  weight: number;
-  challenges?: { total: number; passed: number; failed: number };
   accuracy?: number;
-  responseTime?: number;
+  uptime?: number;
+  coverage?: number;
+  attest_validity?: number;
+  queries_total?: number;
+  queries_correct?: number;
+  health_checks_total?: number;
+  health_checks_responded?: number;
+  attestations_total?: number;
+  attestations_valid?: number;
+  notary_reliability?: number;
+  proactive_proof_verified?: boolean;
   error?: string;
 }
 
@@ -432,29 +440,39 @@ function MinerLookup() {
             <thead>
               <tr className="text-left text-xs text-slate-400 uppercase tracking-wide border-b">
                 <th className="px-3 py-2">Validator</th>
-                <th className="px-3 py-2 text-right">Weight</th>
+                <th className="px-3 py-2 text-right">Uptime</th>
+                <th className="px-3 py-2 text-right">Health</th>
                 <th className="px-3 py-2 text-right">Challenges</th>
-                <th className="px-3 py-2 text-right">Accuracy</th>
-                <th className="px-3 py-2 text-right">Response Time</th>
+                <th className="px-3 py-2 text-right">Attestations</th>
+                <th className="px-3 py-2 text-right">Notary</th>
               </tr>
             </thead>
             <tbody>
               {results.map((r) => (
                 <tr key={r.validatorUid} className="border-b border-slate-100">
                   <td className="px-3 py-2 font-mono">UID {r.validatorUid}</td>
-                  <td className="px-3 py-2 text-right font-mono">
-                    {typeof r.weight === "number" ? r.weight.toFixed(6) : "-"}
-                  </td>
                   <td className="px-3 py-2 text-right">
-                    {r.challenges
-                      ? `${r.challenges.passed}/${r.challenges.total}`
+                    {r.uptime !== undefined ? `${(r.uptime * 100).toFixed(1)}%` : "-"}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {r.health_checks_responded !== undefined
+                      ? `${r.health_checks_responded}/${r.health_checks_total}`
+                      : "-"}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {r.queries_total !== undefined
+                      ? `${r.queries_correct}/${r.queries_total}`
+                      : "-"}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {r.attestations_total !== undefined
+                      ? `${r.attestations_valid}/${r.attestations_total}`
                       : "-"}
                   </td>
                   <td className="px-3 py-2 text-right">
-                    {r.accuracy !== undefined ? `${(r.accuracy * 100).toFixed(1)}%` : "-"}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {r.responseTime !== undefined ? `${r.responseTime.toFixed(0)}ms` : "-"}
+                    {r.notary_reliability !== undefined
+                      ? `${(r.notary_reliability * 100).toFixed(0)}%`
+                      : "-"}
                   </td>
                 </tr>
               ))}
