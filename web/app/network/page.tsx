@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 
 // ---------- Types ----------
 
@@ -323,7 +324,7 @@ function getMinerSortVal(m: NodeWithHealth, key: string): number | string {
   }
 }
 
-function MinerTable({ miners, onLookup }: { miners: NodeWithHealth[]; onLookup?: (uid: string) => void }) {
+function MinerTable({ miners }: { miners: NodeWithHealth[] }) {
   const { sorted, sortKey, sortDir, toggle } = useSortable(
     miners, "incentive", "desc", getMinerSortVal,
   );
@@ -363,15 +364,13 @@ function MinerTable({ miners, onLookup }: { miners: NodeWithHealth[]; onLookup?:
             return (
               <tr key={m.uid} className="border-b border-slate-100 hover:bg-slate-50">
                 <td className="px-3 py-2 font-mono font-medium">
-                  {onLookup ? (
-                    <button
-                      onClick={() => onLookup(String(m.uid))}
-                      className="text-blue-600 hover:text-blue-800 hover:underline"
-                      title="Look up scoring details"
-                    >
-                      {m.uid}
-                    </button>
-                  ) : m.uid}
+                  <Link
+                    href={`/network/miner/${m.uid}`}
+                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                    title="View scoring details"
+                  >
+                    {m.uid}
+                  </Link>
                 </td>
                 <td className="px-3 py-2">
                   <StatusBadge status={status} />
@@ -405,169 +404,38 @@ function MinerTable({ miners, onLookup }: { miners: NodeWithHealth[]; onLookup?:
   );
 }
 
-function MinerLookup({ initialUid }: { initialUid?: string }) {
-  const [uid, setUid] = useState(initialUid || "");
-  const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<MinerScores[]>([]);
-  const [error, setError] = useState("");
-  const lookupRef = useRef<HTMLDivElement>(null);
+function MinerLookup() {
+  const [uid, setUid] = useState("");
 
-  const lookup = useCallback(async (lookupUid?: string) => {
-    const target = lookupUid || uid.trim();
-    if (!target) return;
-    if (lookupUid) setUid(lookupUid);
-    setLoading(true);
-    setError("");
-    setResults([]);
-
-    // Scroll into view
-    lookupRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-
-    try {
-      // Server-side parallel fetch (single hop to each validator)
-      const res = await fetch(`/api/network/miner/${target}`);
-      const data = await res.json();
-      if (data.scores && data.scores.length > 0) {
-        setResults(data.scores);
-      } else {
-        setError("No validators returned scoring data for this UID. The miner may not be registered or validators may be unreachable.");
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Lookup failed");
-    } finally {
-      setLoading(false);
+  const go = () => {
+    if (uid.trim()) {
+      window.location.href = `/network/miner/${uid.trim()}`;
     }
-  }, [uid]);
-
-  // Auto-lookup when initialUid changes
-  useEffect(() => {
-    if (initialUid && initialUid !== uid) {
-      setUid(initialUid);
-      lookup(initialUid);
-    }
-  }, [initialUid]); // eslint-disable-line react-hooks/exhaustive-deps
+  };
 
   return (
-    <div className="card" ref={lookupRef}>
+    <div className="card">
       <h2 className="text-lg font-semibold text-slate-900 mb-1">Miner Lookup</h2>
       <p className="text-sm text-slate-500 mb-4">
-        Enter a miner UID to see how validators are scoring it.
+        Enter a miner UID to see the full scoring breakdown. Or click any UID in the table above.
       </p>
-      <div className="flex gap-2 mb-4">
+      <div className="flex gap-2">
         <input
           type="number"
           value={uid}
           onChange={(e) => setUid(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && lookup()}
+          onKeyDown={(e) => e.key === "Enter" && go()}
           placeholder="Enter miner UID"
           className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
         />
         <button
-          onClick={() => lookup()}
-          disabled={loading || !uid.trim()}
+          onClick={go}
+          disabled={!uid.trim()}
           className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {loading ? "Querying..." : "Lookup"}
+          View Miner
         </button>
       </div>
-
-      {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
-
-      {results.length > 0 && (
-        <div className="space-y-4">
-          {results.map((r) => (
-            <div key={r.validatorUid} className="border border-slate-200 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-3">
-                <span className="font-mono text-sm font-medium">Validator UID {r.validatorUid}</span>
-                {r.weight !== undefined && (
-                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full font-mono">
-                    weight: {r.weight.toFixed(6)}
-                  </span>
-                )}
-              </div>
-
-              {/* Line Verification (the core problem miners solve) */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-                <div>
-                  <p className="text-[11px] text-slate-400 uppercase">Line Challenges</p>
-                  <p className="text-lg font-semibold font-mono">
-                    {r.lifetime_correct ?? r.queries_correct ?? 0}/{r.lifetime_queries ?? r.queries_total ?? 0}
-                  </p>
-                  <p className="text-[11px] text-slate-400">
-                    {(r.lifetime_queries ?? r.queries_total ?? 0) > 0
-                      ? `${(((r.lifetime_correct ?? 0) / (r.lifetime_queries ?? 1)) * 100).toFixed(0)}% accuracy (lifetime)`
-                      : "no challenges yet"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[11px] text-slate-400 uppercase">Uptime</p>
-                  <p className="text-lg font-semibold">
-                    {r.uptime !== undefined ? `${(r.uptime * 100).toFixed(1)}%` : "-"}
-                  </p>
-                  <p className="text-[11px] text-slate-400 font-mono">
-                    {r.health_checks_responded ?? 0}/{r.health_checks_total ?? 0} checks
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[11px] text-slate-400 uppercase">Attestations</p>
-                  <p className="text-lg font-semibold font-mono">
-                    {r.lifetime_attestations_valid ?? r.attestations_valid ?? 0}/{r.lifetime_attestations ?? r.attestations_total ?? 0}
-                  </p>
-                  <p className="text-[11px] text-slate-400">
-                    {r.proactive_proof_verified ? "proactive proof verified" : "no proactive proof"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[11px] text-slate-400 uppercase">Notary Service</p>
-                  <p className="text-lg font-semibold font-mono">
-                    {r.notary_duties_completed ?? 0}/{r.notary_duties_assigned ?? 0}
-                  </p>
-                  <p className="text-[11px] text-slate-400">
-                    {(r.notary_reliability ?? 0) > 0
-                      ? `${((r.notary_reliability ?? 0) * 100).toFixed(0)}% reliability`
-                      : "no duties yet"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Weight Breakdown */}
-              {r.weight_breakdown && (
-                <details className="text-xs">
-                  <summary className="cursor-pointer text-slate-400 hover:text-slate-600">
-                    Weight breakdown
-                  </summary>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2 bg-slate-50 rounded-lg p-3">
-                    {r.weight_breakdown.sports_score !== undefined && (
-                      <div>
-                        <span className="text-slate-400">Sports Score</span>
-                        <p className="font-mono">{Number(r.weight_breakdown.sports_score).toFixed(4)}</p>
-                      </div>
-                    )}
-                    {r.weight_breakdown.attestation_score !== undefined && (
-                      <div>
-                        <span className="text-slate-400">Attestation Score</span>
-                        <p className="font-mono">{Number(r.weight_breakdown.attestation_score).toFixed(4)}</p>
-                      </div>
-                    )}
-                    {r.weight_breakdown.capability_score !== undefined && (
-                      <div>
-                        <span className="text-slate-400">Capability</span>
-                        <p className="font-mono">{Number(r.weight_breakdown.capability_score).toFixed(4)}</p>
-                      </div>
-                    )}
-                    {r.weight_breakdown.raw_score !== undefined && (
-                      <div>
-                        <span className="text-slate-400">Raw Score</span>
-                        <p className="font-mono">{Number(r.weight_breakdown.raw_score).toFixed(4)}</p>
-                      </div>
-                    )}
-                  </div>
-                </details>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -578,7 +446,6 @@ export default function NetworkPage() {
   const [data, setData] = useState<NetworkData | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<string>("");
-  const [lookupUid, setLookupUid] = useState<string>("");
 
   useEffect(() => {
     async function load() {
@@ -654,12 +521,12 @@ export default function NetworkPage() {
           </span>
         </h2>
         <div className="card p-0 overflow-hidden">
-          <MinerTable miners={data.miners} onLookup={setLookupUid} />
+          <MinerTable miners={data.miners} />
         </div>
       </section>
 
       <section className="mb-8">
-        <MinerLookup initialUid={lookupUid} />
+        <MinerLookup />
       </section>
     </div>
   );
