@@ -61,7 +61,7 @@ async def epoch_loop(
     chain_client: ChainClient | None = None,
     activity: ActivityBuffer | None = None,
     audit_set_store: AuditSetStore | None = None,
-    burn_fraction: float = 0.95,
+    burn_fraction: float = 0.90,
     espn_client: ESPNClient | None = None,
     shares_threshold: int = 3,
     telemetry: TelemetryStore | None = None,
