@@ -111,13 +111,13 @@ async def bootstrap_audit_sets(
                     if purchase is None:
                         continue
 
-                    signal_id = str(purchase[1])  # signalId field
-                    notional = int(purchase[2])  # notional field
-                    odds = int(purchase[6])  # odds field
+                    signal_id = str(purchase["signalId"])
+                    notional = int(purchase["notional"])
+                    odds = int(purchase["odds"])
 
                     # Get SLA from the signal commitment
                     signal = await chain_client.get_signal(int(signal_id))
-                    sla_bps = int(signal[5]) if signal else 10_000  # slaMultiplierBps
+                    sla_bps = int(signal["slaMultiplierBps"]) if signal and isinstance(signal, dict) else 10_000
 
                     audit_set_store.add_signal(
                         genius=genius,
@@ -186,7 +186,7 @@ async def _get_buyers_for_signal(
         for pid in purchase_ids:
             purchase = await chain_client.get_purchase(pid)
             if purchase:
-                buyer = purchase[0]  # idiot address
+                buyer = purchase["idiot"]
                 pairs.append((genius_addr, buyer))
     except Exception as e:
         # Only log first few errors to avoid spam
