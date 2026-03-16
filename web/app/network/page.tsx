@@ -328,7 +328,7 @@ function MinerTable({ miners }: { miners: NodeWithHealth[] }) {
                 {m.health?.version || "-"}
               </td>
               <td className="px-3 py-2 text-right">
-                {m.incentive > 0 ? (m.incentive / 65535 * 100).toFixed(2) + "%" : "0%"}
+                {u16ToPercent(m.incentive)}
               </td>
               <td className="px-3 py-2 text-right font-mono">
                 {formatStake(m.emission)}
