@@ -163,13 +163,23 @@ async def _get_buyers_for_signal(
     pairs = []
     try:
         purchase_ids = await chain_client.get_purchases_by_signal(int(signal_id))
+        if purchase_ids:
+            log.debug(
+                "audit_bootstrap_signal_has_purchases",
+                signal_id=signal_id[:20],
+                purchases=len(purchase_ids),
+            )
         for pid in purchase_ids:
             purchase = await chain_client.get_purchase(pid)
             if purchase:
                 buyer = purchase[0]  # idiot address
                 pairs.append((genius_addr, buyer))
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug(
+            "audit_bootstrap_buyer_check_failed",
+            signal_id=signal_id[:20],
+            err=str(e)[:100],
+        )
     return pairs
 
 
