@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 
 // ---------- Types ----------
@@ -315,7 +315,7 @@ function getMinerSortVal(m: NodeWithHealth, key: string): number | string {
   }
 }
 
-function MinerTable({ miners }: { miners: NodeWithHealth[] }) {
+function MinerTable({ miners, onLookup }: { miners: NodeWithHealth[]; onLookup?: (uid: string) => void }) {
   const { sorted, sortKey, sortDir, toggle } = useSortable(
     miners, "incentive", "desc", getMinerSortVal,
   );
@@ -354,7 +354,17 @@ function MinerTable({ miners }: { miners: NodeWithHealth[] }) {
             const status = s?.status ?? m.health?.status ?? "unreachable";
             return (
               <tr key={m.uid} className="border-b border-slate-100 hover:bg-slate-50">
-                <td className="px-3 py-2 font-mono font-medium">{m.uid}</td>
+                <td className="px-3 py-2 font-mono font-medium">
+                  {onLookup ? (
+                    <button
+                      onClick={() => onLookup(String(m.uid))}
+                      className="text-blue-600 hover:text-blue-800 hover:underline"
+                      title="Look up scoring details"
+                    >
+                      {m.uid}
+                    </button>
+                  ) : m.uid}
+                </td>
                 <td className="px-3 py-2">
                   <StatusBadge status={status} />
                 </td>
@@ -387,47 +397,31 @@ function MinerTable({ miners }: { miners: NodeWithHealth[] }) {
   );
 }
 
-function MinerLookup() {
-  const [uid, setUid] = useState("");
+function MinerLookup({ initialUid }: { initialUid?: string }) {
+  const [uid, setUid] = useState(initialUid || "");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<MinerScores[]>([]);
   const [error, setError] = useState("");
+  const lookupRef = useRef<HTMLDivElement>(null);
 
-  const lookup = useCallback(async () => {
-    if (!uid.trim()) return;
+  const lookup = useCallback(async (lookupUid?: string) => {
+    const target = lookupUid || uid.trim();
+    if (!target) return;
+    if (lookupUid) setUid(lookupUid);
     setLoading(true);
     setError("");
     setResults([]);
 
+    // Scroll into view
+    lookupRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
     try {
-      const discRes = await fetch("/api/validators/discover");
-      const { validators } = await discRes.json();
-      if (!validators || validators.length === 0) {
-        setError("No validators available for scoring lookup.");
-        setLoading(false);
-        return;
-      }
-
-      const promises = validators.slice(0, 10).map(async (v: { uid: number }) => {
-        try {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 8000);
-          const res = await fetch(
-            `/api/validators/${v.uid}/v1/miner/${uid.trim()}/scores`,
-            { signal: controller.signal },
-          );
-          clearTimeout(timeout);
-          if (!res.ok) return { validatorUid: v.uid, weight: 0, error: `HTTP ${res.status}` };
-          const data = await res.json();
-          return { validatorUid: v.uid, ...data };
-        } catch {
-          return { validatorUid: v.uid, weight: 0, error: "timeout" };
-        }
-      });
-
-      const all = await Promise.all(promises);
-      setResults(all.filter((r) => !r.error));
-      if (all.every((r) => r.error)) {
+      // Server-side parallel fetch (single hop to each validator)
+      const res = await fetch(`/api/network/miner/${target}`);
+      const data = await res.json();
+      if (data.scores && data.scores.length > 0) {
+        setResults(data.scores);
+      } else {
         setError("No validators returned scoring data for this UID. The miner may not be registered or validators may be unreachable.");
       }
     } catch (e) {
@@ -437,8 +431,16 @@ function MinerLookup() {
     }
   }, [uid]);
 
+  // Auto-lookup when initialUid changes
+  useEffect(() => {
+    if (initialUid && initialUid !== uid) {
+      setUid(initialUid);
+      lookup(initialUid);
+    }
+  }, [initialUid]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <div className="card">
+    <div className="card" ref={lookupRef}>
       <h2 className="text-lg font-semibold text-slate-900 mb-1">Miner Lookup</h2>
       <p className="text-sm text-slate-500 mb-4">
         Enter a miner UID to see how validators are scoring it.
@@ -453,7 +455,7 @@ function MinerLookup() {
           className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
         />
         <button
-          onClick={lookup}
+          onClick={() => lookup()}
           disabled={loading || !uid.trim()}
           className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
@@ -568,6 +570,7 @@ export default function NetworkPage() {
   const [data, setData] = useState<NetworkData | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<string>("");
+  const [lookupUid, setLookupUid] = useState<string>("");
 
   useEffect(() => {
     async function load() {
@@ -643,12 +646,12 @@ export default function NetworkPage() {
           </span>
         </h2>
         <div className="card p-0 overflow-hidden">
-          <MinerTable miners={data.miners} />
+          <MinerTable miners={data.miners} onLookup={setLookupUid} />
         </div>
       </section>
 
       <section className="mb-8">
-        <MinerLookup />
+        <MinerLookup initialUid={lookupUid} />
       </section>
     </div>
   );

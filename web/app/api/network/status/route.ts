@@ -155,19 +155,31 @@ export async function GET() {
       }
     }
 
-    // Build miner health from validator data
-    for (const m of miners) {
-      const vData = minerHealthFromValidators[m.uid];
-      if (vData) {
-        healthMap[m.uid] = {
-          uid: m.uid,
-          status: vData.status === "ok" ? "ok" : "unreachable",
-          version: "",
-          // Relay validator-observed metrics as health fields
-          bt_connected: vData.uptime > 0.5,
-          odds_api_connected: vData.queries_total > 0 ? vData.accuracy > 0 : undefined,
-          uptime_seconds: vData.health_checks_total * 12, // ~12s per epoch
-        };
+    const hasValidatorData = Object.keys(minerHealthFromValidators).length > 0;
+
+    // Build miner health: prefer validator data, fall back to direct probe
+    if (hasValidatorData) {
+      for (const m of miners) {
+        const vData = minerHealthFromValidators[m.uid];
+        if (vData) {
+          healthMap[m.uid] = {
+            uid: m.uid,
+            status: vData.status === "ok" ? "ok" : "unreachable",
+            version: "",
+            bt_connected: vData.uptime > 0.5,
+            odds_api_connected: vData.queries_total > 0 ? vData.accuracy > 0 : undefined,
+            uptime_seconds: vData.health_checks_total * 12,
+          };
+        }
+      }
+    } else {
+      // Fallback: probe miners directly (less accurate but better than all offline)
+      const minerHealthPromises = miners.map((m) => probeHealth(m.ip, m.port, m.uid));
+      const minerHealthResults = await Promise.allSettled(minerHealthPromises);
+      for (const r of minerHealthResults) {
+        if (r.status === "fulfilled") {
+          healthMap[r.value.uid] = r.value;
+        }
       }
     }
 
