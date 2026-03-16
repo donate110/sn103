@@ -33,6 +33,21 @@ interface HealthResult {
   error?: string;
 }
 
+interface ValidatorMinerData {
+  uid: number;
+  status: string;
+  uptime: number;
+  health_checks_total: number;
+  health_checks_responded: number;
+  queries_total: number;
+  queries_correct: number;
+  accuracy: number;
+  attestations_total: number;
+  attestations_valid: number;
+  proactive_proof_verified: boolean;
+  weight: number;
+}
+
 async function probeHealth(
   ip: string,
   port: number,
@@ -51,6 +66,31 @@ async function probeHealth(
     return { uid, ...data };
   } catch {
     return { uid, status: "unreachable", version: "", error: "timeout" };
+  }
+}
+
+/**
+ * Fetch miner scoring data from a validator's /v1/network/miners endpoint.
+ * This gives us the validator's view of miner health (probed from the
+ * validator's IP, which miners whitelist) instead of probing from Vercel.
+ */
+async function fetchValidatorMinerData(
+  ip: string,
+  port: number,
+): Promise<ValidatorMinerData[]> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`http://${ip}:${port}/v1/network/miners`, {
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.miners || [];
+  } catch {
+    return [];
   }
 }
 
@@ -86,19 +126,54 @@ export async function GET() {
     const validators = allNodes.filter((n) => n.isValidator);
     const miners = allNodes.filter((n) => !n.isValidator);
 
-    // Probe health for all nodes (concurrent, 5s timeout each)
-    const healthPromises = reachable.map((n) => probeHealth(n.ip, n.port, n.uid));
-    const healthResults = await Promise.allSettled(healthPromises);
+    // Probe validator health directly (few nodes, always reachable)
+    const valHealthPromises = validators.map((v) => probeHealth(v.ip, v.port, v.uid));
+    const valHealthResults = await Promise.allSettled(valHealthPromises);
     const healthMap: Record<number, HealthResult> = {};
-    for (const r of healthResults) {
+    for (const r of valHealthResults) {
       if (r.status === "fulfilled") {
         healthMap[r.value.uid] = r.value;
       }
     }
 
+    // For miner health: pull from validators instead of probing directly.
+    // Validators already health-check every miner each epoch from their
+    // whitelisted IPs, so this data is more accurate than Vercel probing.
+    const minerHealthFromValidators: Record<number, ValidatorMinerData> = {};
+    const valMinerPromises = validators.map((v) =>
+      fetchValidatorMinerData(v.ip, v.port),
+    );
+    const valMinerResults = await Promise.allSettled(valMinerPromises);
+    for (const r of valMinerResults) {
+      if (r.status !== "fulfilled") continue;
+      for (const m of r.value) {
+        // Use the validator with the most data for each miner
+        const existing = minerHealthFromValidators[m.uid];
+        if (!existing || m.health_checks_total > existing.health_checks_total) {
+          minerHealthFromValidators[m.uid] = m;
+        }
+      }
+    }
+
+    // Build miner health from validator data
+    for (const m of miners) {
+      const vData = minerHealthFromValidators[m.uid];
+      if (vData) {
+        healthMap[m.uid] = {
+          uid: m.uid,
+          status: vData.status === "ok" ? "ok" : "unreachable",
+          version: "",
+          // Relay validator-observed metrics as health fields
+          bt_connected: vData.uptime > 0.5,
+          odds_api_connected: vData.queries_total > 0 ? vData.accuracy > 0 : undefined,
+          uptime_seconds: vData.health_checks_total * 12, // ~12s per epoch
+        };
+      }
+    }
+
     // Compute summary stats
     const validatorHealth = validators.map((v) => healthMap[v.uid]).filter(Boolean);
-    const minerHealth = miners.map((m) => healthMap[m.uid]).filter(Boolean);
+    const minerStatusList = miners.map((m) => minerHealthFromValidators[m.uid]).filter(Boolean);
 
     const summary = {
       totalValidators: validators.length,
@@ -114,18 +189,16 @@ export async function GET() {
         (sum, h) => sum + (h.shares_held ?? 0),
         0,
       ),
-      minersRunningDjinn: minerHealth.filter(
-        (h) => h.version && h.version !== "0",
+      minersRunningDjinn: minerStatusList.filter(
+        (m) => m.uptime > 0.5,
       ).length,
-      minersHealthy: minerHealth.filter((h) => h.status === "ok").length,
-      minersOddsConnected: minerHealth.filter(
-        (h) => h.odds_api_connected,
+      minersHealthy: minerStatusList.filter((m) => m.status === "ok").length,
+      minersOddsConnected: minerStatusList.filter(
+        (m) => m.queries_total > 0,
       ).length,
-      minersBtConnected: minerHealth.filter((h) => h.bt_connected).length,
-      attestCapableMiners: minerHealth.filter(
-        (h) =>
-          h.version &&
-          parseInt(h.version, 10) >= 512,
+      minersBtConnected: minerStatusList.filter((m) => m.uptime > 0).length,
+      attestCapableMiners: minerStatusList.filter(
+        (m) => m.proactive_proof_verified,
       ).length,
       attestCapableValidators: validatorHealth.filter(
         (h) =>
@@ -135,9 +208,6 @@ export async function GET() {
       highestVersion: Math.max(
         0,
         ...validatorHealth
-          .map((h) => parseInt(h.version || "0", 10))
-          .filter((v) => !isNaN(v)),
-        ...minerHealth
           .map((h) => parseInt(h.version || "0", 10))
           .filter((v) => !isNaN(v)),
       ),
@@ -157,6 +227,7 @@ export async function GET() {
       .map((m) => ({
         ...m,
         health: healthMap[m.uid] || null,
+        scoring: minerHealthFromValidators[m.uid] || null,
       }));
 
     return NextResponse.json(

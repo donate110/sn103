@@ -1705,6 +1705,49 @@ def create_app(
             } if breakdown else None,
         }
 
+    @app.get("/v1/network/miners")
+    async def network_miners() -> dict:
+        """Return health and scoring data for all miners this validator tracks.
+
+        Public endpoint. The web dashboard uses this instead of probing
+        miners directly (which fails when miners whitelist validator IPs).
+        This validator already health-checks every miner each epoch, so
+        the data is fresh and authoritative.
+        """
+        if scorer is None:
+            return {"miners": [], "validator_uid": getattr(neuron, "uid", None)}
+
+        weights, breakdowns = scorer.compute_weights_detailed(is_active_epoch=True)
+        miners_out = []
+        for uid, m in sorted(scorer._miners.items()):
+            miners_out.append({
+                "uid": uid,
+                "hotkey": m.hotkey,
+                "status": "ok" if m.health_checks_responded > 0 and m.uptime_score() > 0.5 else "offline",
+                "version": "",  # Not tracked in scorer; health endpoint has it
+                "uptime": round(m.uptime_score(), 4),
+                "health_checks_total": m.health_checks_total,
+                "health_checks_responded": m.health_checks_responded,
+                "queries_total": m.queries_total,
+                "queries_correct": m.queries_correct,
+                "accuracy": round(m.accuracy_score(), 4),
+                "attestations_total": m.attestations_total,
+                "attestations_valid": m.attestations_valid,
+                "proactive_proof_verified": m.proactive_proof_verified,
+                "notary_duties_assigned": m.notary_duties_assigned,
+                "notary_duties_completed": m.notary_duties_completed,
+                "notary_reliability": round(m.notary_reliability(), 4),
+                "weight": round(weights.get(uid, 0.0), 8),
+                "capabilities_reported": m.capabilities_reported,
+                "memory_total_mb": m.memory_total_mb,
+                "cpu_cores": m.cpu_cores,
+            })
+        return {
+            "miners": miners_out,
+            "validator_uid": getattr(neuron, "uid", None) if neuron else None,
+            "miner_count": len(miners_out),
+        }
+
     # ------------------------------------------------------------------
     # Shared HTTP client for attestation dispatch (connection reuse)
     # ------------------------------------------------------------------

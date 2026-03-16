@@ -18,6 +18,21 @@ interface HealthResult {
   error?: string;
 }
 
+interface ScoringData {
+  uid: number;
+  status: string;
+  uptime: number;
+  health_checks_total: number;
+  health_checks_responded: number;
+  queries_total: number;
+  queries_correct: number;
+  accuracy: number;
+  attestations_total: number;
+  attestations_valid: number;
+  proactive_proof_verified: boolean;
+  weight: number;
+}
+
 interface NodeWithHealth {
   uid: number;
   ip: string;
@@ -33,6 +48,7 @@ interface NodeWithHealth {
   dividends: number;
   consensus: number;
   health: HealthResult | null;
+  scoring?: ScoringData | null;
 }
 
 interface Summary {
@@ -288,13 +304,13 @@ function ValidatorTable({ validators }: { validators: NodeWithHealth[] }) {
 function getMinerSortVal(m: NodeWithHealth, key: string): number | string {
   switch (key) {
     case "uid": return m.uid;
-    case "status": return m.health?.status === "ok" ? 1 : 0;
-    case "version": return parseInt(m.health?.version || "0", 10);
+    case "status": return m.scoring?.status === "ok" ? 1 : m.health?.status === "ok" ? 1 : 0;
     case "incentive": return m.incentive;
     case "emission": return parseFloat(m.emission);
-    case "odds": return m.health?.odds_api_connected ? 1 : 0;
-    case "bt": return m.health?.bt_connected ? 1 : 0;
-    case "uptime": return m.health?.uptime_seconds ?? 0;
+    case "uptime": return m.scoring?.uptime ?? 0;
+    case "challenges": return m.scoring?.queries_correct ?? 0;
+    case "accuracy": return m.scoring?.accuracy ?? 0;
+    case "weight": return m.scoring?.weight ?? 0;
     default: return 0;
   }
 }
@@ -324,41 +340,47 @@ function MinerTable({ miners }: { miners: NodeWithHealth[] }) {
           <tr className="text-left text-xs text-slate-400 uppercase tracking-wide border-b">
             <Th k="uid">UID</Th>
             <Th k="status">Status</Th>
-            <Th k="version" align="text-right">Version</Th>
-            <Th k="incentive" align="text-right">Incentive</Th>
-            <Th k="emission" align="text-right">Emission</Th>
-            <Th k="odds" align="text-center">Odds</Th>
-            <Th k="bt" align="text-center">BT</Th>
             <Th k="uptime" align="text-right">Uptime</Th>
+            <Th k="challenges" align="text-right">Challenges</Th>
+            <Th k="accuracy" align="text-right">Accuracy</Th>
+            <Th k="incentive" align="text-right">Incentive</Th>
+            <Th k="weight" align="text-right">Weight</Th>
+            <th className="px-3 py-2 text-center">Proof</th>
           </tr>
         </thead>
         <tbody>
-          {sorted.map((m) => (
-            <tr key={m.uid} className="border-b border-slate-100 hover:bg-slate-50">
-              <td className="px-3 py-2 font-mono font-medium">{m.uid}</td>
-              <td className="px-3 py-2">
-                <StatusBadge status={m.health?.status || "unreachable"} />
-              </td>
-              <td className="px-3 py-2 text-right font-mono text-slate-600">
-                {m.health?.version || "-"}
-              </td>
-              <td className="px-3 py-2 text-right">
-                {u16ToPercent(m.incentive)}
-              </td>
-              <td className="px-3 py-2 text-right font-mono">
-                {formatStake(m.emission)}
-              </td>
-              <td className="px-3 py-2 text-center">
-                <Check ok={m.health?.odds_api_connected} />
-              </td>
-              <td className="px-3 py-2 text-center">
-                <Check ok={m.health?.bt_connected} />
-              </td>
-              <td className="px-3 py-2 text-right text-slate-500">
-                {formatUptime(m.health?.uptime_seconds)}
-              </td>
-            </tr>
-          ))}
+          {sorted.map((m) => {
+            const s = m.scoring;
+            const status = s?.status ?? m.health?.status ?? "unreachable";
+            return (
+              <tr key={m.uid} className="border-b border-slate-100 hover:bg-slate-50">
+                <td className="px-3 py-2 font-mono font-medium">{m.uid}</td>
+                <td className="px-3 py-2">
+                  <StatusBadge status={status} />
+                </td>
+                <td className="px-3 py-2 text-right">
+                  {s ? `${(s.uptime * 100).toFixed(0)}%` : "-"}
+                </td>
+                <td className="px-3 py-2 text-right font-mono">
+                  {s ? `${s.queries_correct}/${s.queries_total}` : "-"}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  {s && s.queries_total > 0
+                    ? `${(s.accuracy * 100).toFixed(0)}%`
+                    : s ? "n/a" : "-"}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  {u16ToPercent(m.incentive)}
+                </td>
+                <td className="px-3 py-2 text-right font-mono">
+                  {s && s.weight > 0 ? s.weight.toFixed(5) : "-"}
+                </td>
+                <td className="px-3 py-2 text-center">
+                  <Check ok={s?.proactive_proof_verified} />
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
