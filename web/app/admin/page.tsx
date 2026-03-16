@@ -2009,7 +2009,7 @@ function TestResultViewer({ result }: { result: TestAttestResult }) {
           </div>
           {viewMode === "preview" && (
             <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-2">
-              Preview only &mdash; external resources (CSS, images, scripts) are not included in the proof.
+              Preview only. External resources (CSS, images, scripts) are not included in the proof.
             </p>
           )}
           {viewMode === "source" ? (

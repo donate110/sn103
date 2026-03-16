@@ -44,7 +44,7 @@ export default function PrivateWorkspace({ open, onClose, children }: PrivateWor
             {/* Badge */}
             <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-900/50 border border-emerald-700/50 px-3 py-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              <span className="text-xs font-medium text-emerald-300">Private &mdash; Local Only</span>
+              <span className="text-xs font-medium text-emerald-300">Private, Local Only</span>
             </div>
           </div>
 

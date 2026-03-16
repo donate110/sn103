@@ -495,7 +495,7 @@ function ResultCard({
 
           {viewMode === "preview" && (
             <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5 mb-2">
-              Preview only &mdash; external resources (CSS, images, scripts) are not included in the proof and will not load.
+              Preview only. External resources (CSS, images, scripts) are not included in the proof and will not load.
             </p>
           )}
 

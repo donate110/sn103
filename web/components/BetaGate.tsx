@@ -82,7 +82,7 @@ export default function BetaGate({ children }: { children: React.ReactNode }) {
           Sell analysis you can <span className="font-semibold text-slate-900">prove</span>.
         </p>
         <p className="text-sm text-idiot-500 italic mt-3">
-          Signals stay secret forever &mdash; even from us.
+          Signals stay secret forever. Even from us.
         </p>
       </div>
 
