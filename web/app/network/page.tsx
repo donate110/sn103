@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 
 // ---------- Types ----------
@@ -67,6 +67,8 @@ interface MinerScores {
   error?: string;
 }
 
+type SortDir = "asc" | "desc";
+
 // ---------- Helpers ----------
 
 function formatStake(raw: string): string {
@@ -81,6 +83,11 @@ function formatUptime(seconds?: number): string {
   const h = Math.floor(seconds / 3600);
   if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
   return `${h}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+/** Normalize u16 metagraph values (0-65535) to 0-1 range */
+function u16ToPercent(val: number): string {
+  return ((val / 65535) * 100).toFixed(1) + "%";
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -104,6 +111,52 @@ function Check({ ok }: { ok: boolean | undefined }) {
   ) : (
     <span className="text-red-400">&#10005;</span>
   );
+}
+
+function SortArrow({ active, dir }: { active: boolean; dir: SortDir }) {
+  if (!active) return <span className="text-slate-300 ml-0.5">&#8597;</span>;
+  return (
+    <span className="text-slate-600 ml-0.5">
+      {dir === "asc" ? "\u25B2" : "\u25BC"}
+    </span>
+  );
+}
+
+function useSortable<T>(
+  items: T[],
+  defaultKey: string,
+  defaultDir: SortDir,
+  getVal: (item: T, key: string) => number | string,
+) {
+  const [sortKey, setSortKey] = useState(defaultKey);
+  const [sortDir, setSortDir] = useState<SortDir>(defaultDir);
+
+  const toggle = useCallback(
+    (key: string) => {
+      if (sortKey === key) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      } else {
+        setSortKey(key);
+        setSortDir("desc");
+      }
+    },
+    [sortKey],
+  );
+
+  const sorted = useMemo(() => {
+    const copy = [...items];
+    copy.sort((a, b) => {
+      const va = getVal(a, sortKey);
+      const vb = getVal(b, sortKey);
+      const cmp = typeof va === "number" && typeof vb === "number"
+        ? va - vb
+        : String(va).localeCompare(String(vb));
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return copy;
+  }, [items, sortKey, sortDir, getVal]);
+
+  return { sorted, sortKey, sortDir, toggle };
 }
 
 // ---------- Components ----------
@@ -143,27 +196,53 @@ function SummaryCards({ summary }: { summary: Summary }) {
   );
 }
 
+function getValidatorSortVal(v: NodeWithHealth, key: string): number | string {
+  switch (key) {
+    case "uid": return v.uid;
+    case "status": return v.health?.status === "ok" ? 1 : 0;
+    case "version": return parseInt(v.health?.version || "0", 10);
+    case "stake": return parseFloat(v.stake);
+    case "vtrust": return v.validatorTrust;
+    case "shares": return v.health?.shares_held ?? 0;
+    default: return 0;
+  }
+}
+
 function ValidatorTable({ validators }: { validators: NodeWithHealth[] }) {
+  const { sorted, sortKey, sortDir, toggle } = useSortable(
+    validators, "stake", "desc", getValidatorSortVal,
+  );
+
   if (validators.length === 0)
     return <p className="text-sm text-slate-400 py-4">No validators discovered.</p>;
+
+  const Th = ({ k, children, align }: { k: string; children: React.ReactNode; align?: string }) => (
+    <th
+      className={`px-3 py-2 cursor-pointer select-none hover:text-slate-600 ${align || ""}`}
+      onClick={() => toggle(k)}
+    >
+      {children}
+      <SortArrow active={sortKey === k} dir={sortDir} />
+    </th>
+  );
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-slate-400 uppercase tracking-wide border-b">
-            <th className="px-3 py-2">UID</th>
-            <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2 text-right">Version</th>
-            <th className="px-3 py-2 text-right">Stake</th>
-            <th className="px-3 py-2 text-right">VTrust</th>
-            <th className="px-3 py-2 text-right">Shares</th>
+            <Th k="uid">UID</Th>
+            <Th k="status">Status</Th>
+            <Th k="version" align="text-right">Version</Th>
+            <Th k="stake" align="text-right">Stake</Th>
+            <Th k="vtrust" align="text-right">VTrust</Th>
+            <Th k="shares" align="text-right">Shares</Th>
             <th className="px-3 py-2 text-center">Chain</th>
             <th className="px-3 py-2 text-center">BT</th>
           </tr>
         </thead>
         <tbody>
-          {validators.map((v) => (
+          {sorted.map((v) => (
             <tr key={v.uid} className="border-b border-slate-100 hover:bg-slate-50">
               <td className="px-3 py-2 font-mono font-medium">{v.uid}</td>
               <td className="px-3 py-2">
@@ -173,9 +252,7 @@ function ValidatorTable({ validators }: { validators: NodeWithHealth[] }) {
                 {v.health?.version || "-"}
               </td>
               <td className="px-3 py-2 text-right">{formatStake(v.stake)}</td>
-              <td className="px-3 py-2 text-right">
-                {(v.validatorTrust * 100).toFixed(1)}%
-              </td>
+              <td className="px-3 py-2 text-right">{u16ToPercent(v.validatorTrust)}</td>
               <td className="px-3 py-2 text-right font-mono">
                 {v.health?.shares_held ?? "-"}
               </td>
@@ -193,27 +270,55 @@ function ValidatorTable({ validators }: { validators: NodeWithHealth[] }) {
   );
 }
 
+function getMinerSortVal(m: NodeWithHealth, key: string): number | string {
+  switch (key) {
+    case "uid": return m.uid;
+    case "status": return m.health?.status === "ok" ? 1 : 0;
+    case "version": return parseInt(m.health?.version || "0", 10);
+    case "incentive": return m.incentive;
+    case "emission": return parseFloat(m.emission);
+    case "odds": return m.health?.odds_api_connected ? 1 : 0;
+    case "bt": return m.health?.bt_connected ? 1 : 0;
+    case "uptime": return m.health?.uptime_seconds ?? 0;
+    default: return 0;
+  }
+}
+
 function MinerTable({ miners }: { miners: NodeWithHealth[] }) {
+  const { sorted, sortKey, sortDir, toggle } = useSortable(
+    miners, "incentive", "desc", getMinerSortVal,
+  );
+
   if (miners.length === 0)
     return <p className="text-sm text-slate-400 py-4">No miners discovered.</p>;
+
+  const Th = ({ k, children, align }: { k: string; children: React.ReactNode; align?: string }) => (
+    <th
+      className={`px-3 py-2 cursor-pointer select-none hover:text-slate-600 ${align || ""}`}
+      onClick={() => toggle(k)}
+    >
+      {children}
+      <SortArrow active={sortKey === k} dir={sortDir} />
+    </th>
+  );
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-slate-400 uppercase tracking-wide border-b">
-            <th className="px-3 py-2">UID</th>
-            <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2 text-right">Version</th>
-            <th className="px-3 py-2 text-right">Incentive</th>
-            <th className="px-3 py-2 text-right">Emission</th>
-            <th className="px-3 py-2 text-center">Odds</th>
-            <th className="px-3 py-2 text-center">BT</th>
-            <th className="px-3 py-2 text-right">Uptime</th>
+            <Th k="uid">UID</Th>
+            <Th k="status">Status</Th>
+            <Th k="version" align="text-right">Version</Th>
+            <Th k="incentive" align="text-right">Incentive</Th>
+            <Th k="emission" align="text-right">Emission</Th>
+            <Th k="odds" align="text-center">Odds</Th>
+            <Th k="bt" align="text-center">BT</Th>
+            <Th k="uptime" align="text-right">Uptime</Th>
           </tr>
         </thead>
         <tbody>
-          {miners.map((m) => (
+          {sorted.map((m) => (
             <tr key={m.uid} className="border-b border-slate-100 hover:bg-slate-50">
               <td className="px-3 py-2 font-mono font-medium">{m.uid}</td>
               <td className="px-3 py-2">
@@ -223,7 +328,7 @@ function MinerTable({ miners }: { miners: NodeWithHealth[] }) {
                 {m.health?.version || "-"}
               </td>
               <td className="px-3 py-2 text-right">
-                {(m.incentive * 100).toFixed(2)}%
+                {m.incentive > 0 ? (m.incentive / 65535 * 100).toFixed(2) + "%" : "0%"}
               </td>
               <td className="px-3 py-2 text-right font-mono">
                 {formatStake(m.emission)}
@@ -258,7 +363,6 @@ function MinerLookup() {
     setResults([]);
 
     try {
-      // First get validators
       const discRes = await fetch("/api/validators/discover");
       const { validators } = await discRes.json();
       if (!validators || validators.length === 0) {
@@ -267,7 +371,6 @@ function MinerLookup() {
         return;
       }
 
-      // Query each validator for this miner's scores
       const promises = validators.slice(0, 10).map(async (v: { uid: number }) => {
         try {
           const controller = new AbortController();
@@ -386,7 +489,7 @@ export default function NetworkPage() {
       }
     }
     load();
-    const interval = setInterval(load, 120_000); // refresh every 2 min
+    const interval = setInterval(load, 120_000);
     return () => clearInterval(interval);
   }, []);
 
@@ -409,7 +512,6 @@ export default function NetworkPage() {
 
   return (
     <div className="max-w-6xl mx-auto">
-      {/* Header */}
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
           <Image src="/djinn-logo.png" alt="Djinn" width={36} height={36} />
@@ -423,10 +525,8 @@ export default function NetworkPage() {
         </p>
       </div>
 
-      {/* Summary Cards */}
       <SummaryCards summary={data.summary} />
 
-      {/* Validators */}
       <section className="mb-8">
         <h2 className="text-lg font-semibold text-slate-900 mb-3">
           Validators
@@ -439,7 +539,6 @@ export default function NetworkPage() {
         </div>
       </section>
 
-      {/* Miners */}
       <section className="mb-8">
         <h2 className="text-lg font-semibold text-slate-900 mb-3">
           Miners
@@ -452,7 +551,6 @@ export default function NetworkPage() {
         </div>
       </section>
 
-      {/* Miner Lookup */}
       <section className="mb-8">
         <MinerLookup />
       </section>
