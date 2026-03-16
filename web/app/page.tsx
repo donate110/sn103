@@ -146,7 +146,7 @@ export default function Home() {
           Source
         </a>
         <a
-          href="https://github.com/djinn-inc/djinn/blob/main/docs/whitepaper.md"
+          href="/whitepaper.pdf"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-1.5 hover:text-slate-600 transition-colors"
