@@ -685,6 +685,7 @@ async def async_main() -> None:
             chain_client=chain_client,
             share_store=share_store,
             audit_set_store=audit_set_store,
+            outcome_attestor=outcome_attestor,
         )
         if pairs_loaded:
             log.info("audit_bootstrap_done", pairs=pairs_loaded)

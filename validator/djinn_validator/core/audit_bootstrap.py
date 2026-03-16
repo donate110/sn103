@@ -5,17 +5,23 @@ AuditSetStore is ephemeral.  This module reconstructs them from
 on-chain truth (Account.getPurchaseIds + Escrow.getPurchase) using
 the genius addresses already persisted in the ShareStore.
 
+Also registers signals with the OutcomeAttestor by parsing the
+on-chain decoyLines (which contain full JSON with sport, event_id,
+home_team, away_team, market, line, side, price, commence_time).
+
 Flow:
   1. Query ShareStore for all distinct genius addresses
   2. Scan SignalPurchased events (or use share signal_ids) to find buyers
   3. For each (genius, idiot) pair: read current cycle + purchase IDs
   4. Populate AuditSetStore with signal data from chain
-  5. The normal epoch loop then resolves outcomes and triggers settlement
+  5. Parse decoy line JSON and register signals with OutcomeAttestor
+  6. The normal epoch loop then resolves outcomes and triggers settlement
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import TYPE_CHECKING
 
 import structlog
@@ -23,6 +29,7 @@ import structlog
 if TYPE_CHECKING:
     from djinn_validator.chain.contracts import ChainClient
     from djinn_validator.core.audit_set import AuditSetStore
+    from djinn_validator.core.outcomes import OutcomeAttestor
     from djinn_validator.core.shares import ShareStore
 
 log = structlog.get_logger()
@@ -32,8 +39,12 @@ async def bootstrap_audit_sets(
     chain_client: "ChainClient",
     share_store: "ShareStore",
     audit_set_store: "AuditSetStore",
+    outcome_attestor: "OutcomeAttestor | None" = None,
 ) -> int:
     """Populate audit_set_store from on-chain state.
+
+    If outcome_attestor is provided, also registers signals by parsing
+    the on-chain decoyLines JSON so the epoch loop can resolve outcomes.
 
     Returns the number of audit sets populated.
     """
@@ -158,6 +169,14 @@ async def bootstrap_audit_sets(
             )
             continue
 
+    # Step 4: Register signals with OutcomeAttestor by parsing on-chain decoy lines.
+    # The decoyLines stored on-chain contain full JSON with sport, event_id, teams.
+    if outcome_attestor and populated > 0:
+        registered = await _register_signals_from_chain(
+            chain_client, audit_set_store, outcome_attestor,
+        )
+        log.info("audit_bootstrap_signals_registered", count=registered)
+
     ready = audit_set_store.get_ready_sets()
     log.info(
         "audit_bootstrap_complete",
@@ -215,3 +234,132 @@ def _get_genius_signals(share_store: "ShareStore") -> dict[str, str]:
     except Exception as e:
         log.error("audit_bootstrap_db_query_failed", err=str(e))
     return result
+
+
+async def _register_signals_from_chain(
+    chain_client: "ChainClient",
+    audit_set_store: "AuditSetStore",
+    outcome_attestor: "OutcomeAttestor",
+) -> int:
+    """Parse on-chain decoyLines JSON and register signals for outcome resolution.
+
+    The decoyLines stored on SignalCommitment contain full JSON objects like:
+      {"sport":"soccer_epl","event_id":"9c44...","home_team":"Sunderland",
+       "away_team":"Brighton","market":"h2h","line":null,"side":"Brighton",
+       "price":2.19,"commence_time":"2026-03-14T15:00:00Z"}
+
+    We parse these to build SignalMetadata for the OutcomeAttestor.
+    """
+    from djinn_validator.core.outcomes import SignalMetadata, parse_pick
+
+    # Collect all unique signal_ids from loaded audit sets
+    signal_ids: set[str] = set()
+    for audit_set in audit_set_store._sets.values():
+        for sig_id in audit_set.signals:
+            signal_ids.add(sig_id)
+
+    if not signal_ids:
+        return 0
+
+    registered = 0
+    for signal_id in signal_ids:
+        # Skip if already registered
+        if outcome_attestor.get_signal(signal_id) is not None:
+            continue
+
+        try:
+            signal = await chain_client.get_signal(int(signal_id))
+            if not signal or not isinstance(signal, dict):
+                continue
+
+            decoy_lines = signal.get("decoyLines", [])
+            if not decoy_lines or len(decoy_lines) < 10:
+                continue
+
+            # Parse the first decoy line's JSON to extract game metadata
+            first_line = _parse_decoy_json(decoy_lines[0])
+            if not first_line:
+                continue
+
+            sport = first_line.get("sport", "")
+            event_id = first_line.get("event_id", "")
+            home_team = first_line.get("home_team", "")
+            away_team = first_line.get("away_team", "")
+
+            if not sport or not event_id:
+                continue
+
+            # Build pick strings for parse_pick (e.g., "Brighton ML +220")
+            parsed_lines = []
+            for dl in decoy_lines:
+                dl_data = _parse_decoy_json(dl)
+                if dl_data:
+                    pick_str = _decoy_to_pick_string(dl_data)
+                    try:
+                        parsed_lines.append(parse_pick(pick_str))
+                    except Exception:
+                        parsed_lines.append(parse_pick("Unknown 0 (+100)"))
+                else:
+                    parsed_lines.append(parse_pick("Unknown 0 (+100)"))
+
+            if len(parsed_lines) != 10:
+                continue
+
+            metadata = SignalMetadata(
+                signal_id=signal_id,
+                sport=sport,
+                event_id=event_id,
+                home_team=home_team,
+                away_team=away_team,
+                lines=parsed_lines,
+            )
+            outcome_attestor.register_signal(metadata)
+            registered += 1
+
+        except Exception as e:
+            log.debug(
+                "audit_bootstrap_register_skip",
+                signal_id=signal_id[:20],
+                err=str(e)[:100],
+            )
+            continue
+
+        # Rate limit
+        if registered % 10 == 0:
+            await asyncio.sleep(0.5)
+
+    return registered
+
+
+def _parse_decoy_json(line: str) -> dict | None:
+    """Try to parse a decoy line as JSON."""
+    try:
+        data = json.loads(line)
+        if isinstance(data, dict):
+            return data
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return None
+
+
+def _decoy_to_pick_string(data: dict) -> str:
+    """Convert a decoy line JSON object to a pick string for parse_pick."""
+    market = data.get("market", "h2h")
+    team = data.get("side", data.get("team", "Unknown"))
+    line_val = data.get("line")
+    price = data.get("price", 2.0)
+
+    # Convert decimal odds to American
+    if price >= 2.0:
+        american = int((price - 1) * 100)
+    else:
+        american = int(-100 / (price - 1))
+
+    if market == "spreads" and line_val is not None:
+        return f"{team} {line_val:+g} ({american:+d})"
+    elif market == "totals" and line_val is not None:
+        side = data.get("side", "Over")
+        return f"{side} {line_val} ({american:+d})"
+    else:
+        # h2h / moneyline
+        return f"{team} ML ({american:+d})"
