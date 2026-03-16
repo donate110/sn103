@@ -49,10 +49,12 @@ async def bootstrap_audit_sets(
     signal_count = len(genius_signals)
     log.info("audit_bootstrap_scanning", signals=signal_count)
 
-    # Batch check: only look at signals that have purchases
-    # Rate-limit RPC calls with small batches
-    batch_size = 20
+    # Batch check: only look at signals that have purchases.
+    # Use small batches with delays to avoid RPC rate limits (Base Sepolia
+    # public endpoint returns 403 under heavy load).
+    batch_size = 5
     signal_list = list(genius_signals.items())
+    errors = 0
 
     for i in range(0, len(signal_list), batch_size):
         batch = signal_list[i : i + batch_size]
@@ -63,13 +65,25 @@ async def bootstrap_audit_sets(
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for result in results:
             if isinstance(result, Exception):
+                errors += 1
                 continue
             for genius, idiot in result:
                 pairs.add((genius.lower(), idiot.lower()))
 
-        # Small delay between batches to avoid RPC rate limits
+        # Log progress every 100 signals
+        processed = min(i + batch_size, len(signal_list))
+        if processed % 100 < batch_size:
+            log.info(
+                "audit_bootstrap_progress",
+                processed=processed,
+                total=len(signal_list),
+                pairs_found=len(pairs),
+                errors=errors,
+            )
+
+        # Delay between batches to avoid RPC rate limits
         if i + batch_size < len(signal_list):
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
 
     if not pairs:
         log.info("audit_bootstrap_no_pairs")
@@ -164,7 +178,7 @@ async def _get_buyers_for_signal(
     try:
         purchase_ids = await chain_client.get_purchases_by_signal(int(signal_id))
         if purchase_ids:
-            log.debug(
+            log.info(
                 "audit_bootstrap_signal_has_purchases",
                 signal_id=signal_id[:20],
                 purchases=len(purchase_ids),
@@ -175,11 +189,16 @@ async def _get_buyers_for_signal(
                 buyer = purchase[0]  # idiot address
                 pairs.append((genius_addr, buyer))
     except Exception as e:
-        log.debug(
-            "audit_bootstrap_buyer_check_failed",
-            signal_id=signal_id[:20],
-            err=str(e)[:100],
-        )
+        # Only log first few errors to avoid spam
+        if not hasattr(_get_buyers_for_signal, "_error_count"):
+            _get_buyers_for_signal._error_count = 0  # type: ignore[attr-defined]
+        _get_buyers_for_signal._error_count += 1  # type: ignore[attr-defined]
+        if _get_buyers_for_signal._error_count <= 5:  # type: ignore[attr-defined]
+            log.info(
+                "audit_bootstrap_buyer_check_failed",
+                signal_id=signal_id[:20],
+                err=str(e)[:150],
+            )
     return pairs
 
 
