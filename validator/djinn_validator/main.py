@@ -475,6 +475,8 @@ async def epoch_loop(
                             error=weight_error,
                         )
                 log.info("weights_updated", n_miners=n_miners, active=is_active, success=success)
+                # Persist scores to SQLite before resetting epoch metrics
+                scorer.persist_all()
                 # Reset per-epoch metrics after weight setting (increments
                 # consecutive_epochs for miners that participated)
                 scorer.reset_epoch()
@@ -485,8 +487,9 @@ async def epoch_loop(
                 log.warning(
                     "epoch_reset_fallback",
                     seconds_since_reset=round(time.monotonic() - last_reset_time),
-                    msg="Resetting scorer metrics — weight-setting has not fired in 30 min",
+                    msg="Resetting scorer metrics. Weight-setting has not fired in 30 min.",
                 )
+                scorer.persist_all()
                 scorer.reset_epoch()
                 last_reset_time = time.monotonic()
 
@@ -591,7 +594,7 @@ async def async_main() -> None:
         db_path=str(data_dir / "signal_registrations.db"),
     )
     audit_set_store = AuditSetStore()
-    scorer = MinerScorer()
+    scorer = MinerScorer(db_path=str(data_dir / "miner_scores.db"))
     activity = ActivityBuffer()
 
     # Persistent telemetry — stores all events to SQLite

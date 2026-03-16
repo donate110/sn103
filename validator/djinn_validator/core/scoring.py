@@ -27,8 +27,12 @@ Empty epoch weights (no active signals):
 
 from __future__ import annotations
 
+import json
 import math
+import sqlite3
+import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import structlog
 
@@ -227,10 +231,148 @@ class MinerScorer:
     W_EMPTY_HISTORY_A = 0.30
     W_EMPTY_ATTESTATION = 0.35
 
-    def __init__(self, attestation_blend: float | None = None) -> None:
+    def __init__(
+        self,
+        attestation_blend: float | None = None,
+        db_path: str | None = None,
+    ) -> None:
         self._miners: dict[int, MinerMetrics] = {}
         if attestation_blend is not None:
             self.W_ATTESTATION_BLEND = attestation_blend
+
+        # Optional SQLite persistence so scores survive restarts
+        self._db: sqlite3.Connection | None = None
+        self._db_lock = threading.Lock()
+        if db_path:
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            self._db = sqlite3.connect(db_path, check_same_thread=False)
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA busy_timeout=5000")
+            self._db.execute("""
+                CREATE TABLE IF NOT EXISTS miner_scores (
+                    uid INTEGER PRIMARY KEY,
+                    hotkey TEXT NOT NULL,
+                    data TEXT NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+            """)
+            self._db.commit()
+            self._load_persisted()
+
+    def _load_persisted(self) -> None:
+        """Load miner scores from SQLite on startup."""
+        if not self._db:
+            return
+        try:
+            import time as _time
+            cursor = self._db.execute("SELECT uid, hotkey, data FROM miner_scores")
+            loaded = 0
+            for uid, hotkey, data_json in cursor:
+                try:
+                    d = json.loads(data_json)
+                    m = MinerMetrics(uid=uid, hotkey=hotkey)
+                    m.queries_total = d.get("queries_total", 0)
+                    m.queries_correct = d.get("queries_correct", 0)
+                    m.proofs_submitted = d.get("proofs_submitted", 0)
+                    m.proofs_verified = d.get("proofs_verified", 0)
+                    m.proofs_requested = d.get("proofs_requested", 0)
+                    m.attestations_total = d.get("attestations_total", 0)
+                    m.attestations_valid = d.get("attestations_valid", 0)
+                    m.health_checks_total = d.get("health_checks_total", 0)
+                    m.health_checks_responded = d.get("health_checks_responded", 0)
+                    m.consecutive_epochs = d.get("consecutive_epochs", 0)
+                    m.notary_duties_assigned = d.get("notary_duties_assigned", 0)
+                    m.notary_duties_completed = d.get("notary_duties_completed", 0)
+                    m.notary_capable = d.get("notary_capable", False)
+                    m.proactive_proof_verified = d.get("proactive_proof_verified", False)
+                    m.tlsn_binary_hash = d.get("tlsn_binary_hash", "")
+                    m.capabilities_reported = d.get("capabilities_reported", False)
+                    m.memory_total_mb = d.get("memory_total_mb", 0)
+                    m.cpu_cores = d.get("cpu_cores", 0)
+                    self._miners[uid] = m
+                    loaded += 1
+                except Exception:
+                    continue
+            if loaded:
+                log.info("scorer_loaded_from_db", count=loaded)
+        except Exception as e:
+            log.error("scorer_db_load_failed", err=str(e))
+
+    def persist(self, uid: int) -> None:
+        """Save a single miner's scores to SQLite."""
+        if not self._db:
+            return
+        m = self._miners.get(uid)
+        if not m:
+            return
+        import time as _time
+        data = json.dumps({
+            "queries_total": m.queries_total,
+            "queries_correct": m.queries_correct,
+            "proofs_submitted": m.proofs_submitted,
+            "proofs_verified": m.proofs_verified,
+            "proofs_requested": m.proofs_requested,
+            "attestations_total": m.attestations_total,
+            "attestations_valid": m.attestations_valid,
+            "health_checks_total": m.health_checks_total,
+            "health_checks_responded": m.health_checks_responded,
+            "consecutive_epochs": m.consecutive_epochs,
+            "notary_duties_assigned": m.notary_duties_assigned,
+            "notary_duties_completed": m.notary_duties_completed,
+            "notary_capable": m.notary_capable,
+            "proactive_proof_verified": m.proactive_proof_verified,
+            "tlsn_binary_hash": m.tlsn_binary_hash,
+            "capabilities_reported": m.capabilities_reported,
+            "memory_total_mb": m.memory_total_mb,
+            "cpu_cores": m.cpu_cores,
+        })
+        try:
+            with self._db_lock:
+                self._db.execute(
+                    "INSERT OR REPLACE INTO miner_scores (uid, hotkey, data, updated_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (uid, m.hotkey, data, _time.time()),
+                )
+                self._db.commit()
+        except Exception:
+            pass  # non-critical
+
+    def persist_all(self) -> None:
+        """Batch save all miner scores. Called after each epoch."""
+        if not self._db:
+            return
+        import time as _time
+        try:
+            with self._db_lock:
+                for uid, m in self._miners.items():
+                    data = json.dumps({
+                        "queries_total": m.queries_total,
+                        "queries_correct": m.queries_correct,
+                        "proofs_submitted": m.proofs_submitted,
+                        "proofs_verified": m.proofs_verified,
+                        "proofs_requested": m.proofs_requested,
+                        "attestations_total": m.attestations_total,
+                        "attestations_valid": m.attestations_valid,
+                        "health_checks_total": m.health_checks_total,
+                        "health_checks_responded": m.health_checks_responded,
+                        "consecutive_epochs": m.consecutive_epochs,
+                        "notary_duties_assigned": m.notary_duties_assigned,
+                        "notary_duties_completed": m.notary_duties_completed,
+                        "notary_capable": m.notary_capable,
+                        "proactive_proof_verified": m.proactive_proof_verified,
+                        "tlsn_binary_hash": m.tlsn_binary_hash,
+                        "capabilities_reported": m.capabilities_reported,
+                        "memory_total_mb": m.memory_total_mb,
+                        "cpu_cores": m.cpu_cores,
+                    })
+                    self._db.execute(
+                        "INSERT OR REPLACE INTO miner_scores (uid, hotkey, data, updated_at) "
+                        "VALUES (?, ?, ?, ?)",
+                        (uid, m.hotkey, data, _time.time()),
+                    )
+                self._db.commit()
+        except Exception as e:
+            log.warning("scorer_persist_all_failed", err=str(e)[:100])
 
     def get(self, uid: int) -> MinerMetrics | None:
         """Get metrics for a miner without creating or resetting."""
