@@ -680,26 +680,29 @@ async def async_main() -> None:
         log_format=os.getenv("LOG_FORMAT", "console"),
     )
 
-    # Bootstrap audit sets from on-chain state (survives validator restarts)
-    try:
-        from djinn_validator.core.audit_bootstrap import bootstrap_audit_sets
+    # Bootstrap audit sets from on-chain state in the background.
+    # This takes ~5 minutes to scan 1200+ shares so we don't block startup.
+    async def _run_bootstrap() -> None:
+        try:
+            from djinn_validator.core.audit_bootstrap import bootstrap_audit_sets
 
-        pairs_loaded = await bootstrap_audit_sets(
-            chain_client=chain_client,
-            share_store=share_store,
-            audit_set_store=audit_set_store,
-            outcome_attestor=outcome_attestor,
-        )
-        if pairs_loaded:
-            log.info("audit_bootstrap_done", pairs=pairs_loaded)
-    except Exception as e:
-        log.warning("audit_bootstrap_failed", err=str(e)[:200])
+            pairs_loaded = await bootstrap_audit_sets(
+                chain_client=chain_client,
+                share_store=share_store,
+                audit_set_store=audit_set_store,
+                outcome_attestor=outcome_attestor,
+            )
+            if pairs_loaded:
+                log.info("audit_bootstrap_done", pairs=pairs_loaded)
+        except Exception as e:
+            log.warning("audit_bootstrap_failed", err=str(e)[:200])
 
     # Run API server, epoch loop, MPC cleanup, watchtower, and validator sync concurrently
     running_tasks = [
         asyncio.create_task(run_server(app, config.api_host, config.api_port)),
         asyncio.create_task(mpc_cleanup_loop(mpc_coordinator)),
         asyncio.create_task(watchtower_loop(package_dir=Path(__file__).resolve().parent.parent)),
+        asyncio.create_task(_run_bootstrap()),  # Background: ~5 min, doesn't block startup
     ]
     if bt_ok:
         running_tasks.append(asyncio.create_task(
