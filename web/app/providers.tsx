@@ -129,14 +129,20 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Testnet QA mode: real signing with private key from sessionStorage
+  // Testnet QA mode: real signing with private key from sessionStorage.
+  // Still wrap in RainbowKitProvider since the app uses RainbowKit transaction hooks.
   if (checked && qaConfig) {
     return (
       <WagmiProvider config={qaConfig}>
         <QueryClientProvider client={queryClient}>
-          <QAAutoConnect>
-            {children}
-          </QAAutoConnect>
+          <RainbowKitProvider
+            modalSize="compact"
+            initialChain={activeChain}
+          >
+            <QAAutoConnect>
+              {children}
+            </QAAutoConnect>
+          </RainbowKitProvider>
         </QueryClientProvider>
       </WagmiProvider>
     );
