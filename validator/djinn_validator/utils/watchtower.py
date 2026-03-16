@@ -108,6 +108,20 @@ def _restart() -> None:
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
+def _validator_code_changed(repo: Path, old_sha: str) -> bool:
+    """Check if any validator or miner code changed between old_sha and HEAD."""
+    try:
+        r = _run(["git", "diff", "--name-only", old_sha, "HEAD"], repo)
+        if r.returncode != 0:
+            return True  # assume changed if diff fails
+        changed = r.stdout.strip().splitlines()
+        # Only restart for validator/, miner/, or root config changes
+        relevant_prefixes = ("validator/", "miner/", "contracts/", "pyproject.toml", "uv.lock")
+        return any(f.startswith(relevant_prefixes) for f in changed)
+    except Exception:
+        return True  # restart on error to be safe
+
+
 async def watch_loop(package_dir: Path | None = None) -> None:
     """Main watchtower loop. Runs forever, checking for updates.
 
@@ -156,7 +170,21 @@ async def watch_loop(package_dir: Path | None = None) -> None:
                 branch=_BRANCH,
             )
 
+            # Check which files changed before pulling
+            old_sha = local
+
             if not _pull(repo, _BRANCH):
+                continue
+
+            # Only restart if validator code changed. Web-only commits
+            # (web/, docs/, scripts/) don't need a validator restart.
+            if not _validator_code_changed(repo, old_sha):
+                log.info(
+                    "watchtower_skip_restart",
+                    msg="No validator code changes, skipping restart",
+                    old=old_sha[:8],
+                    new=remote[:8],
+                )
                 continue
 
             if not _install_deps(package_dir):
