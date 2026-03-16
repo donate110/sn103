@@ -630,7 +630,7 @@ export default function IdiotDashboard() {
           <div className="card">
             <p className="text-center text-slate-500 py-8">
               {signals.length === 0
-                ? "No signals available right now. Check back soon \u2014 new signals are committed as Geniuses publish their analysis."
+                ? "No signals available right now. Check back soon; new signals are committed as Geniuses publish their analysis."
                 : "No signals match your filters. Try adjusting or resetting them."}
             </p>
           </div>

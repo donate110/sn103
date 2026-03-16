@@ -29,7 +29,7 @@ const ARTICLES: Article[] = [
     date: "Jan 24, 2026",
     url: "https://taodaily.io/djinn-subnet-sn103-sets-new-bitstarter-record-raising-600-tao-in-51-minutes/",
     description:
-      "Djinn achieved a record on Bittensor\u2019s crowdfunding platform, completing its 600 TAO fundraise in under an hour \u2014 the fastest Bitstarter raise to date.",
+      "Djinn achieved a record on Bittensor\u2019s crowdfunding platform, completing its 600 TAO fundraise in under an hour. The fastest Bitstarter raise to date.",
     image: "/press/taodaily-djinn.png",
     tag: "article",
   },
