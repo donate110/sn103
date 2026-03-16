@@ -214,7 +214,7 @@ export default function PurchaseSignal() {
       if (!checkResult || checkResult.available_indices.length === 0) {
         console.log("[purchase] ABORT: no lines available");
         setStepError(
-          "No lines are currently available at any sportsbook. The signal may have gone stale — check back later.",
+          "No lines are currently available at any sportsbook. The signal may have gone stale. Check back later.",
         );
         setStep("idle");
         return;
@@ -298,7 +298,7 @@ export default function PurchaseSignal() {
         const allNotFound = errors.length > 0 && errors.every((e) => e.includes("not found"));
         const friendlyMsg = allNotFound
           ? "This signal's encryption keys are not held by any active validator. It may have been created during a network reset and cannot be purchased."
-          : "Signal not currently available. The pick may have gone stale — check back later.";
+          : "Signal not currently available. The pick may have gone stale. Check back later.";
         setStepError(friendlyMsg);
         setStep("idle");
         return;
@@ -431,7 +431,7 @@ export default function PurchaseSignal() {
           try {
             parsed = JSON.parse(plaintext);
           } catch {
-            throw new Error("Decrypted data is not valid JSON — key may be incorrect");
+            throw new Error("Decrypted data is not valid JSON. Key may be incorrect.");
           }
           if (typeof parsed.realIndex !== "number" || typeof parsed.pick !== "string") {
             throw new Error("Decrypted data missing required fields (realIndex, pick)");

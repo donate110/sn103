@@ -584,11 +584,11 @@ export default function AdminDashboard() {
               <div>
                 <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Validators ({validators.length} total)</h3>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Validators responding to /health with a non-zero version string — confirms they're running Djinn validator software">
+                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Validators responding to /health with a non-zero version string. Confirms they're running Djinn validator software.">
                     <span className="text-slate-400 text-[11px] block mb-1">Running Djinn</span>
                     <span className="text-2xl font-bold">{djinnValidators.length}<span className="text-sm font-normal text-slate-500">/{validators.length}</span></span>
                   </div>
-                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Validators whose /health endpoint returns status=ok — reachable and self-reporting as healthy">
+                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Validators whose /health endpoint returns status=ok. Reachable and self-reporting as healthy.">
                     <span className="text-slate-400 text-[11px] block mb-1">Healthy</span>
                     <span className="text-2xl font-bold">{healthyValidators.length}<span className="text-sm font-normal text-slate-500">/{validators.length}</span></span>
                   </div>
@@ -607,7 +607,7 @@ export default function AdminDashboard() {
               <div>
                 <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Miners ({miners.length} total)</h3>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Miners responding to /health with a non-zero version string — confirms they're running Djinn miner software">
+                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Miners responding to /health with a non-zero version string. Confirms they're running Djinn miner software.">
                     <span className="text-slate-400 text-[11px] block mb-1">Running Djinn</span>
                     <span className="text-2xl font-bold">{djinnMiners.length}<span className="text-sm font-normal text-slate-500">/{miners.length}</span></span>
                   </div>
@@ -616,11 +616,11 @@ export default function AdminDashboard() {
                     <span className="text-2xl font-bold text-green-400">{fullyOperationalMiners.length}<span className="text-sm font-normal text-green-600">/{miners.length}</span></span>
                     <span className="text-green-600 text-[10px] block mt-0.5">Healthy + Odds + BT + Djinn</span>
                   </div>
-                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Miners with a live connection to The Odds API — can fetch real-time sports betting lines for challenge verification">
+                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Miners with a live connection to The Odds API. Can fetch real-time sports betting lines for challenge verification.">
                     <span className="text-slate-400 text-[11px] block mb-1">Odds API Connected</span>
                     <span className="text-2xl font-bold">{oddsConnectedMiners.length}<span className="text-sm font-normal text-slate-500">/{miners.length}</span></span>
                   </div>
-                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Miners connected to the Bittensor network — can communicate with validators for challenges and weight setting">
+                  <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Miners connected to the Bittensor network. Can communicate with validators for challenges and weight setting.">
                     <span className="text-slate-400 text-[11px] block mb-1">BT Connected</span>
                     <span className="text-2xl font-bold">{btConnectedMiners.length}<span className="text-sm font-normal text-slate-500">/{miners.length}</span></span>
                   </div>
@@ -630,15 +630,15 @@ export default function AdminDashboard() {
             {/* Attestation row */}
             <div className="mt-4 pt-4 border-t border-slate-700">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3 cursor-help" title="Miners running version 512+ which includes TLSNotary prover support — can generate cryptographic proofs for URL attestation (djinn.gg/attest)">
+                <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3 cursor-help" title="Miners running version 512+ which includes TLSNotary prover support. Can generate cryptographic proofs for URL attestation (djinn.gg/attest).">
                   <span className="text-cyan-400 text-[11px] block mb-1">Attest-Capable Miners (v512+)</span>
                   <span className="text-2xl font-bold text-cyan-300">{attestCapableMiners.length}<span className="text-sm font-normal text-cyan-600">/{miners.length}</span></span>
                 </div>
-                <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3 cursor-help" title="Validators running version 512+ which includes TLSNotary verifier support — can verify and validate attestation proofs from miners">
+                <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3 cursor-help" title="Validators running version 512+ which includes TLSNotary verifier support. Can verify and validate attestation proofs from miners.">
                   <span className="text-cyan-400 text-[11px] block mb-1">Attest-Capable Validators (v512+)</span>
                   <span className="text-2xl font-bold text-cyan-300">{attestCapableValidators.length}<span className="text-sm font-normal text-cyan-600">/{validators.length}</span></span>
                 </div>
-                <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Nodes registered on the subnet but not responding with Djinn software — may be running generic Bittensor code, offline, or misconfigured">
+                <div className="bg-white/5 rounded-lg p-3 cursor-help" title="Nodes registered on the subnet but not responding with Djinn software. May be running generic Bittensor code, offline, or misconfigured.">
                   <span className="text-slate-400 text-[11px] block mb-1">Not Running Djinn</span>
                   <span className="text-2xl font-bold text-slate-500">{miners.length - djinnMiners.length} miners / {validators.length - djinnValidators.length} validators</span>
                 </div>
@@ -714,10 +714,10 @@ export default function AdminDashboard() {
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Delegate name or hotkey prefix">Name</th>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Axon IP address and port registered on-chain">IP</th>
                     <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Total alpha staked on this validator (α)">Stake</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Validator trust — consensus agreement with other validators on miner weights">VTrust</th>
-                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Fraction of miner-side emission earned — typically 0 for validators who earn via dividends instead">Incentive</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Validator trust: consensus agreement with other validators on miner weights">VTrust</th>
+                    <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Fraction of miner-side emission earned, typically 0 for validators who earn via dividends instead">Incentive</th>
                     <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Alpha earned per day from subnet emission">Emission</th>
-                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Health check result — Healthy if /health responds OK">Status</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Health check result. Healthy if /health responds OK.">Status</th>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Software version reported by /health endpoint">Version</th>
                     <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Shamir key shares held for signal encryption">Shares</th>
                     <th className="px-2 sm:px-4 py-3 text-center font-medium" title="Connected to Base chain for settlement">Chain</th>
@@ -829,7 +829,7 @@ export default function AdminDashboard() {
                     <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Total alpha staked on this miner (α)">Stake</th>
                     <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Fraction of miner-side emission earned based on validator weight consensus">Incentive</th>
                     <th className="px-2 sm:px-4 py-3 text-right font-medium" title="Alpha earned per day from subnet emission">Emission</th>
-                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Health check result — Healthy if /health responds OK">Status</th>
+                    <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Health check result. Healthy if /health responds OK.">Status</th>
                     <th className="px-2 sm:px-4 py-3 text-left font-medium" title="Software version reported by /health endpoint">Version</th>
                     <th className="px-2 sm:px-4 py-3 text-center font-medium" title="Connected to The Odds API for live sports data">Odds</th>
                     <th className="px-2 sm:px-4 py-3 text-center font-medium" title="Connected to Bittensor network">BT</th>
@@ -2128,12 +2128,12 @@ function AttestationsTab({
                   {(() => {
                     const daysAgo = Math.floor((Date.now() / 1000 - lastCentralized) / 86400);
                     return daysAgo >= 7
-                      ? <span className="text-emerald-600 font-medium">({daysAgo}d ago — safe to remove from codebase)</span>
+                      ? <span className="text-emerald-600 font-medium">({daysAgo}d ago, safe to remove from codebase)</span>
                       : <span className="text-amber-600">({daysAgo}d ago)</span>;
                   })()}
                 </>
               ) : (
-                <> &middot; <span className="text-emerald-600 font-medium">Never used — safe to remove from codebase</span></>
+                <> &middot; <span className="text-emerald-600 font-medium">Never used, safe to remove from codebase</span></>
               )}
             </div>
           </div>
@@ -3283,7 +3283,7 @@ function MetagraphTab() {
             {data.minerUrl ? (
               <p className="text-sm font-mono text-emerald-700 bg-emerald-50 px-3 py-2 rounded">{data.minerUrl}</p>
             ) : (
-              <p className="text-sm font-mono text-red-700 bg-red-50 px-3 py-2 rounded">None — miner check will fail</p>
+              <p className="text-sm font-mono text-red-700 bg-red-50 px-3 py-2 rounded">None. Miner check will fail.</p>
             )}
             <p className="text-xs text-slate-400 mt-2">
               Miner discovery: {data.minerDiscoveryMs}ms

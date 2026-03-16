@@ -859,7 +859,7 @@ export default function CreateSignal() {
         {!eventsLoading && filteredEvents.length > 0 && (
           <div className="space-y-3">
             <p className="text-xs text-slate-400">
-              {filteredEvents.length} game{filteredEvents.length !== 1 ? "s" : ""} — sorted by start time
+              {filteredEvents.length} game{filteredEvents.length !== 1 ? "s" : ""}, sorted by start time
             </p>
             {filteredEvents.map((event) => (
               <EventCard
@@ -910,7 +910,7 @@ export default function CreateSignal() {
         </p>
 
         <p className="text-xs text-slate-400 mb-3">
-          {sameMarketCount}/10 lines are {realPick?.market === "h2h" ? "moneyline" : realPick?.market} — higher same-market ratio = harder to identify your signal
+          {sameMarketCount}/10 lines are {realPick?.market === "h2h" ? "moneyline" : realPick?.market}. Higher same-market ratio = harder to identify your signal
         </p>
 
         <div className="space-y-2 mb-6">
@@ -1162,7 +1162,7 @@ export default function CreateSignal() {
                       return (
                       <div className="rounded-lg bg-white border border-genius-200 overflow-hidden">
                         <p className="text-[10px] text-genius-600 uppercase tracking-wide font-medium px-3 pt-2 pb-1">
-                          Market Depth — tap a book to use its odds
+                          Market Depth: tap a book to use its odds
                         </p>
                         <table className="w-full text-xs">
                           <tbody>
@@ -1483,7 +1483,7 @@ export default function CreateSignal() {
 
         {!isExclusive && (
         <div>
-          <label htmlFor="minNotional" className="label">Min Purchase (USDC) <span className="text-slate-400 font-normal">— optional</span></label>
+          <label htmlFor="minNotional" className="label">Min Purchase (USDC) <span className="text-slate-400 font-normal">(optional)</span></label>
           <input
             id="minNotional"
             type="number"

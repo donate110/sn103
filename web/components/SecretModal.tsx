@@ -38,7 +38,7 @@ export default function SecretModal({ open, title, message, variant = "local", f
       badgeText: "text-emerald-300",
       dotColor: "bg-emerald-400",
       spinnerColor: "border-emerald-500",
-      badge: "Private — Local Only",
+      badge: "Private, Local Only",
       defaultFooter: "Encrypted locally using AES-256. Your data never leaves this device.",
       icon: (
         <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
