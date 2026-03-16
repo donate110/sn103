@@ -26,7 +26,7 @@ log = structlog.get_logger()
 
 _ENABLED = os.getenv("AUTO_UPDATE", "false").lower() in ("true", "1", "yes")
 _BRANCH = os.getenv("AUTO_UPDATE_BRANCH", "main")
-_INTERVAL = int(os.getenv("AUTO_UPDATE_INTERVAL", "300"))
+_INTERVAL = int(os.getenv("AUTO_UPDATE_INTERVAL", "900"))  # 15 minutes default
 
 
 def _find_repo_root() -> Path | None:
@@ -149,8 +149,12 @@ async def watch_loop(package_dir: Path | None = None) -> None:
         package_dir=str(package_dir),
     )
 
+    import random
+    # Stagger initial check so validators don't all hit GitHub simultaneously
+    await asyncio.sleep(random.uniform(30, 120))
+
     while True:
-        await asyncio.sleep(_INTERVAL)
+        await asyncio.sleep(_INTERVAL + random.uniform(-60, 60))
         try:
             local = _local_sha(repo)
             remote = _remote_sha(repo, _BRANCH)
