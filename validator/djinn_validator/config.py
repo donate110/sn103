@@ -59,12 +59,22 @@ class Config:
     # Validator Base chain private key (for signing outcome settlement txs)
     base_validator_private_key: str = os.getenv("BASE_VALIDATOR_PRIVATE_KEY", "")
 
-    # Contract addresses
-    escrow_address: str = os.getenv("ESCROW_ADDRESS", "")
-    signal_commitment_address: str = os.getenv("SIGNAL_COMMITMENT_ADDRESS", "")
-    account_address: str = os.getenv("ACCOUNT_ADDRESS", "")
-    collateral_address: str = os.getenv("COLLATERAL_ADDRESS", "")
-    outcome_voting_address: str = os.getenv("OUTCOME_VOTING_ADDRESS", "")
+    # Contract addresses (Base Sepolia defaults, override via env for mainnet)
+    escrow_address: str = os.getenv(
+        "ESCROW_ADDRESS", "0x290E97c4B26ef1FdcF7BC27aFc43169B4a804a75"
+    )
+    signal_commitment_address: str = os.getenv(
+        "SIGNAL_COMMITMENT_ADDRESS", "0x184afff99bf4d742a1168281c029c06174477bf7"
+    )
+    account_address: str = os.getenv(
+        "ACCOUNT_ADDRESS", "0xbA02aAFaa497953Aa567Ecf12582996E74325a89"
+    )
+    collateral_address: str = os.getenv(
+        "COLLATERAL_ADDRESS", "0x47bcae6055dff70137336211be22f34c7a631626"
+    )
+    outcome_voting_address: str = os.getenv(
+        "OUTCOME_VOTING_ADDRESS", "0x28b5738ff35E207E90b2974cbfae2BdC556acAf6"
+    )
 
     # Validator API
     api_host: str = os.getenv("API_HOST", "0.0.0.0")
