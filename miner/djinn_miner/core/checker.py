@@ -129,7 +129,18 @@ class LineChecker:
         markets_needed = {l.market for l in sport_lines}
         markets_str = ",".join(sorted(markets_needed))
 
-        events = await self._odds.get_odds(sport, markets=markets_str)
+        try:
+            events = await self._odds.get_odds(sport, markets=markets_str)
+        except Exception:
+            # Some markets (e.g. player_prop) aren't available for every
+            # sport. If the full set fails, retry with core markets only.
+            core = markets_needed & {"h2h", "spreads", "totals"}
+            if core and core != markets_needed:
+                events = await self._odds.get_odds(
+                    sport, markets=",".join(sorted(core)),
+                )
+            else:
+                raise
 
         # Filter out events where the game has already started.
         # This prevents geniuses from creating signals with expired lines.
