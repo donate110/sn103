@@ -149,6 +149,7 @@ class NotarySidecar:
         cmd = [
             binary,
             "--port", str(self._port),
+            "--bind", "0.0.0.0",
             "--key", self._key_path,
         ]
 

@@ -134,16 +134,20 @@ async def discover_peer_notaries(
                     return
                 notary_port = data["port"]
 
-                # WebSocket pre-flight: verify the WS proxy accepts connections.
-                # The proxy lives on the API port at /v1/notary/ws, NOT on the
-                # raw TCP notary_port (7047) which doesn't speak HTTP.
-                if not await _ws_handshake_ok(ip, port):
-                    log.warning(
-                        "notary_ws_probe_failed",
+                # TCP probe: verify the notary sidecar accepts connections
+                # on its direct TCP port (not the WS bridge).
+                try:
+                    r, w = await asyncio.wait_for(
+                        asyncio.open_connection(ip, notary_port), timeout=5.0,
+                    )
+                    w.close()
+                    await w.wait_closed()
+                except (ConnectionRefusedError, TimeoutError, OSError):
+                    log.debug(
+                        "notary_tcp_probe_failed",
                         uid=uid,
                         ip=ip,
                         notary_port=notary_port,
-                        msg="HTTP info OK but WebSocket handshake failed, excluding",
                     )
                     return
 
@@ -887,8 +891,7 @@ async def _request_and_verify_proof(
         payload: dict[str, Any] = {"query_id": query_id}
         if notary:
             payload["notary_host"] = notary.ip
-            payload["notary_port"] = notary.port
-            payload["notary_ws"] = True
+            payload["notary_port"] = notary.notary_port  # direct TCP
         body = json.dumps(payload).encode()
         auth_headers = _sign_miner_request("/v1/proof", body, wallet)
         proof_resp = await client.post(
@@ -1126,8 +1129,7 @@ async def challenge_miners_attestation(
                     payload: dict[str, Any] = {"url": url, "request_id": request_id}
                     if assigned_notary:
                         payload["notary_host"] = assigned_notary.ip
-                        payload["notary_port"] = assigned_notary.port
-                        payload["notary_ws"] = True
+                        payload["notary_port"] = assigned_notary.notary_port  # direct TCP, not WS bridge
                         mr["notary_uid"] = assigned_notary.uid
                         mr["notary_pubkey"] = assigned_notary.pubkey_hex[:16]
 
