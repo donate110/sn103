@@ -13,18 +13,10 @@ import {OutcomeVoting} from "../src/OutcomeVoting.sol";
 
 /// @title ExecuteUpgrade
 /// @notice Executes the scheduled audit-fix upgrade batch after the 72h timelock delay.
-///         Run this after the delay has elapsed:
-///           forge script script/ExecuteUpgrade.s.sol --rpc-url $RPC_URL --broadcast
-///
-///         Set these env vars (from UpgradeAuditFixes output):
-///           ACCOUNT_IMPL, AUDIT_IMPL, COLLATERAL_IMPL, ESCROW_IMPL, VOTING_IMPL
-///           ACCOUNT_PROXY, ESCROW_PROXY, COLLATERAL_PROXY, AUDIT_PROXY, OUTCOME_VOTING_PROXY
-///           TIMELOCK_ADDRESS
+///         Must reproduce the exact 13-op batch from UpgradeAuditFixes.s.sol.
 contract ExecuteUpgrade is Script {
-    // ---- Must match the salt used in UpgradeAuditFixes ----
     bytes32 constant UPGRADE_SALT = keccak256("audit-fixes-2026-03-13");
 
-    // CF-16: Addresses packed into structs to avoid stack-too-deep
     struct Proxies {
         address account;
         address escrow;
@@ -43,7 +35,6 @@ contract ExecuteUpgrade is Script {
     }
 
     function run() external {
-        // CF-16: Read proxy addresses from environment for reusability across chains
         Proxies memory px;
         px.account = vm.envAddress("ACCOUNT_PROXY");
         px.escrow = vm.envAddress("ESCROW_PROXY");
@@ -59,47 +50,55 @@ contract ExecuteUpgrade is Script {
         im.escrow = vm.envAddress("ESCROW_IMPL");
         im.voting = vm.envAddress("VOTING_IMPL");
 
-        // Rebuild the exact same batch that was scheduled
-        uint256 opCount = 11;
+        // Rebuild the exact 13-op batch from UpgradeAuditFixes._scheduleBatch
+        uint256 opCount = 13;
         address[] memory targets = new address[](opCount);
         uint256[] memory values = new uint256[](opCount);
         bytes[] memory payloads = new bytes[](opCount);
 
+        // Pause phase (4 ops)
         targets[0] = px.collateral;
         payloads[0] = abi.encodeCall(Collateral.pause, ());
 
         targets[1] = px.escrow;
         payloads[1] = abi.encodeCall(Escrow.pause, ());
 
-        // CF-01: Audit._authorizeUpgrade requires whenPaused
         targets[2] = px.audit;
         payloads[2] = abi.encodeCall(Audit.pause, ());
 
         targets[3] = px.account;
-        payloads[3] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.account, ""));
+        payloads[3] = abi.encodeCall(DjinnAccount.pause, ());
 
-        targets[4] = px.audit;
-        payloads[4] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.audit, ""));
+        // Upgrade phase (5 ops)
+        targets[4] = px.account;
+        payloads[4] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.account, ""));
 
-        targets[5] = px.collateral;
-        payloads[5] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.collateral, ""));
+        targets[5] = px.audit;
+        payloads[5] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.audit, ""));
 
-        targets[6] = px.escrow;
-        payloads[6] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.escrow, ""));
+        targets[6] = px.collateral;
+        payloads[6] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.collateral, ""));
 
-        targets[7] = px.outcomeVoting;
-        payloads[7] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.voting, ""));
+        targets[7] = px.escrow;
+        payloads[7] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.escrow, ""));
 
-        targets[8] = px.collateral;
-        payloads[8] = abi.encodeCall(Collateral.unpause, ());
+        targets[8] = px.outcomeVoting;
+        payloads[8] = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (im.voting, ""));
 
-        targets[9] = px.escrow;
-        payloads[9] = abi.encodeCall(Escrow.unpause, ());
+        // Unpause phase (4 ops)
+        targets[9] = px.collateral;
+        payloads[9] = abi.encodeCall(Collateral.unpause, ());
 
-        targets[10] = px.audit;
-        payloads[10] = abi.encodeCall(Audit.unpause, ());
+        targets[10] = px.escrow;
+        payloads[10] = abi.encodeCall(Escrow.unpause, ());
 
-        // Verify the batch is ready
+        targets[11] = px.audit;
+        payloads[11] = abi.encodeCall(Audit.unpause, ());
+
+        targets[12] = px.account;
+        payloads[12] = abi.encodeCall(DjinnAccount.unpause, ());
+
+        // Verify the batch hash matches the scheduled one
         bytes32 batchId = px.timelock.hashOperationBatch(targets, values, payloads, bytes32(0), UPGRADE_SALT);
         console.log("Batch operation ID:");
         console.logBytes32(batchId);
@@ -110,19 +109,12 @@ contract ExecuteUpgrade is Script {
 
         // Execute
         vm.startBroadcast();
-
         px.timelock.executeBatch(targets, values, payloads, bytes32(0), UPGRADE_SALT);
-
         vm.stopBroadcast();
 
-        // Verify
         console.log("");
         console.log("=== UPGRADE EXECUTED ===");
         console.log("All 5 proxies upgraded. Addresses unchanged.");
-        console.log("Collateral, Escrow, and Audit unpaused.");
-        console.log("");
-        console.log("NOTE: This batch uses the original 11-op schedule (no Account pause/unpause).");
-        console.log("The old Account implementation does not require whenPaused for upgrade.");
-        console.log("Future upgrade batches MUST pause Account (see UpgradeAuditFixes.s.sol).");
+        console.log("All contracts unpaused.");
     }
 }
