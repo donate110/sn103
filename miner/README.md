@@ -18,6 +18,17 @@ uv run python -m djinn_miner
 
 The miner starts a FastAPI server on port 8422 (configurable via `API_PORT`) and registers with the Bittensor metagraph. Validators will begin sending health checks, line availability queries, and attestation challenges automatically.
 
+### Firewall
+
+Open **two ports** on your firewall:
+
+```bash
+ufw allow 8422/tcp   # API port (validator challenges)
+ufw allow 7047/tcp   # Notary sidecar (peer attestation via direct TCP)
+```
+
+Port 7047 is required for peer notary attestation. Miners whose notary port is unreachable cannot serve as peer notaries for other miners, which reduces their notary reliability score.
+
 ## How Scoring Works
 
 Validators compute miner weights each epoch using two independent scoring tracks that are blended into a final score.
