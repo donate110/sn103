@@ -144,6 +144,7 @@ class ProofGenerator:
         notary_host: str | None = None,
         notary_port: int | None = None,
         notary_ws: bool = False,
+        notary_ws_port: int | None = None,
     ) -> ProofResponse:
         """Generate a proof for a captured HTTP session.
 
@@ -161,6 +162,7 @@ class ProofGenerator:
                 notary_host=notary_host,
                 notary_port=notary_port,
                 notary_ws=notary_ws,
+                notary_ws_port=notary_ws_port,
             )
             if tlsn_result is not None:
                 self._capture.remove(query_id)
@@ -222,6 +224,7 @@ class ProofGenerator:
         notary_host: str | None = None,
         notary_port: int | None = None,
         notary_ws: bool = False,
+        notary_ws_port: int | None = None,
     ) -> ProofResponse | None:
         """Attempt to generate a TLSNotary proof for the session."""
         # Reconstruct the original URL with API key for TLSNotary
@@ -236,6 +239,7 @@ class ProofGenerator:
             notary_host=notary_host,
             notary_port=notary_port,
             notary_ws=notary_ws,
+            notary_ws_port=notary_ws_port,
         )
 
         if not result.success:

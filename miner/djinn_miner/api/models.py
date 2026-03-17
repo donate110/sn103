@@ -97,8 +97,9 @@ class ProofRequest(BaseModel):
     query_id: str = Field(max_length=256, description="ID of the original check query")
     session_data: str = Field(default="", max_length=10_000, description="Optional session data for fallback proof")
     notary_host: str | None = Field(default=None, description="Peer notary IP for TLSNotary proof")
-    notary_port: int | None = Field(default=None, description="Peer notary port (API port, WebSocket proxy)")
-    notary_ws: bool = Field(default=False, description="Use WebSocket transport to peer notary")
+    notary_port: int | None = Field(default=None, description="Peer notary TCP port (direct connection)")
+    notary_ws: bool = Field(default=False, description="Legacy WS flag; direct TCP tried first")
+    notary_ws_port: int | None = Field(default=None, description="API port for WS bridge fallback")
 
 
 class ProofResponse(BaseModel):
@@ -175,11 +176,15 @@ class AttestRequest(BaseModel):
     )
     notary_port: int | None = Field(
         default=None, ge=1, le=65535,
-        description="Peer notary port (API port when notary_ws=True). Uses default if omitted.",
+        description="Peer notary TCP port (direct connection). Uses default if omitted.",
     )
     notary_ws: bool = Field(
         default=False,
-        description="If True, connect to peer notary via WebSocket proxy at /v1/notary/ws.",
+        description="Legacy: if True and direct TCP fails, use WS bridge on notary_port.",
+    )
+    notary_ws_port: int | None = Field(
+        default=None, ge=1, le=65535,
+        description="API port for WebSocket bridge fallback (ws://host:port/v1/notary/ws).",
     )
 
     @field_validator("url")

@@ -85,6 +85,7 @@ async def generate_proof(
     notary_host: str | None = None,
     notary_port: int | None = None,
     notary_ws: bool = False,
+    notary_ws_port: int | None = None,
     output_dir: str | None = None,
     timeout: float = 180.0,
 ) -> TLSNProofResult:
@@ -93,10 +94,9 @@ async def generate_proof(
     Args:
         url: Full URL to fetch (with query params, including API key).
         notary_host: Notary server hostname. Defaults to TLSN_NOTARY_HOST env.
-        notary_port: Notary server port. Defaults to TLSN_NOTARY_PORT env.
-        notary_ws: If True, connect to the peer notary via WebSocket proxy
-            at ws://notary_host:notary_port/v1/notary/ws. A local TCP bridge
-            is created so the prover binary can connect as usual.
+        notary_port: Notary server TCP port. Tried first via direct TCP.
+        notary_ws: If True and direct TCP fails, fall back to WebSocket proxy.
+        notary_ws_port: API port for WS fallback (ws://host:ws_port/v1/notary/ws).
         output_dir: Directory for the presentation file. Uses tempdir if None.
         timeout: Max seconds to wait for proof generation.
 
@@ -158,11 +158,40 @@ async def generate_proof(
         recv_data_size = _MIN_RECV
 
     try:
-        if notary_ws and notary_host:
-            return await _run_prover_via_ws(
-                url, notary_host, port, output_path, timeout,
-                max_recv_data=recv_data_size,
+        # Try direct TCP first (works when peer notary binds 0.0.0.0).
+        # If TCP is refused, fall back to WS bridge on the API port.
+        if notary_host and port:
+            import socket as _sock
+            tcp_ok = False
+            try:
+                s = _sock.socket()
+                s.settimeout(3)
+                s.connect((host, port))
+                s.close()
+                tcp_ok = True
+            except (ConnectionRefusedError, TimeoutError, OSError):
+                pass
+
+            if tcp_ok:
+                log.info("tlsn_using_direct_tcp", host=host, port=port)
+                return await _run_prover(url, host, port, output_path, timeout,
+                                         max_recv_data=recv_data_size)
+
+            # Direct TCP failed. Try WS bridge if we have an API port.
+            ws_port = notary_ws_port or (port if notary_ws else None)
+            if ws_port and notary_host:
+                log.info("tlsn_tcp_refused_trying_ws", host=notary_host, tcp_port=port, ws_port=ws_port)
+                return await _run_prover_via_ws(
+                    url, notary_host, ws_port, output_path, timeout,
+                    max_recv_data=recv_data_size,
+                )
+
+            # No WS fallback available, TCP refused
+            return TLSNProofResult(
+                success=False,
+                error=f"Peer notary {host}:{port} TCP refused and no WS fallback available",
             )
+
         return await _run_prover(url, host, port, output_path, timeout,
                                  max_recv_data=recv_data_size)
     except Exception:

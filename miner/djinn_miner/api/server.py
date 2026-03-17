@@ -220,6 +220,7 @@ def create_app(
                     notary_host=request.notary_host,
                     notary_port=request.notary_port,
                     notary_ws=request.notary_ws,
+                    notary_ws_port=request.notary_ws_port,
                 ),
                 timeout=180.0,
             )
@@ -481,6 +482,7 @@ def create_app(
                     notary_host=request.notary_host,
                     notary_port=request.notary_port,
                     notary_ws=request.notary_ws,
+                    notary_ws_port=request.notary_ws_port,
                     timeout=180.0,
                 ),
                 timeout=210.0,

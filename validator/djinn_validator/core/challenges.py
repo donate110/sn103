@@ -892,11 +892,8 @@ async def _request_and_verify_proof(
         payload: dict[str, Any] = {"query_id": query_id}
         if notary:
             payload["notary_host"] = notary.ip
-            if notary.tcp_reachable:
-                payload["notary_port"] = notary.notary_port
-            else:
-                payload["notary_port"] = notary.port
-                payload["notary_ws"] = True
+            payload["notary_port"] = notary.notary_port
+            payload["notary_ws_port"] = notary.port
         body = json.dumps(payload).encode()
         auth_headers = _sign_miner_request("/v1/proof", body, wallet)
         proof_resp = await client.post(
@@ -1134,11 +1131,8 @@ async def challenge_miners_attestation(
                     payload: dict[str, Any] = {"url": url, "request_id": request_id}
                     if assigned_notary:
                         payload["notary_host"] = assigned_notary.ip
-                        if assigned_notary.tcp_reachable:
-                            payload["notary_port"] = assigned_notary.notary_port
-                        else:
-                            payload["notary_port"] = assigned_notary.port  # API port
-                            payload["notary_ws"] = True  # WS bridge fallback
+                        payload["notary_port"] = assigned_notary.notary_port  # direct TCP port
+                        payload["notary_ws_port"] = assigned_notary.port  # API port for WS fallback
                         mr["notary_uid"] = assigned_notary.uid
                         mr["notary_pubkey"] = assigned_notary.pubkey_hex[:16]
 
