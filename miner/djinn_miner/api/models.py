@@ -32,8 +32,10 @@ class CandidateLine(BaseModel):
     @field_validator("market")
     @classmethod
     def validate_market(cls, v: str) -> str:
-        if v not in _VALID_MARKETS:
-            raise ValueError(f"market must be one of {_VALID_MARKETS}, got '{v}'")
+        # Accept any market string. Validators send synthetic markets
+        # (e.g., "player_prop") as part of challenge scoring. Rejecting
+        # them causes 422 and 0% accuracy. The miner should report
+        # unknown markets as unavailable, not refuse the request.
         return v
 
 
