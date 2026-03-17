@@ -57,6 +57,7 @@ class PeerNotary:
     port: int  # miner API port
     notary_port: int  # TCP port of the notary sidecar
     pubkey_hex: str
+    tcp_reachable: bool = False  # True if notary TCP port is directly accessible
 
 
 async def _ws_handshake_ok(ip: str, port: int, timeout: float = 5.0) -> bool:
@@ -134,21 +135,20 @@ async def discover_peer_notaries(
                     return
                 notary_port = data["port"]
 
-                # TCP probe: verify the notary sidecar accepts connections
-                # on its direct TCP port (not the WS bridge).
+                # Probe: try direct TCP first (updated miners bind 0.0.0.0),
+                # fall back to WS handshake check for old miners.
+                tcp_ok = False
                 try:
                     r, w = await asyncio.wait_for(
-                        asyncio.open_connection(ip, notary_port), timeout=5.0,
+                        asyncio.open_connection(ip, notary_port), timeout=3.0,
                     )
                     w.close()
                     await w.wait_closed()
+                    tcp_ok = True
                 except (ConnectionRefusedError, TimeoutError, OSError):
-                    log.debug(
-                        "notary_tcp_probe_failed",
-                        uid=uid,
-                        ip=ip,
-                        notary_port=notary_port,
-                    )
+                    pass
+
+                if not tcp_ok and not await _ws_handshake_ok(ip, port):
                     return
 
                 notaries.append(PeerNotary(
@@ -157,6 +157,7 @@ async def discover_peer_notaries(
                     port=port,
                     notary_port=notary_port,
                     pubkey_hex=data["pubkey_hex"],
+                    tcp_reachable=tcp_ok,
                 ))
             except (httpx.HTTPError, Exception):
                 pass
@@ -891,7 +892,11 @@ async def _request_and_verify_proof(
         payload: dict[str, Any] = {"query_id": query_id}
         if notary:
             payload["notary_host"] = notary.ip
-            payload["notary_port"] = notary.notary_port  # direct TCP
+            if notary.tcp_reachable:
+                payload["notary_port"] = notary.notary_port
+            else:
+                payload["notary_port"] = notary.port
+                payload["notary_ws"] = True
         body = json.dumps(payload).encode()
         auth_headers = _sign_miner_request("/v1/proof", body, wallet)
         proof_resp = await client.post(
@@ -1129,7 +1134,11 @@ async def challenge_miners_attestation(
                     payload: dict[str, Any] = {"url": url, "request_id": request_id}
                     if assigned_notary:
                         payload["notary_host"] = assigned_notary.ip
-                        payload["notary_port"] = assigned_notary.notary_port  # direct TCP, not WS bridge
+                        if assigned_notary.tcp_reachable:
+                            payload["notary_port"] = assigned_notary.notary_port
+                        else:
+                            payload["notary_port"] = assigned_notary.port  # API port
+                            payload["notary_ws"] = True  # WS bridge fallback
                         mr["notary_uid"] = assigned_notary.uid
                         mr["notary_pubkey"] = assigned_notary.pubkey_hex[:16]
 
