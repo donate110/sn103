@@ -189,37 +189,100 @@ export default function MinerPage() {
                 </div>
 
                 {r.weight_breakdown && (
-                  <details className="text-xs">
-                    <summary className="cursor-pointer text-slate-400 hover:text-slate-600">
-                      Weight breakdown
-                    </summary>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2 bg-slate-50 rounded-lg p-3">
-                      {r.weight_breakdown.sports_score !== undefined && (
+                  <div className="text-xs mt-3 space-y-3">
+                    <p className="text-slate-500 font-medium uppercase tracking-wide">Weight Breakdown</p>
+
+                    {/* Final Scores */}
+                    <div>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wide mb-1">Final Scores</p>
+                      <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg p-3">
                         <div>
                           <span className="text-slate-400">Sports Score</span>
-                          <p className="font-mono">{Number(r.weight_breakdown.sports_score).toFixed(4)}</p>
+                          <p className="font-mono text-sm font-semibold">
+                            {r.weight_breakdown.sports_score !== undefined ? Number(r.weight_breakdown.sports_score).toFixed(4) : "-"}
+                          </p>
                         </div>
-                      )}
-                      {r.weight_breakdown.attestation_score !== undefined && (
                         <div>
                           <span className="text-slate-400">Attestation Score</span>
-                          <p className="font-mono">{Number(r.weight_breakdown.attestation_score).toFixed(4)}</p>
+                          <p className="font-mono text-sm font-semibold">
+                            {r.weight_breakdown.attestation_score !== undefined ? Number(r.weight_breakdown.attestation_score).toFixed(4) : "-"}
+                          </p>
                         </div>
-                      )}
-                      {r.weight_breakdown.capability_score !== undefined && (
-                        <div>
-                          <span className="text-slate-400">Capability</span>
-                          <p className="font-mono">{Number(r.weight_breakdown.capability_score).toFixed(4)}</p>
-                        </div>
-                      )}
-                      {r.weight_breakdown.raw_score !== undefined && (
                         <div>
                           <span className="text-slate-400">Raw Score</span>
-                          <p className="font-mono">{Number(r.weight_breakdown.raw_score).toFixed(4)}</p>
+                          <p className="font-mono text-sm font-semibold">
+                            {r.weight_breakdown.raw_score !== undefined ? Number(r.weight_breakdown.raw_score).toFixed(4) : "-"}
+                          </p>
                         </div>
-                      )}
+                      </div>
                     </div>
-                  </details>
+
+                    {/* Components */}
+                    <div>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wide mb-1">Components</p>
+                      <div className="grid grid-cols-5 gap-2 bg-slate-50 rounded-lg p-3">
+                        <div>
+                          <span className="text-slate-400">Speed</span>
+                          <p className="font-mono text-sm font-semibold">
+                            {r.weight_breakdown.speed !== undefined ? Number(r.weight_breakdown.speed).toFixed(4) : "-"}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Uptime</span>
+                          <p className="font-mono text-sm font-semibold">
+                            {r.weight_breakdown.uptime !== undefined ? Number(r.weight_breakdown.uptime).toFixed(4) : "-"}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Accuracy</span>
+                          <p className="font-mono text-sm font-semibold">
+                            {r.weight_breakdown.accuracy !== undefined ? Number(r.weight_breakdown.accuracy).toFixed(4) : "-"}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Coverage</span>
+                          <p className="font-mono text-sm font-semibold">
+                            {r.weight_breakdown.coverage !== undefined ? Number(r.weight_breakdown.coverage).toFixed(4) : "-"}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Capability</span>
+                          <p className="font-mono text-sm font-semibold">
+                            {r.weight_breakdown.capability_score !== undefined ? Number(r.weight_breakdown.capability_score).toFixed(4) : "-"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* History & Notary */}
+                    <div>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wide mb-1">History & Notary</p>
+                      <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-lg p-3">
+                        <div>
+                          <span className="text-slate-400">Consecutive Epochs</span>
+                          <p className="font-mono text-sm font-semibold">
+                            {r.weight_breakdown.consecutive_epochs !== undefined ? String(r.weight_breakdown.consecutive_epochs) : "-"}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Notary Reliability</span>
+                          <p className="font-mono text-sm font-semibold">
+                            {r.weight_breakdown.notary_reliability !== undefined
+                              ? `${(Number(r.weight_breakdown.notary_reliability) * 100).toFixed(0)}%`
+                              : "-"}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Notary Capable</span>
+                          <p className="font-mono text-sm font-semibold">
+                            {r.weight_breakdown.notary_capable !== undefined
+                              ? (r.weight_breakdown.notary_capable ? "Yes" : "No")
+                              : "-"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             ))}
