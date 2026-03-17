@@ -209,6 +209,34 @@ async def async_main() -> None:
             telemetry.record("notary_sidecar_started", "Peer notary sidecar running",
                              port=notary_sidecar.info.port,
                              pubkey=notary_sidecar.info.pubkey_hex[:16] + "...")
+            # Check if the notary port is reachable from outside (firewall check).
+            # Miners whose port is blocked can't serve as peer notaries.
+            import socket
+            notary_port = notary_sidecar.info.port
+            ext_ip = config.external_ip
+            if not ext_ip and neuron and bt_ok:
+                try:
+                    axon = neuron.get_axon_info(neuron.uid)
+                    ext_ip = axon.get("ip", "")
+                except Exception:
+                    pass
+            if ext_ip:
+                try:
+                    s = socket.socket()
+                    s.settimeout(3)
+                    s.connect((ext_ip, notary_port))
+                    s.close()
+                    log.info("notary_port_reachable", port=notary_port, ip=ext_ip)
+                except (ConnectionRefusedError, TimeoutError, OSError):
+                    log.error(
+                        "notary_port_blocked",
+                        port=notary_port,
+                        ip=ext_ip,
+                        msg=f"Port {notary_port}/tcp is not reachable from outside. "
+                            f"Run: ufw allow {notary_port}/tcp -- "
+                            f"Without this, your miner cannot serve as a peer notary and will lose attestation score.",
+                    )
+                    s.close()
         else:
             log.warning("notary_sidecar_failed", msg="Could not start peer notary sidecar")
 
