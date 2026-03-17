@@ -1114,8 +1114,7 @@ async def challenge_miners_attestation(
             request_id = f"challenge-{uid}-{int(time.time())}"
             mr: dict = {"uid": uid}
 
-            # Assign a peer notary if available (backwards-compat: omit fields
-            # for old miners that don't understand notary_host/notary_port)
+            # Assign a peer notary so the miner can't self-notarize.
             assigned_notary = assign_peer_notary(
                 uid, peer_notaries, prover_ip=axon.get("ip"),
                 assignment_counts=_notary_counts, max_per_notary=_max_per_notary,
@@ -1126,12 +1125,9 @@ async def challenge_miners_attestation(
                 try:
                     payload: dict[str, Any] = {"url": url, "request_id": request_id}
                     if assigned_notary:
-                        # Use WebSocket proxy on the peer miner's existing API port.
-                        # The prover connects to ws://<ip>:<api_port>/v1/notary/ws
-                        # which proxies to the notary sidecar on localhost:7047.
                         payload["notary_host"] = assigned_notary.ip
-                        payload["notary_port"] = assigned_notary.port  # API port, not TCP notary port
-                        payload["notary_ws"] = True  # signal to use WebSocket transport
+                        payload["notary_port"] = assigned_notary.port
+                        payload["notary_ws"] = True
                         mr["notary_uid"] = assigned_notary.uid
                         mr["notary_pubkey"] = assigned_notary.pubkey_hex[:16]
 
@@ -1141,7 +1137,7 @@ async def challenge_miners_attestation(
                         miner_url,
                         content=body,
                         headers={"Content-Type": "application/json", **auth_headers},
-                        timeout=60.0,
+                        timeout=120.0,
                     )
                     latency = time.perf_counter() - start
                     mr["latency"] = round(latency, 1)

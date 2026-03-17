@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import time
+
+from djinn_miner.core.tlsn_bootstrap import ensure_binary
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -277,24 +280,65 @@ def create_app(
             port=info.port,
         )
 
-    # Notary MPC sessions are stateful and heavy — limit concurrency.
-    # The sidecar can handle a few concurrent sessions but degrades fast.
+    # Max concurrent peer notary sessions. Each session spawns its own
+    # ephemeral notary process on a random port (clean MPC state, no
+    # cross-session interference). The limit prevents resource exhaustion.
     _notary_max_concurrent = int(os.getenv("NOTARY_MAX_CONCURRENT", "4"))
     _notary_sem = asyncio.Semaphore(_notary_max_concurrent)
+
+    async def _spawn_ephemeral_notary() -> tuple[asyncio.subprocess.Process, int] | None:
+        """Spawn a short-lived notary process on a random port for one session."""
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        if notary_sidecar is None:
+            return None
+        binary = shutil.which(ensure_binary("djinn-tlsn-notary"))
+        if not binary:
+            return None
+        key_path = notary_sidecar._key_path
+        env = os.environ.copy()
+        env["RUST_LOG"] = "warn"
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                binary, "--port", str(port), "--key", key_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                env=env,
+            )
+            # Wait for the notary to be ready (listens on port)
+            for _ in range(40):  # 4 seconds max
+                await asyncio.sleep(0.1)
+                try:
+                    r, w = await asyncio.wait_for(
+                        asyncio.open_connection("127.0.0.1", port), timeout=0.5,
+                    )
+                    w.close()
+                    await w.wait_closed()
+                    return proc, port
+                except (ConnectionRefusedError, TimeoutError, OSError):
+                    if proc.returncode is not None:
+                        return None
+            log.warning("ephemeral_notary_start_timeout", port=port)
+            proc.kill()
+            return None
+        except Exception as e:
+            log.warning("ephemeral_notary_spawn_failed", error=str(e))
+            return None
 
     @app.websocket("/v1/notary/ws")
     async def notary_ws_proxy(ws: WebSocket) -> None:
         """WebSocket-to-TCP proxy for the peer notary MPC handshake.
 
-        A peer miner's prover connects here via WebSocket. We proxy bytes
-        bidirectionally to the local notary sidecar on localhost:7047.
-        This lets peers reach the notary through the existing API port
-        with zero firewall changes.
-
-        Concurrency is limited by NOTARY_MAX_CONCURRENT (default 4) to
-        prevent overwhelming the notary sidecar.
+        Each session spawns an ephemeral notary process on a random port.
+        This gives every prover a clean MPC state and eliminates the
+        cascade failure where post-session restarts kill concurrent
+        sessions. The process is killed when the session ends.
         """
-        if notary_sidecar is None or not notary_sidecar.is_running():
+        if notary_sidecar is None or not notary_sidecar.enabled:
             await ws.close(code=1013, reason="notary not available")
             return
 
@@ -307,14 +351,22 @@ def create_app(
         NOTARY_SESSIONS.labels(status="connected").inc()
 
         async with _notary_sem:
+            spawned = await _spawn_ephemeral_notary()
+            if spawned is None:
+                NOTARY_SESSIONS.labels(status="error").inc()
+                await ws.close(code=1013, reason="notary spawn failed")
+                return
+            notary_proc, notary_port = spawned
+
             try:
                 reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection("127.0.0.1", notary_sidecar.info.port),
+                    asyncio.open_connection("127.0.0.1", notary_port),
                     timeout=5.0,
                 )
             except (ConnectionRefusedError, TimeoutError, OSError) as e:
-                log.warning("notary_ws_connect_failed", error=str(e))
+                log.warning("notary_ws_connect_failed", error=str(e), port=notary_port)
                 NOTARY_SESSIONS.labels(status="error").inc()
+                notary_proc.kill()
                 await ws.close(code=1013, reason="notary connection failed")
                 return
 
@@ -342,7 +394,7 @@ def create_app(
             try:
                 await asyncio.wait_for(
                     asyncio.gather(ws_to_tcp(), tcp_to_ws()),
-                    timeout=300.0,  # 5 min max per notary session
+                    timeout=120.0,
                 )
                 NOTARY_SESSIONS.labels(status="completed").inc()
             except TimeoutError:
@@ -356,14 +408,13 @@ def create_app(
                     await ws.close()
                 except Exception:
                     pass
-                # Restart the notary sidecar after each session to clear
-                # accumulated MPC state. The tlsn library (alpha) degrades
-                # across sessions. Restarting takes <1s and guarantees
-                # fresh state for the next session.
+                notary_proc.kill()
+                try:
+                    await asyncio.wait_for(notary_proc.wait(), timeout=3.0)
+                except TimeoutError:
+                    pass
                 if notary_sidecar is not None:
                     notary_sidecar.record_session()
-                    await notary_sidecar.stop()
-                    await notary_sidecar.start()
 
     @app.get("/v1/attest/capacity")
     async def attest_miner_capacity() -> dict:

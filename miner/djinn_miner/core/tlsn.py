@@ -106,12 +106,10 @@ async def generate_proof(
     host = notary_host or NOTARY_HOST
     port = notary_port or NOTARY_PORT
 
-    # Peer notary is required. Validators assign one via notary_host/notary_port.
-    # If none was assigned, fail fast rather than hanging on an external service.
-    if not notary_host and not NOTARY_HOST:
+    if not host:
         return TLSNProofResult(
             success=False,
-            error="No peer notary assigned. Validator must provide notary_host/notary_port.",
+            error="No notary host configured. Set TLSN_NOTARY_HOST or wait for validator peer assignment.",
         )
 
     # Resolve redirects and probe response size. The prover can't follow
@@ -161,11 +159,10 @@ async def generate_proof(
 
     try:
         if notary_ws and notary_host:
-            result = await _run_prover_via_ws(
+            return await _run_prover_via_ws(
                 url, notary_host, port, output_path, timeout,
                 max_recv_data=recv_data_size,
             )
-            return result
         return await _run_prover(url, host, port, output_path, timeout,
                                  max_recv_data=recv_data_size)
     except Exception:

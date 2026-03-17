@@ -306,12 +306,15 @@ class NotarySidecar:
         """
         self._session_count += 1
 
-    async def watchdog_loop(self, interval: float = 30.0) -> None:
-        """Periodically check sidecar health and restart if crashed.
+    # Restart the sidecar after this many sessions to clear accumulated
+    # MPC state. The tlsn library can degrade over many sessions.
+    _RESTART_EVERY_N_SESSIONS = int(os.getenv("NOTARY_RESTART_INTERVAL", "10"))
 
-        The notary binary is restarted after every MPC session by the
-        WebSocket proxy handler (server.py). The watchdog only handles
-        crash recovery and port-death detection.
+    async def watchdog_loop(self, interval: float = 30.0) -> None:
+        """Periodically check sidecar health and restart if needed.
+
+        Handles crash recovery, port-death detection, and periodic
+        restarts after N sessions to clear accumulated MPC state.
         """
         self._session_count = 0
         while True:
@@ -329,6 +332,10 @@ class NotarySidecar:
                     needs_restart = True
                     reason = "port_dead"
                     log.warning("notary_watchdog_port_dead", port=self._port)
+                elif self._session_count >= self._RESTART_EVERY_N_SESSIONS:
+                    needs_restart = True
+                    reason = f"periodic ({self._session_count} sessions)"
+                    log.info("notary_watchdog_periodic_restart", sessions=self._session_count)
                 if needs_restart:
                     await self.stop()
                     restarted = await self.restart_if_needed()
