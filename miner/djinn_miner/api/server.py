@@ -482,9 +482,7 @@ def create_app(
             )
             # When a peer notary is assigned, use a short timeout (45s) so we
             # can fall back to our local notary quickly if the peer is broken.
-            # Most successful peer proofs complete in <30s; 180s wastes the
-            # validator's entire timeout budget on a dead peer.
-            _peer_timeout = 45.0 if _using_peer else 180.0
+            _peer_timeout = 45.0 if _using_peer else 150.0
 
             result = await asyncio.wait_for(
                 tlsn_module.generate_proof(
@@ -498,28 +496,38 @@ def create_app(
                 timeout=_peer_timeout + 15.0,
             )
 
-            # Fallback: if peer notary failed, retry with our own local notary.
-            # Peer notaries are often unreliable (version mismatch, OOM, dropped
-            # connections). Our local sidecar on port 7047 is always compatible.
-            if not result.success and _using_peer:
-                from djinn_miner.core.notary_sidecar import NOTARY_PORT as _LOCAL_NOTARY_PORT
-                log.info(
-                    "attest_peer_failed_trying_local",
-                    url=request.url,
-                    peer_error=result.error[:200] if result.error else "",
-                    local_port=_LOCAL_NOTARY_PORT,
-                )
-                result = await asyncio.wait_for(
-                    tlsn_module.generate_proof(
-                        request.url,
-                        notary_host="127.0.0.1",
-                        notary_port=_LOCAL_NOTARY_PORT,
-                        timeout=150.0,
-                    ),
-                    timeout=165.0,
-                )
-                if result.success:
-                    log.info("attest_local_fallback_succeeded", url=request.url)
+            # Fallback: if peer or main sidecar failed, spawn a fresh ephemeral
+            # notary. The main sidecar (port 7047) accumulates MPC state and
+            # becomes unresponsive after handling sessions. Ephemeral notaries
+            # get clean state every time, matching the WS proxy approach.
+            if not result.success:
+                spawned = await _spawn_ephemeral_notary()
+                if spawned is not None:
+                    eph_proc, eph_port = spawned
+                    try:
+                        log.info(
+                            "attest_trying_ephemeral_notary",
+                            url=request.url,
+                            prior_error=result.error[:200] if result.error else "",
+                            eph_port=eph_port,
+                        )
+                        result = await asyncio.wait_for(
+                            tlsn_module.generate_proof(
+                                request.url,
+                                notary_host="127.0.0.1",
+                                notary_port=eph_port,
+                                timeout=150.0,
+                            ),
+                            timeout=165.0,
+                        )
+                        if result.success:
+                            log.info("attest_ephemeral_notary_succeeded", url=request.url)
+                    finally:
+                        eph_proc.kill()
+                        try:
+                            await eph_proc.wait()
+                        except Exception:
+                            pass
         except TimeoutError:
             ATTESTATION_REQUESTS.labels(status="error").inc()
             ATTESTATION_DURATION.observe(time.perf_counter() - start)
