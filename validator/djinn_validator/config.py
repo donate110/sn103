@@ -45,7 +45,9 @@ class Config:
     bt_network: str = os.getenv("BT_NETWORK", "finney")
     bt_wallet_name: str = os.getenv("BT_WALLET_NAME", "default")
     bt_wallet_hotkey: str = os.getenv("BT_WALLET_HOTKEY", "default")
-    bt_burn_fraction: float = _float_env("BT_BURN_FRACTION", "0.90")
+    # Burn fraction is a protocol parameter, not operator-configurable.
+    # Hardcoded so .env overrides can't cause validators to diverge.
+    bt_burn_fraction: float = 0.90
 
     # Base chain (comma-separated URLs for failover)
     base_rpc_url: str = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
