@@ -18,6 +18,7 @@ HTTP attestation when the Rust binary is not installed.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -136,6 +137,49 @@ class ProofGenerator:
     def tlsn_available(self) -> bool:
         return self._tlsn_available
 
+    @staticmethod
+    async def _spawn_ephemeral_notary() -> tuple[asyncio.subprocess.Process, int] | None:
+        """Spawn a short-lived notary on a random port for one proof."""
+        import os
+        import shutil
+        import socket
+
+        from djinn_miner.core.tlsn_bootstrap import ensure_binary
+
+        binary = shutil.which(ensure_binary("djinn-tlsn-notary"))
+        if not binary:
+            return None
+        key_path = os.getenv(
+            "NOTARY_KEY_PATH", os.path.expanduser("~/.local/share/djinn/notary-key.bin")
+        )
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        env = os.environ.copy()
+        env["RUST_LOG"] = "warn"
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                binary, "--port", str(port), "--key", key_path,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+                env=env,
+            )
+            for _ in range(40):
+                await asyncio.sleep(0.1)
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.connect(("127.0.0.1", port))
+                    s.close()
+                    return proc, port
+                except ConnectionRefusedError:
+                    continue
+            proc.kill()
+            return None
+        except Exception as e:
+            log.warning("ephemeral_notary_spawn_failed", error=str(e))
+            return None
+
     async def generate(
         self,
         query_id: str,
@@ -243,12 +287,34 @@ class ProofGenerator:
         )
 
         if not result.success:
+            # Peer notary failed. Try an ephemeral local notary before
+            # falling back to http_attestation (which validators reject).
             log.warning(
-                "tlsn_proof_failed_falling_back",
+                "tlsn_proof_failed_trying_ephemeral",
                 query_id=session.query_id,
                 error=result.error,
             )
-            return None
+            spawned = await self._spawn_ephemeral_notary()
+            if spawned is not None:
+                eph_proc, eph_port = spawned
+                try:
+                    result = await tlsn_module.generate_proof(
+                        url,
+                        notary_host="127.0.0.1",
+                        notary_port=eph_port,
+                        timeout=150.0,
+                    )
+                    if result.success:
+                        log.info("tlsn_proof_ephemeral_succeeded", query_id=session.query_id)
+                finally:
+                    eph_proc.kill()
+                    try:
+                        await eph_proc.wait()
+                    except Exception:
+                        pass
+
+            if not result.success:
+                return None
 
         # Hash the presentation for the proof_hash field
         proof_hash = hashlib.sha256(result.presentation_bytes).hexdigest()
