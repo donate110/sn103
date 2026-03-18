@@ -62,6 +62,46 @@ class ProactiveAttester:
     def __init__(self, notary_port: int = 7047, notary_pubkey: str = "") -> None:
         self._notary_port = notary_port
         self._notary_pubkey = notary_pubkey
+        self._notary_key_path = os.getenv(
+            "NOTARY_KEY_PATH", os.path.expanduser("~/.local/share/djinn/notary-key.bin")
+        )
+
+    async def _spawn_ephemeral_notary(self) -> tuple[asyncio.subprocess.Process, int] | None:
+        """Spawn a short-lived notary on a random port for one proof."""
+        import shutil
+        import socket
+        from djinn_miner.core.tlsn_bootstrap import ensure_binary
+
+        binary = shutil.which(ensure_binary("djinn-tlsn-notary"))
+        if not binary:
+            return None
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        env = os.environ.copy()
+        env["RUST_LOG"] = "warn"
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                binary, "--port", str(port), "--key", self._notary_key_path,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+                env=env,
+            )
+            for _ in range(40):
+                await asyncio.sleep(0.1)
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.connect(("127.0.0.1", port))
+                    s.close()
+                    return proc, port
+                except ConnectionRefusedError:
+                    continue
+            proc.kill()
+            return None
+        except Exception as e:
+            log.warning("ephemeral_notary_spawn_failed", error=str(e))
+            return None
         self._cached: CachedProof | None = None
         self._running = False
         self._consecutive_failures = 0
@@ -89,7 +129,12 @@ class ProactiveAttester:
         return None
 
     async def _generate_proof(self) -> CachedProof | None:
-        """Generate a TLSNotary proof of the proactive URL using local notary."""
+        """Generate a TLSNotary proof of the proactive URL using an ephemeral notary.
+
+        Spawns a temporary notary process on a random port so it doesn't
+        interfere with the main sidecar or peer notary sessions. The
+        process is killed after the proof completes.
+        """
         from djinn_miner.core import tlsn as tlsn_module
 
         if not tlsn_module.is_available():
@@ -99,12 +144,28 @@ class ProactiveAttester:
         log.info("proactive_attest_starting", url=PROACTIVE_URL)
         start = time.time()
 
-        result = await tlsn_module.generate_proof(
-            PROACTIVE_URL,
-            notary_host="127.0.0.1",
-            notary_port=self._notary_port,
-            timeout=120.0,
-        )
+        # Spawn ephemeral notary to avoid colliding with the main sidecar
+        ephemeral = await self._spawn_ephemeral_notary()
+        if ephemeral is None:
+            # Fall back to shared sidecar if ephemeral spawn fails
+            notary_port = self._notary_port
+            ephemeral_proc = None
+        else:
+            ephemeral_proc, notary_port = ephemeral
+
+        try:
+            result = await tlsn_module.generate_proof(
+                PROACTIVE_URL,
+                notary_host="127.0.0.1",
+                notary_port=notary_port,
+                timeout=120.0,
+            )
+        finally:
+            if ephemeral_proc is not None:
+                try:
+                    ephemeral_proc.kill()
+                except Exception:
+                    pass
 
         if not result.success:
             log.warning("proactive_attest_failed", error=result.error, elapsed_s=round(time.time() - start, 1))
