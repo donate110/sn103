@@ -91,6 +91,9 @@ class MinerMetrics:
     health_checks_responded: int = 0
     consecutive_epochs: int = 0
 
+    # ── Carry-forward accuracy (preserved across epoch resets) ──
+    prev_accuracy: float = 0.0  # Last epoch's accuracy, used when no challenges in current epoch
+
     # ── Lifetime counters (never reset, for dashboard display) ──
     lifetime_queries: int = 0
     lifetime_correct: int = 0
@@ -98,9 +101,14 @@ class MinerMetrics:
     lifetime_attestations_valid: int = 0
 
     def accuracy_score(self) -> float:
-        """Fraction of sports queries where Phase 1 result matched ground truth."""
+        """Fraction of sports queries where Phase 1 result matched ground truth.
+
+        Falls back to previous epoch's accuracy if no challenges have
+        happened yet in the current epoch. This prevents miners from
+        being scored as 0% accuracy between challenge rounds.
+        """
         if self.queries_total == 0:
-            return 0.0
+            return self.prev_accuracy
         return self.queries_correct / self.queries_total
 
     def coverage_score(self) -> float:
@@ -303,6 +311,7 @@ class MinerScorer:
                     m.lifetime_correct = d.get("lifetime_correct", 0)
                     m.lifetime_attestations = d.get("lifetime_attestations", 0)
                     m.lifetime_attestations_valid = d.get("lifetime_attestations_valid", 0)
+                    m.prev_accuracy = d.get("prev_accuracy", 0.0)
                     self._miners[uid] = m
                     loaded += 1
                 except Exception:
@@ -343,6 +352,7 @@ class MinerScorer:
             "lifetime_correct": m.lifetime_correct,
             "lifetime_attestations": m.lifetime_attestations,
             "lifetime_attestations_valid": m.lifetime_attestations_valid,
+            "prev_accuracy": m.prev_accuracy,
         })
         try:
             with self._db_lock:
@@ -898,7 +908,11 @@ class MinerScorer:
                 m.consecutive_epochs += 1
             else:
                 m.consecutive_epochs = 0
-            # Reset sports metrics
+            # Carry forward sports accuracy from the previous epoch so miners
+            # aren't scored as 0% accuracy between challenge rounds. Challenges
+            # run every ~10 minutes but epochs reset every ~12 seconds. Without
+            # carry-forward, accuracy is zero for 98% of epochs.
+            m.prev_accuracy = m.accuracy_score() if m.queries_total > 0 else m.prev_accuracy
             m.queries_total = 0
             m.queries_correct = 0
             m.latencies.clear()
