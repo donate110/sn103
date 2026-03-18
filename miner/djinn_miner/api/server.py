@@ -476,6 +476,16 @@ def create_app(
         await _attest_sem.acquire()
         task_started()
         try:
+            _using_peer = (
+                request.notary_host
+                and request.notary_host not in ("127.0.0.1", "localhost")
+            )
+            # When a peer notary is assigned, use a short timeout (45s) so we
+            # can fall back to our local notary quickly if the peer is broken.
+            # Most successful peer proofs complete in <30s; 180s wastes the
+            # validator's entire timeout budget on a dead peer.
+            _peer_timeout = 45.0 if _using_peer else 180.0
+
             result = await asyncio.wait_for(
                 tlsn_module.generate_proof(
                     request.url,
@@ -483,19 +493,15 @@ def create_app(
                     notary_port=request.notary_port,
                     notary_ws=request.notary_ws,
                     notary_ws_port=request.notary_ws_port,
-                    timeout=180.0,
+                    timeout=_peer_timeout,
                 ),
-                timeout=210.0,
+                timeout=_peer_timeout + 15.0,
             )
 
             # Fallback: if peer notary failed, retry with our own local notary.
             # Peer notaries are often unreliable (version mismatch, OOM, dropped
             # connections). Our local sidecar on port 7047 is always compatible.
-            if (
-                not result.success
-                and request.notary_host
-                and request.notary_host not in ("127.0.0.1", "localhost")
-            ):
+            if not result.success and _using_peer:
                 from djinn_miner.core.notary_sidecar import NOTARY_PORT as _LOCAL_NOTARY_PORT
                 log.info(
                     "attest_peer_failed_trying_local",
@@ -508,9 +514,9 @@ def create_app(
                         request.url,
                         notary_host="127.0.0.1",
                         notary_port=_LOCAL_NOTARY_PORT,
-                        timeout=180.0,
+                        timeout=150.0,
                     ),
-                    timeout=210.0,
+                    timeout=165.0,
                 )
                 if result.success:
                     log.info("attest_local_fallback_succeeded", url=request.url)
