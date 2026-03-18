@@ -305,7 +305,9 @@ class TestInputValidation:
         resp = app.post("/v1/proof", json={})
         assert resp.status_code == 422
 
-    def test_check_invalid_market(self, app: TestClient) -> None:
+    def test_check_unknown_market_accepted(self, app: TestClient) -> None:
+        """Unknown markets are accepted (not 422). Validators send synthetic
+        markets as part of challenge scoring; rejecting them caused 0% accuracy."""
         resp = app.post("/v1/check", json={
             "lines": [{
                 "index": 1,
@@ -317,7 +319,7 @@ class TestInputValidation:
                 "side": "A",
             }],
         })
-        assert resp.status_code == 422
+        assert resp.status_code == 200
 
     def test_nonexistent_endpoint_returns_404(self, app: TestClient) -> None:
         resp = app.get("/v1/doesnotexist")
@@ -719,20 +721,17 @@ class TestAttestEndpoint:
 
     def test_attest_busy_when_at_capacity(self, app: TestClient) -> None:
         """When max concurrent attestations are in-flight, new requests get busy response."""
-        import djinn_miner.api.server as server_mod
-
-        orig = server_mod._ATTEST_MAX_CONCURRENT
-        server_mod._ATTEST_MAX_CONCURRENT = 0  # force immediate busy
-        try:
-            with patch("djinn_miner.core.tlsn.is_available", return_value=True):
-                resp = app.post(
-                    "/v1/attest",
-                    json={"url": "https://example.com", "request_id": "test-busy"},
-                )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["success"] is False
-            assert data["busy"] is True
-            assert data["retry_after"] == 30
-        finally:
-            server_mod._ATTEST_MAX_CONCURRENT = orig
+        # Patch the semaphore's locked() to always return True
+        with (
+            patch("djinn_miner.core.tlsn.is_available", return_value=True),
+            patch("asyncio.Semaphore.locked", return_value=True),
+        ):
+            resp = app.post(
+                "/v1/attest",
+                json={"url": "https://example.com", "request_id": "test-busy"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert data["busy"] is True
+        assert data["retry_after"] == 30

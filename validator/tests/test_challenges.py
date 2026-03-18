@@ -946,8 +946,9 @@ class TestProofsRequestedTracking:
         m.record_query(correct=True, latency=0.1, proof_submitted=True)
         m.record_query(correct=True, latency=0.2, proof_submitted=True)
         m.record_query(correct=True, latency=0.3, proof_submitted=False)
-        # 2 proofs submitted out of 3 queries — but proofs_requested is what matters
+        # coverage = proofs_verified / proofs_requested (not proofs_submitted)
         m.proofs_requested = 3
+        m.proofs_verified = 2
         assert m.coverage_score() == pytest.approx(2 / 3)
 
     def test_coverage_score_zero_when_never_requested(self) -> None:

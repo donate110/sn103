@@ -56,6 +56,10 @@ class HealthTracker:
     def set_odds_api_connected(self, connected: bool) -> None:
         self._odds_api_connected = connected
 
+    @property
+    def bt_connected(self) -> bool:
+        return self._bt_connected
+
     def set_bt_connected(self, connected: bool) -> None:
         self._bt_connected = connected
         if connected:
