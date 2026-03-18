@@ -480,26 +480,29 @@ def create_app(
                 request.notary_host
                 and request.notary_host not in ("127.0.0.1", "localhost")
             )
-            # When a peer notary is assigned, use a short timeout (45s) so we
-            # can fall back to our local notary quickly if the peer is broken.
-            _peer_timeout = 45.0 if _using_peer else 150.0
 
-            result = await asyncio.wait_for(
-                tlsn_module.generate_proof(
-                    request.url,
-                    notary_host=request.notary_host,
-                    notary_port=request.notary_port,
-                    notary_ws=request.notary_ws,
-                    notary_ws_port=request.notary_ws_port,
-                    timeout=_peer_timeout,
-                ),
-                timeout=_peer_timeout + 15.0,
-            )
+            if _using_peer:
+                # Peer notary assigned: try it with a short timeout (45s),
+                # then fall back to ephemeral if it fails.
+                result = await asyncio.wait_for(
+                    tlsn_module.generate_proof(
+                        request.url,
+                        notary_host=request.notary_host,
+                        notary_port=request.notary_port,
+                        notary_ws=request.notary_ws,
+                        notary_ws_port=request.notary_ws_port,
+                        timeout=45.0,
+                    ),
+                    timeout=60.0,
+                )
+            else:
+                # No peer assigned: skip the main sidecar (port 7047) entirely.
+                # It accumulates stale MPC state and hangs for 150s before
+                # failing. Go straight to ephemeral notary.
+                result = tlsn_module.TLSNProofResult(success=False, error="no peer, using ephemeral")
 
-            # Fallback: if peer or main sidecar failed, spawn a fresh ephemeral
-            # notary. The main sidecar (port 7047) accumulates MPC state and
-            # becomes unresponsive after handling sessions. Ephemeral notaries
-            # get clean state every time, matching the WS proxy approach.
+            # Spawn a fresh ephemeral notary if the first attempt failed.
+            # Ephemeral notaries get clean MPC state every time.
             if not result.success:
                 spawned = await _spawn_ephemeral_notary()
                 if spawned is not None:
@@ -516,9 +519,9 @@ def create_app(
                                 request.url,
                                 notary_host="127.0.0.1",
                                 notary_port=eph_port,
-                                timeout=150.0,
+                                timeout=180.0,
                             ),
-                            timeout=165.0,
+                            timeout=195.0,
                         )
                         if result.success:
                             log.info("attest_ephemeral_notary_succeeded", url=request.url)
