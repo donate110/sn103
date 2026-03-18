@@ -47,6 +47,7 @@ class Config:
     bt_wallet_hotkey: str = os.getenv("BT_WALLET_HOTKEY", "default")
     # Burn fraction is a protocol parameter, not operator-configurable.
     # Hardcoded so .env overrides can't cause validators to diverge.
+    # If you previously had BT_BURN_FRACTION in your .env, it is now ignored.
     bt_burn_fraction: float = 0.90
 
     # Base chain (comma-separated URLs for failover)
@@ -133,6 +134,13 @@ class Config:
         warnings = []
         if not (0.0 <= self.bt_burn_fraction <= 1.0):
             raise ValueError(f"BT_BURN_FRACTION must be 0.0-1.0, got {self.bt_burn_fraction}")
+        env_burn = os.getenv("BT_BURN_FRACTION")
+        if env_burn is not None:
+            warnings.append(
+                f"BT_BURN_FRACTION={env_burn} found in your .env but is ignored. "
+                f"Burn fraction is now a hardcoded protocol parameter ({self.bt_burn_fraction}). "
+                f"Remove BT_BURN_FRACTION from your .env to silence this warning."
+            )
         if not (1 <= self.bt_netuid <= 65535):
             raise ValueError(f"BT_NETUID must be 1-65535, got {self.bt_netuid}")
         if self.api_port < 1 or self.api_port > 65535:
