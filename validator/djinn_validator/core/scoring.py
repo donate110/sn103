@@ -382,6 +382,10 @@ class MinerScorer:
                         "capabilities_reported": m.capabilities_reported,
                         "memory_total_mb": m.memory_total_mb,
                         "cpu_cores": m.cpu_cores,
+                        "lifetime_queries": m.lifetime_queries,
+                        "lifetime_correct": m.lifetime_correct,
+                        "lifetime_attestations": m.lifetime_attestations,
+                        "lifetime_attestations_valid": m.lifetime_attestations_valid,
                     })
                     self._db.execute(
                         "INSERT OR REPLACE INTO miner_scores (uid, hotkey, data, updated_at) "
@@ -901,10 +905,14 @@ class MinerScorer:
             m.proofs_submitted = 0
             m.proofs_verified = 0
             m.proofs_requested = 0
-            # Reset attestation metrics
-            m.attestations_total = 0
-            m.attestations_valid = 0
-            m.attestation_latencies.clear()
+            # Attestation metrics are NOT reset per-epoch.  Attestation
+            # challenges are rare events (minutes apart vs. 12-second epochs).
+            # Resetting every epoch zeroed them before the next weight
+            # computation could use the data.  Instead we let them accumulate
+            # so attestation_validity_score() returns a running average.
+            # Cap latencies to prevent unbounded growth.
+            if len(m.attestation_latencies) > 100:
+                m.attestation_latencies = m.attestation_latencies[-50:]
             # Reset notary metrics
             m.notary_duties_assigned = 0
             m.notary_duties_completed = 0

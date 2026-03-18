@@ -487,6 +487,33 @@ def create_app(
                 ),
                 timeout=210.0,
             )
+
+            # Fallback: if peer notary failed, retry with our own local notary.
+            # Peer notaries are often unreliable (version mismatch, OOM, dropped
+            # connections). Our local sidecar on port 7047 is always compatible.
+            if (
+                not result.success
+                and request.notary_host
+                and request.notary_host not in ("127.0.0.1", "localhost")
+            ):
+                from djinn_miner.core.notary_sidecar import NOTARY_PORT as _LOCAL_NOTARY_PORT
+                log.info(
+                    "attest_peer_failed_trying_local",
+                    url=request.url,
+                    peer_error=result.error[:200] if result.error else "",
+                    local_port=_LOCAL_NOTARY_PORT,
+                )
+                result = await asyncio.wait_for(
+                    tlsn_module.generate_proof(
+                        request.url,
+                        notary_host="127.0.0.1",
+                        notary_port=_LOCAL_NOTARY_PORT,
+                        timeout=180.0,
+                    ),
+                    timeout=210.0,
+                )
+                if result.success:
+                    log.info("attest_local_fallback_succeeded", url=request.url)
         except TimeoutError:
             ATTESTATION_REQUESTS.labels(status="error").inc()
             ATTESTATION_DURATION.observe(time.perf_counter() - start)
