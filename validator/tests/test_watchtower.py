@@ -28,7 +28,7 @@ class TestConfig:
         assert watchtower._BRANCH == "main"
 
     def test_default_interval(self) -> None:
-        assert watchtower._INTERVAL == 300
+        assert watchtower._INTERVAL == 900
 
 
 class TestFindRepoRoot:

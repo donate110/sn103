@@ -19,8 +19,9 @@ class TestMinerMetrics:
         m = MinerMetrics(uid=1, hotkey="h1")
         m.record_query(correct=True, latency=0.1, proof_submitted=True)
         m.record_query(correct=True, latency=0.2, proof_submitted=False)
-        # coverage_score uses proofs_requested as denominator (not queries_total)
+        # coverage_score = proofs_verified / proofs_requested
         m.proofs_requested = 2
+        m.proofs_verified = 1
         assert m.coverage_score() == 0.5
 
     def test_coverage_score_no_requests(self) -> None:
@@ -156,16 +157,16 @@ class TestMinerScorer:
         assert scorer.compute_weights(is_active_epoch=True) == {}
         assert scorer.compute_weights(is_active_epoch=False) == {}
 
-    def test_zero_total_weight_returns_zeros(self) -> None:
-        """When all raw scores are 0, weights should be 0 (no free emissions)."""
+    def test_equal_weight_when_no_activity(self) -> None:
+        """Miners with no activity still get equal capability-based weights."""
         scorer = MinerScorer()
         for uid in range(3):
             scorer.get_or_create(uid, f"h{uid}")
-            # No queries, no health checks → all scores 0
+            # No queries, no health checks. Capability score defaults to 0.3.
         weights = scorer.compute_weights(is_active_epoch=True)
         assert len(weights) == 3
         for uid in range(3):
-            assert weights[uid] == 0.0
+            assert weights[uid] == pytest.approx(1.0 / 3)
 
     def test_history_log_scaling(self) -> None:
         scorer = MinerScorer()
@@ -362,7 +363,10 @@ class TestSplitScoring:
         # Attestation: miner 0 faster → higher score
         assert attest_speed[0] > attest_speed[1]
 
-    def test_reset_epoch_clears_attestation_metrics(self) -> None:
+    def test_reset_epoch_preserves_attestation_metrics(self) -> None:
+        """Attestation metrics accumulate across epochs (not reset).
+        They are rare events so resetting every epoch would zero them
+        before the next weight computation could use the data."""
         scorer = MinerScorer()
         m = scorer.get_or_create(0, "h0")
         m.record_attestation(latency=30.0, proof_valid=True)
@@ -370,9 +374,11 @@ class TestSplitScoring:
         m.record_health_check(responded=True)
 
         scorer.reset_epoch()
-        assert m.attestations_total == 0
-        assert m.attestations_valid == 0
-        assert m.attestation_latencies == []
+        # Attestation metrics survive epoch reset
+        assert m.attestations_total == 1
+        assert m.attestations_valid == 1
+        assert len(m.attestation_latencies) == 1
+        # Sports metrics are still reset
         assert m.queries_total == 0
         assert m.consecutive_epochs == 1  # Participated
 
@@ -398,21 +404,23 @@ class TestSplitScoring:
     def test_attestation_validity_dominates_attestation_score(self) -> None:
         """60% validity weight means perfect proofs score much higher."""
         scorer = MinerScorer()
-        # Miner 0: all valid proofs
+        # Miner 0: all valid proofs, notary capable
         m0 = scorer.get_or_create(0, "h0")
+        m0.notary_capable = True
         for _ in range(5):
             m0.record_attestation(latency=50.0, proof_valid=True)
         m0.record_health_check(responded=True)
 
-        # Miner 1: all invalid proofs, same speed
+        # Miner 1: all invalid proofs, same speed, notary capable
         m1 = scorer.get_or_create(1, "h1")
+        m1.notary_capable = True
         for _ in range(5):
             m1.record_attestation(latency=50.0, proof_valid=False)
         m1.record_health_check(responded=True)
 
         miners = list(scorer._miners.values())
         scores = scorer._compute_attestation_scores(miners)
-        # Same speed → only validity differs
+        # Same speed, notary capable -> only validity differs
         assert scores[0] > scores[1]
         # Miner 0: 0.6*1.0 + 0.4*1.0 = 1.0, miner 1: 0.6*0.0 + 0.4*1.0 = 0.4
         assert scores[0] == pytest.approx(1.0)
@@ -474,7 +482,8 @@ class TestComputeWeightsDetailed:
         m = scorer.get_or_create(0, "h0")
         m.record_query(correct=True, latency=0.1, proof_submitted=True)
         m.record_query(correct=False, latency=0.2, proof_submitted=False)
-        m.proofs_requested = 2  # coverage = proofs_submitted / proofs_requested
+        m.proofs_requested = 2
+        m.proofs_verified = 1  # coverage = proofs_verified / proofs_requested
         m.record_health_check(responded=True)
         m.record_health_check(responded=False)
 
