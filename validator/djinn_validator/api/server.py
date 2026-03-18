@@ -1049,7 +1049,9 @@ def create_app(
             """Try one miner. Returns (axon, data, proof_hex, elapsed_s, notary_uid, notary_pubkey) on success."""
             attempt_start = _t.perf_counter()
             miner_url = axon.get("_url") or f"http://{axon['ip']}:{axon['port']}/v1/attest"
-            tier_timeout = 210.0 if tier == "proven" else 60.0 if tier == "redemption" else 120.0
+            # 90s for proven (enough for miners with local notary fallback),
+            # 60s for redemption, 90s for unproven. Previously 210/60/120.
+            tier_timeout = 90.0 if tier == "proven" else 60.0 if tier == "redemption" else 90.0
             timeout = min(req.timeout or tier_timeout, 600.0)
             breaker = _get_miner_breaker(axon["uid"]) if axon["uid"] >= 0 else None
 
@@ -1220,6 +1222,19 @@ def create_app(
                 break
             else:
                 last_error = "All attempted miners failed or were busy"
+
+        # All candidates failed. Try fallback miner as last resort.
+        # The fallback skips peer notary assignment so it uses its local
+        # notary sidecar, which is much more reliable.
+        if selected is None and fallback_miner_url:
+            log.info("attest_trying_fallback_miner", url=req.url, fallback=fallback_miner_url)
+            fb_axon = {"uid": -1, "ip": "", "port": 0, "hotkey": "fallback",
+                       "_url": fallback_miner_url.rstrip("/") + "/v1/attest"}
+            fb_result = await _try_miner(fb_axon, "fallback")
+            if fb_result is not None:
+                selected, miner_data, proof_hex = fb_result[0], fb_result[1], fb_result[2]
+                selected_notary_uid = fb_result[4]
+                selected_notary_pubkey = fb_result[5]
 
         # All attempts failed
         if selected is None or miner_data is None or proof_hex is None:
