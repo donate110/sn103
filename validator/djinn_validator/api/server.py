@@ -1049,9 +1049,10 @@ def create_app(
             """Try one miner. Returns (axon, data, proof_hex, elapsed_s, notary_uid, notary_pubkey) on success."""
             attempt_start = _t.perf_counter()
             miner_url = axon.get("_url") or f"http://{axon['ip']}:{axon['port']}/v1/attest"
-            # 90s for proven (enough for miners with local notary fallback),
-            # 60s for redemption, 90s for unproven. Previously 210/60/120.
-            tier_timeout = 90.0 if tier == "proven" else 60.0 if tier == "redemption" else 90.0
+            # 90s for proven/unproven, 60s for redemption, 180s for fallback
+            # (fallback uses local notary which needs ~72s for proof generation).
+            _tier_timeouts = {"proven": 90.0, "unproven": 90.0, "redemption": 60.0, "fallback": 180.0}
+            tier_timeout = _tier_timeouts.get(tier, 90.0)
             timeout = min(req.timeout or tier_timeout, 600.0)
             breaker = _get_miner_breaker(axon["uid"]) if axon["uid"] >= 0 else None
 
