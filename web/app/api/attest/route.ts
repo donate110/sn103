@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { discoverValidatorUrls } from "@/lib/bt-metagraph";
 import { getIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
 
+// TLSNotary proof generation takes 60-180s. The default Vercel function
+// timeout (60s) is too short. Requires a Pro plan for >60s.
+export const maxDuration = 300;
+
 /** Shuffle an array in-place (Fisher-Yates). */
 function shuffle<T>(arr: T[]): T[] {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -60,8 +64,8 @@ async function getValidatorUrls(): Promise<string[]> {
   return fallback ? [fallback] : ["http://localhost:8421"];
 }
 
-const PER_VALIDATOR_TIMEOUT_MS = 120_000;
-const TOTAL_DEADLINE_MS = 180_000; // 3 min total
+const PER_VALIDATOR_TIMEOUT_MS = 240_000;
+const TOTAL_DEADLINE_MS = 270_000; // 4.5 min total
 
 /**
  * Translate raw backend errors into helpful human-readable messages.
