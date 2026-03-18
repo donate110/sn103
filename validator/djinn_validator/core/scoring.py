@@ -91,8 +91,12 @@ class MinerMetrics:
     health_checks_responded: int = 0
     consecutive_epochs: int = 0
 
-    # ── Carry-forward accuracy (preserved across epoch resets) ──
-    prev_accuracy: float = 0.0  # Last epoch's accuracy, used when no challenges in current epoch
+    # ── Carry-forward metrics (preserved across epoch resets) ──
+    # Challenges run every ~10 min but epochs reset every ~12s. Without
+    # carry-forward, all challenge metrics show 0 for 98% of the time.
+    prev_accuracy: float = 0.0
+    prev_latencies: list[float] = field(default_factory=list)
+    prev_coverage: float = 0.0
 
     # ── Lifetime counters (never reset, for dashboard display) ──
     lifetime_queries: int = 0
@@ -114,11 +118,11 @@ class MinerMetrics:
     def coverage_score(self) -> float:
         """Fraction of proof requests where miner's proof was verified.
 
-        Only TLSNotary-verified proofs count. Submitting an unverifiable
-        proof (HTTP hash, missing presentation bytes) earns no coverage.
+        Only TLSNotary-verified proofs count. Falls back to previous
+        epoch's coverage if no proofs requested in current epoch.
         """
         if self.proofs_requested == 0:
-            return 0.0
+            return self.prev_coverage
         return self.proofs_verified / self.proofs_requested
 
     def uptime_score(self) -> float:
@@ -312,6 +316,8 @@ class MinerScorer:
                     m.lifetime_attestations = d.get("lifetime_attestations", 0)
                     m.lifetime_attestations_valid = d.get("lifetime_attestations_valid", 0)
                     m.prev_accuracy = d.get("prev_accuracy", 0.0)
+                    m.prev_latencies = d.get("prev_latencies", [])
+                    m.prev_coverage = d.get("prev_coverage", 0.0)
                     self._miners[uid] = m
                     loaded += 1
                 except Exception:
@@ -353,6 +359,8 @@ class MinerScorer:
             "lifetime_attestations": m.lifetime_attestations,
             "lifetime_attestations_valid": m.lifetime_attestations_valid,
             "prev_accuracy": m.prev_accuracy,
+            "prev_latencies": m.prev_latencies[:10],
+            "prev_coverage": m.prev_coverage,
         })
         try:
             with self._db_lock:
@@ -723,6 +731,9 @@ class MinerScorer:
         avg_latencies: dict[int, float] = {}
         for m in miners:
             lats = m.attestation_latencies if use_attestation else m.latencies
+            # Fall back to previous epoch's latencies if none in current epoch
+            if not lats and not use_attestation:
+                lats = m.prev_latencies
             if lats:
                 avg_latencies[m.uid] = sum(lats) / len(lats)
 
@@ -912,7 +923,13 @@ class MinerScorer:
             # aren't scored as 0% accuracy between challenge rounds. Challenges
             # run every ~10 minutes but epochs reset every ~12 seconds. Without
             # carry-forward, accuracy is zero for 98% of epochs.
-            m.prev_accuracy = m.accuracy_score() if m.queries_total > 0 else m.prev_accuracy
+            # Carry forward challenge metrics so they don't zero out between rounds
+            if m.queries_total > 0:
+                m.prev_accuracy = m.accuracy_score()
+            if m.latencies:
+                m.prev_latencies = list(m.latencies)
+            if m.proofs_requested > 0:
+                m.prev_coverage = m.coverage_score()
             m.queries_total = 0
             m.queries_correct = 0
             m.latencies.clear()
