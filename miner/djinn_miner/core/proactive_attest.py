@@ -65,6 +65,10 @@ class ProactiveAttester:
         self._notary_key_path = os.getenv(
             "NOTARY_KEY_PATH", os.path.expanduser("~/.local/share/djinn/notary-key.bin")
         )
+        self._cached: CachedProof | None = None
+        self._running = False
+        self._consecutive_failures = 0
+        self._binary_hash = self._compute_binary_hash()
 
     async def _spawn_ephemeral_notary(self) -> tuple[asyncio.subprocess.Process, int] | None:
         """Spawn a short-lived notary on a random port for one proof."""
@@ -102,10 +106,6 @@ class ProactiveAttester:
         except Exception as e:
             log.warning("ephemeral_notary_spawn_failed", error=str(e))
             return None
-        self._cached: CachedProof | None = None
-        self._running = False
-        self._consecutive_failures = 0
-        self._binary_hash = self._compute_binary_hash()
 
     @staticmethod
     def _compute_binary_hash() -> str:
