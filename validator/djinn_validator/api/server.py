@@ -1006,8 +1006,12 @@ def create_app(
                 if breaker.allow_request():
                     candidates.append((axon, "unproven"))
 
-        # Last resort: configured fallback miner URL
-        if not candidates and fallback_miner_url:
+        # Always include the fallback miner in the parallel race.
+        # Metagraph miners often fail (broken sidecars, version mismatch),
+        # wasting 60-120s before the sequential fallback can start.
+        # Racing the fallback alongside metagraph miners means we get a
+        # result in ~70s even if all metagraph miners fail.
+        if fallback_miner_url:
             candidates.append((
                 {"uid": -1, "ip": "", "port": 0, "hotkey": "fallback",
                  "_url": fallback_miner_url.rstrip("/") + "/v1/attest"},
