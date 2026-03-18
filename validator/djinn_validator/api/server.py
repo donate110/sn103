@@ -1180,10 +1180,12 @@ def create_app(
                 assigned_notary.pubkey_hex if assigned_notary else None,
             )
 
-        # Launch parallel tasks for all candidates (up to 5)
+        # Launch parallel tasks for all candidates (up to 6).
+        # The fallback miner is always appended last, so the limit must
+        # be high enough to include it alongside metagraph miners.
         import asyncio as _aio
 
-        pick = candidates[:5]
+        pick = candidates[:6]
         tasks = [_aio.create_task(_try_miner(axon, tier)) for axon, tier in pick]
 
         async def _score_runner_ups(
