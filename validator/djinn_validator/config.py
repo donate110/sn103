@@ -120,15 +120,13 @@ class Config:
     odds_precision: int = 1_000_000
     bps_denom: int = 10_000
 
-    def validate(self, *, strict: bool | None = None) -> list[str]:
+    def validate(self) -> list[str]:
         """Validate config at startup. Returns list of warnings (empty = all good).
 
-        Args:
-            strict: If True, raise ValueError on any warning. Defaults to True
-                    when bt_network is a production network (finney/mainnet).
+        Hard errors (missing keys, invalid addresses) raise ValueError.
+        Soft warnings (deprecated env vars, non-standard values) are returned
+        as strings for logging but never prevent startup.
         """
-        if strict is None:
-            strict = self.bt_network in ("finney", "mainnet")
         import re
 
         warnings = []
@@ -206,6 +204,8 @@ class Config:
                 f"RATE_LIMIT_CAPACITY ({self.rate_limit_capacity}) < RATE_LIMIT_RATE ({self.rate_limit_rate}) "
                 "— bucket will never fill above rate"
             )
-        if strict and warnings:
-            raise ValueError("Config validation failed in strict mode:\n" + "\n".join(f"  - {w}" for w in warnings))
+        # Warnings are logged but never fatal. Real config errors use
+        # raise ValueError() above. The old strict-mode crash prevented
+        # validators from starting when they had deprecated env vars
+        # (SPORTS_API_KEY, BT_BURN_FRACTION) in their .env files.
         return warnings

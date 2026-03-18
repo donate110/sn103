@@ -127,7 +127,7 @@ class TestConfigStrictAutoDetect:
     """Strict mode auto-detects production network."""
 
     def test_strict_auto_enabled_on_finney(self) -> None:
-        """Warnings become errors on finney when strict is unset."""
+        """Warnings are returned (not raised) even on finney."""
         config = _config(
             bt_network="finney",
             sports_api_key="",
@@ -137,35 +137,19 @@ class TestConfigStrictAutoDetect:
             collateral_address="0x1234567890abcdef1234567890abcdef12345678",
             outcome_voting_address="0x1234567890abcdef1234567890abcdef12345678",
             base_validator_private_key="0x" + "ab" * 32,
-            base_chain_id=99999,  # Non-standard → generates a warning
+            base_chain_id=99999,  # Non-standard, generates a warning
         )
-        with pytest.raises(ValueError, match="strict mode"):
-            config.validate()  # strict=None → auto-detects finney → strict
+        warnings = config.validate()
+        assert any("BASE_CHAIN_ID" in w for w in warnings)
 
-    def test_strict_auto_disabled_on_local(self) -> None:
-        """Warnings are returned (not raised) on local network."""
+    def test_warnings_returned_on_local(self) -> None:
+        """Warnings are returned on local network too."""
         config = _config(
             bt_network="local",
             sports_api_key="",
             base_chain_id=99999,
         )
-        warnings = config.validate()  # strict=None → auto-detects local → lenient
-        assert any("BASE_CHAIN_ID" in w for w in warnings)
-
-    def test_explicit_strict_false_overrides_auto(self) -> None:
-        """Explicit strict=False overrides auto-detect even on finney."""
-        config = _config(
-            bt_network="finney",
-            sports_api_key="",
-            escrow_address="0x1234567890abcdef1234567890abcdef12345678",
-            signal_commitment_address="0x1234567890abcdef1234567890abcdef12345678",
-            account_address="0x1234567890abcdef1234567890abcdef12345678",
-            collateral_address="0x1234567890abcdef1234567890abcdef12345678",
-            outcome_voting_address="0x1234567890abcdef1234567890abcdef12345678",
-            base_validator_private_key="0x" + "ab" * 32,
-            base_chain_id=99999,
-        )
-        warnings = config.validate(strict=False)
+        warnings = config.validate()
         assert any("BASE_CHAIN_ID" in w for w in warnings)
 
 
