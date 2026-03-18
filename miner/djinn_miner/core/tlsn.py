@@ -107,10 +107,13 @@ async def generate_proof(
     port = notary_port or NOTARY_PORT
 
     if not host:
-        return TLSNProofResult(
-            success=False,
-            error="No notary host configured. Set TLSN_NOTARY_HOST or wait for validator peer assignment.",
-        )
+        # Default to the local notary sidecar if no host is configured.
+        # This lets the miner serve attestation requests even without a
+        # peer notary assignment from the validator.
+        from djinn_miner.core.notary_sidecar import NOTARY_PORT as _LOCAL_PORT
+        host = "127.0.0.1"
+        port = _LOCAL_PORT
+        log.info("tlsn_using_local_notary_default", port=port)
 
     # Resolve redirects and probe response size. The prover can't follow
     # redirects, and knowing the size lets us right-size the MPC circuit.

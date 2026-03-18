@@ -1225,17 +1225,29 @@ def create_app(
                 last_error = "All attempted miners failed or were busy"
 
         # All candidates failed. Try fallback miner as last resort.
-        # The fallback skips peer notary assignment so it uses its local
-        # notary sidecar, which is much more reliable.
+        # Send the request WITHOUT notary_host so the miner uses its own
+        # local notary sidecar (no peer notary = no broken MPC connections).
         if selected is None and fallback_miner_url:
             log.info("attest_trying_fallback_miner", url=req.url, fallback=fallback_miner_url)
-            fb_axon = {"uid": -1, "ip": "", "port": 0, "hotkey": "fallback",
-                       "_url": fallback_miner_url.rstrip("/") + "/v1/attest"}
-            fb_result = await _try_miner(fb_axon, "fallback")
-            if fb_result is not None:
-                selected, miner_data, proof_hex = fb_result[0], fb_result[1], fb_result[2]
-                selected_notary_uid = fb_result[4]
-                selected_notary_pubkey = fb_result[5]
+            fb_url = fallback_miner_url.rstrip("/") + "/v1/attest"
+            fb_body = _json.dumps({"url": req.url, "request_id": req.request_id}).encode()
+            fb_hdrs: dict[str, str] = {"Content-Type": "application/json"}
+            if neuron and neuron.wallet:
+                from djinn_validator.api.middleware import create_signed_headers
+                fb_hdrs.update(create_signed_headers("/v1/attest", fb_body, neuron.wallet))
+            try:
+                fb_resp = await _attest_client.post(
+                    fb_url, content=fb_body, headers=fb_hdrs, timeout=180.0,
+                )
+                if fb_resp.status_code == 200:
+                    fb_data = fb_resp.json()
+                    if fb_data.get("success") and fb_data.get("proof_hex"):
+                        miner_data = fb_data
+                        proof_hex = fb_data["proof_hex"]
+                        selected = {"uid": -1, "ip": "", "port": 0, "hotkey": "fallback"}
+                        log.info("attest_fallback_succeeded", url=req.url)
+            except Exception as e:
+                log.warning("attest_fallback_failed", error=str(e)[:200])
 
         # All attempts failed
         if selected is None or miner_data is None or proof_hex is None:
