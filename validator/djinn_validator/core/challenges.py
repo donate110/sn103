@@ -1040,14 +1040,37 @@ async def challenge_miners_attestation(
         capable = await capable_task
         all_notaries = await notary_task
 
-        # Prefer notaries from miners with verified proactive proofs
+        # Prefer notaries from miners with verified proactive proofs,
+        # then narrow to version-compatible notaries by binary hash.
+        # MPC requires matching binary versions on both sides.
         verified_notaries = [
             n for n in all_notaries
             if (m := scorer.get(n.uid)) is not None and m.proactive_proof_verified
         ]
-        peer_notaries = verified_notaries if verified_notaries else all_notaries
-        if verified_notaries:
-            log.info("attest_challenge_notaries_filtered", verified=len(verified_notaries), total=len(all_notaries))
+        if not verified_notaries:
+            peer_notaries = all_notaries
+        else:
+            # Group verified notaries by binary hash
+            by_hash: dict[str, list] = {}
+            for n in verified_notaries:
+                m = scorer.get(n.uid)
+                bh = m.tlsn_binary_hash if m else ""
+                by_hash.setdefault(bh or "unknown", []).append(n)
+
+            # Find the most common binary hash (largest compatible group)
+            largest_group = max(by_hash.values(), key=len) if by_hash else []
+            if len(largest_group) >= 3:
+                peer_notaries = largest_group
+                log.info("attest_challenge_notaries_version_matched",
+                         matched=len(largest_group), verified=len(verified_notaries),
+                         total=len(all_notaries),
+                         hash=next((k for k,v in by_hash.items() if v is largest_group), "?"))
+            else:
+                peer_notaries = verified_notaries
+
+        log.info("attest_challenge_notaries_filtered",
+                 total=len(all_notaries), verified=len(verified_notaries),
+                 selected=len(peer_notaries))
 
         ar.capable = len(capable)
 
