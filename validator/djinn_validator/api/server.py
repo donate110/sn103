@@ -2664,23 +2664,38 @@ def create_app(
             NOTARY_SESSIONS_ASSIGNED.labels(status="no_miners").inc()
             raise HTTPException(status_code=503, detail="No reachable miners (after exclusions)")
 
-        # Pre-filter to miners known to be notary-capable from scorer data.
-        # Probing all 245 miners takes 30-60s (WS handshake per miner).
-        # Narrowing to known-capable miners cuts this to <5s.
+        # Pre-filter to miners with PROVEN notary capability. Browser
+        # extension provers are fragile (no retry/fallback), so we only
+        # assign miners that have:
+        # 1. A verified proactive proof (TLSNotary binary works)
+        # 2. At least one successful attestation challenge (MPC completes)
+        # This eliminates miners with broken sidecars, version mismatches,
+        # or stale MPC state that cause "connection is closed" errors.
         if scorer is not None:
+            proven_uids: set[int] = set()
             capable_uids: set[int] = set()
             for a in axons:
                 m = scorer.get(a["uid"])
-                if m is not None and m.notary_capable:
+                if m is None:
+                    continue
+                if m.notary_capable:
                     capable_uids.add(a["uid"])
-            if capable_uids:
-                # Keep only capable miners for discovery, but fall back to
-                # full probe if none are known (cold start / fresh epoch).
-                axons_for_discovery = [a for a in axons if a["uid"] in capable_uids]
+                if m.proactive_proof_verified and m.attestations_valid > 0:
+                    proven_uids.add(a["uid"])
+            if proven_uids:
+                axons_for_discovery = [a for a in axons if a["uid"] in proven_uids]
                 log.info(
                     "notary_session_prefilter",
                     total_axons=len(axons),
-                    capable=len(axons_for_discovery),
+                    proven=len(proven_uids),
+                    capable=len(capable_uids),
+                )
+            elif capable_uids:
+                axons_for_discovery = [a for a in axons if a["uid"] in capable_uids]
+                log.info(
+                    "notary_session_prefilter_fallback_capable",
+                    total_axons=len(axons),
+                    capable=len(capable_uids),
                 )
             else:
                 axons_for_discovery = axons
