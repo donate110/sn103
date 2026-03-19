@@ -278,12 +278,17 @@ class ProofGenerator:
             sep = "&" if "?" in url else "?"
             url = f"{url}{sep}{urlencode(session.request_params)}"
 
+        # Short timeout on peer notary (45s). If it fails, the ephemeral
+        # fallback below needs time within the server's 300s outer timeout.
+        _using_peer = notary_host and notary_host not in ("127.0.0.1", "localhost")
+        _peer_timeout = 45.0 if _using_peer else 150.0
         result = await tlsn_module.generate_proof(
             url,
             notary_host=notary_host,
             notary_port=notary_port,
             notary_ws=notary_ws,
             notary_ws_port=notary_ws_port,
+            timeout=_peer_timeout,
         )
 
         if not result.success:

@@ -213,6 +213,7 @@ def create_app(
         only non-TLSNotary fallback proofs are possible.
         """
         try:
+            # 300s to allow: 45s peer attempt + 4s spawn + 150s ephemeral
             result = await asyncio.wait_for(
                 proof_gen.generate(
                     request.query_id,
@@ -222,7 +223,7 @@ def create_app(
                     notary_ws=request.notary_ws,
                     notary_ws_port=request.notary_ws_port,
                 ),
-                timeout=180.0,
+                timeout=300.0,
             )
         except TimeoutError:
             log.error("proof_generation_timeout", query_id=request.query_id)
