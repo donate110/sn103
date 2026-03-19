@@ -973,6 +973,23 @@ _ATTESTATION_CHALLENGE_URLS = [
 ]
 
 
+def _generate_nonce_challenge_url() -> tuple[str, str]:
+    """Generate a challenge URL with an unpredictable nonce.
+
+    Uses httpbin.org/anything/<path> which echoes the full URL in its
+    JSON response. The nonce is a UUID that only the validator knows.
+    After the proof, the validator checks that the nonce appears in the
+    verified response body. This proves the prover binary is running
+    unmodified (a fabricating binary wouldn't know the nonce).
+
+    Returns (url, nonce).
+    """
+    import uuid
+    nonce = uuid.uuid4().hex
+    url = f"https://httpbin.org/anything/djinn-nonce-{nonce}"
+    return url, nonce
+
+
 async def _probe_attest_capability(
     client: httpx.AsyncClient,
     axons: list[dict],
@@ -1022,7 +1039,16 @@ async def challenge_miners_attestation(
     Returns an AttestationResult with per-miner details.
     """
     ar = AttestationResult()
-    url = random.choice(_ATTESTATION_CHALLENGE_URLS)
+
+    # 50% of challenges use a nonce URL for content verification.
+    # The nonce proves the prover binary is unmodified: a fabricating
+    # binary can't know the random nonce embedded in the URL path.
+    challenge_nonce: str | None = None
+    if random.random() < 0.5:
+        url, challenge_nonce = _generate_nonce_challenge_url()
+        log.info("attest_challenge_using_nonce", nonce=challenge_nonce[:12] + "...")
+    else:
+        url = random.choice(_ATTESTATION_CHALLENGE_URLS)
     ar.url = url
 
     reachable = [a for a in miner_axons if a.get("ip") and a.get("port")]
@@ -1214,6 +1240,33 @@ async def challenge_miners_attestation(
                                 timeout=30.0,
                             )
                             proof_valid = verify_result.verified
+
+                            # Nonce verification: if this was a nonce challenge,
+                            # check that the nonce appears in the proof body.
+                            # This proves the binary is unmodified (a fabricating
+                            # binary can't know the random nonce).
+                            nonce_verified: bool | None = None
+                            if proof_valid and challenge_nonce:
+                                body = verify_result.response_body or ""
+                                nonce_verified = challenge_nonce in body
+                                if not nonce_verified:
+                                    log.warning(
+                                        "attest_nonce_mismatch",
+                                        uid=uid,
+                                        nonce=challenge_nonce[:12],
+                                        body_len=len(body),
+                                    )
+                                    # Don't fail the proof over this yet.
+                                    # Log it for analysis. A mismatch means either
+                                    # the binary is fabricating content or the
+                                    # response body wasn't fully captured.
+                                else:
+                                    log.info(
+                                        "attest_nonce_verified",
+                                        uid=uid,
+                                        nonce=challenge_nonce[:12],
+                                    )
+                            mr["nonce_verified"] = nonce_verified
                         except Exception as e:
                             log.debug("attest_challenge_verify_error", uid=uid, err=str(e))
                             proof_valid = False
@@ -1241,6 +1294,7 @@ async def challenge_miners_attestation(
                         "attest_challenge_scored", uid=uid,
                         proof_valid=proof_valid, latency_s=round(latency, 3),
                         peer_notary=assigned_notary.uid if assigned_notary else None,
+                        nonce_verified=mr.get("nonce_verified"),
                     )
                     return True, proof_valid
 
