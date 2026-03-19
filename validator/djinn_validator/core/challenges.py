@@ -1232,8 +1232,7 @@ async def challenge_miners_attestation(
                             proof_bytes = bytes.fromhex(data["proof_hex"])
                             expected_server = urlparse(url).hostname
                             # Pass the assigned notary's pubkey so the verifier
-                            # accepts proofs signed by peer miners (in addition
-                            # to the statically configured TRUSTED_NOTARY_KEYS).
+                            # tries it first (falls back to accepting any key).
                             notary_key = assigned_notary.pubkey_hex if assigned_notary else None
                             verify_result = await asyncio.wait_for(
                                 tlsn_verifier.verify_proof(

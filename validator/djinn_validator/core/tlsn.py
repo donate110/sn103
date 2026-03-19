@@ -26,20 +26,9 @@ from djinn_validator.core.tlsn_bootstrap import ensure_binary
 
 VERIFIER_BINARY = ensure_binary("djinn-tlsn-verifier")
 
-# Trusted notary public keys (hex-encoded secp256k1). If empty, any key is
-# accepted (dev mode). In production, configure via TLSN_TRUSTED_NOTARY_KEYS.
 import re as _re
 
 _HEX_KEY_RE = _re.compile(r"^[0-9a-fA-F]{64,130}$")
-
-_raw_keys = set(filter(None, os.getenv("TLSN_TRUSTED_NOTARY_KEYS", "").split(",")))
-TRUSTED_NOTARY_KEYS: set[str] = set()
-for _k in _raw_keys:
-    _k = _k.strip()
-    if _HEX_KEY_RE.match(_k):
-        TRUSTED_NOTARY_KEYS.add(_k)
-    elif _k:
-        log.warning("invalid_notary_key_ignored", key=_k[:16] + "...", reason="must be 64-130 hex chars")
 
 
 @dataclass
@@ -88,15 +77,14 @@ async def verify_proof(
 
     base_cmd = [VERIFIER_BINARY, "--presentation", presentation_path]
 
-    # Build the set of keys to try: peer key first (most likely), then
-    # configured trusted keys, then None (no key constraint) as fallback.
-    # The None fallback handles the transition where miners haven't updated
-    # to use peer notaries and still produce PSE-signed proofs.
+    # Try the assigned peer key first, then accept any key as fallback.
+    # Trust comes from the TLS certificate (server identity), binary hash
+    # matching (software version), and nonce challenges (binary integrity),
+    # not from a notary key allowlist.
     keys_to_try: list[str | None] = []
     if expected_notary_key and _HEX_KEY_RE.match(expected_notary_key):
         keys_to_try.append(expected_notary_key)
-    keys_to_try.extend(TRUSTED_NOTARY_KEYS)
-    keys_to_try.append(None)  # fallback: accept any notary key
+    keys_to_try.append(None)  # accept any notary key
     last_error = ""
     proc = None
     stdout = b""
