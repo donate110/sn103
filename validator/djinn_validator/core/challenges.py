@@ -976,18 +976,22 @@ _ATTESTATION_CHALLENGE_URLS = [
 def _generate_nonce_challenge_url() -> tuple[str, str]:
     """Generate a challenge URL with an unpredictable nonce.
 
-    Uses httpbin.org/anything/<path> which echoes the full URL in its
-    JSON response. The nonce is a UUID that only the validator knows.
-    After the proof, the validator checks that the nonce appears in the
-    verified response body. This proves the prover binary is running
-    unmodified (a fabricating binary wouldn't know the nonce).
+    Uses djinn.gg/hash/<nonce> which returns {"input": "<nonce>",
+    "sha256": "<hash>"}. The content is deterministic: the sha256 of
+    the nonce. The validator can verify the proof body contains the
+    correct hash without fetching the URL itself. A fabricating binary
+    can't produce the right hash without actually connecting to the
+    server (or knowing SHA-256 of the nonce, which it doesn't since
+    the nonce is random).
 
-    Returns (url, nonce).
+    Returns (url, expected_hash).
     """
+    import hashlib
     import uuid
     nonce = uuid.uuid4().hex
-    url = f"https://httpbin.org/anything/djinn-nonce-{nonce}"
-    return url, nonce
+    expected_hash = hashlib.sha256(nonce.encode()).hexdigest()
+    url = f"https://www.djinn.gg/hash/{nonce}"
+    return url, expected_hash
 
 
 async def _probe_attest_capability(
@@ -1242,9 +1246,11 @@ async def challenge_miners_attestation(
                             proof_valid = verify_result.verified
 
                             # Nonce verification: if this was a nonce challenge,
-                            # check that the nonce appears in the proof body.
-                            # This proves the binary is unmodified (a fabricating
-                            # binary can't know the random nonce).
+                            # check that the expected SHA-256 hash appears in
+                            # the proof body. djinn.gg/hash/<nonce> returns
+                            # {"input": "<nonce>", "sha256": "<hash>"}. The
+                            # validator computed the expected hash locally, so
+                            # it can verify without trusting anyone.
                             nonce_verified: bool | None = None
                             if proof_valid and challenge_nonce:
                                 body = verify_result.response_body or ""
@@ -1253,18 +1259,15 @@ async def challenge_miners_attestation(
                                     log.warning(
                                         "attest_nonce_mismatch",
                                         uid=uid,
-                                        nonce=challenge_nonce[:12],
+                                        expected_hash=challenge_nonce[:16],
                                         body_len=len(body),
+                                        body_preview=body[:200],
                                     )
-                                    # Don't fail the proof over this yet.
-                                    # Log it for analysis. A mismatch means either
-                                    # the binary is fabricating content or the
-                                    # response body wasn't fully captured.
                                 else:
                                     log.info(
                                         "attest_nonce_verified",
                                         uid=uid,
-                                        nonce=challenge_nonce[:12],
+                                        expected_hash=challenge_nonce[:16],
                                     )
                             mr["nonce_verified"] = nonce_verified
                         except Exception as e:
