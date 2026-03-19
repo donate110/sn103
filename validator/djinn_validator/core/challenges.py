@@ -976,7 +976,7 @@ _ATTESTATION_CHALLENGE_URLS = [
 def _generate_nonce_challenge_url() -> tuple[str, str]:
     """Generate a challenge URL with an unpredictable nonce.
 
-    Uses djinn.gg/hash/<nonce> which returns {"input": "<nonce>",
+    Uses djinn.gg/api/hash/<nonce> which returns {"input": "<nonce>",
     "sha256": "<hash>"}. The content is deterministic: the sha256 of
     the nonce. The validator can verify the proof body contains the
     correct hash without fetching the URL itself. A fabricating binary
@@ -990,7 +990,7 @@ def _generate_nonce_challenge_url() -> tuple[str, str]:
     import uuid
     nonce = uuid.uuid4().hex
     expected_hash = hashlib.sha256(nonce.encode()).hexdigest()
-    url = f"https://www.djinn.gg/hash/{nonce}"
+    url = f"https://www.djinn.gg/api/hash/{nonce}"
     return url, expected_hash
 
 
@@ -1247,7 +1247,7 @@ async def challenge_miners_attestation(
 
                             # Nonce verification: if this was a nonce challenge,
                             # check that the expected SHA-256 hash appears in
-                            # the proof body. djinn.gg/hash/<nonce> returns
+                            # the proof body. djinn.gg/api/hash/<nonce> returns
                             # {"input": "<nonce>", "sha256": "<hash>"}. The
                             # validator computed the expected hash locally, so
                             # it can verify without trusting anyone.
