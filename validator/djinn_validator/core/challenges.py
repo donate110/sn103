@@ -969,7 +969,7 @@ async def _request_and_verify_proof(
 _ATTESTATION_CHALLENGE_URLS = [
     "https://httpbin.org/get",
     "https://api.github.com/zen",
-    "https://www.wikipedia.org/",
+    "https://httpbin.org/headers",
 ]
 
 
