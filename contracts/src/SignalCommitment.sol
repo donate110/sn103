@@ -55,6 +55,12 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
     /// @notice Address authorized to pause this contract in emergencies
     address public pauser;
 
+    /// @notice Collateral contract for checking genius deposit availability.
+    ///         When set, commit() requires sufficient free collateral to cover
+    ///         maxNotional * slaMultiplierBps / 10000. When zero (pre-upgrade
+    ///         state), the check is skipped for backwards compatibility.
+    address public collateral;
+
     // ─── Events
     // ─────────────────────────────────────────────────────────
 
@@ -80,6 +86,9 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
 
     /// @notice Emitted when the pauser address is updated
     event PauserUpdated(address indexed newPauser);
+
+    /// @notice Emitted when the collateral contract address is updated
+    event CollateralUpdated(address indexed newCollateral);
 
     // ─── Errors
     // ─────────────────────────────────────────────────────────
@@ -138,6 +147,9 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
 
     /// @notice Caller is not the pauser or the owner
     error NotPauserOrOwner(address caller);
+
+    /// @notice Genius does not have enough free collateral for this signal
+    error InsufficientCollateral(address genius, uint256 available, uint256 required);
 
     /// @notice Maximum encrypted blob size (64 KB)
     uint256 public constant MAX_BLOB_SIZE = 65536;
@@ -212,6 +224,24 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
         // requires sufficient genius collateral, providing natural limits.
         if (p.maxNotional > 0 && p.minNotional > p.maxNotional) {
             revert InvalidNotionalRange(p.minNotional, p.maxNotional);
+        }
+
+        // Collateral gate: genius must have enough free collateral to cover
+        // the worst-case SLA payout for this signal's full notional capacity.
+        // Skipped when collateral is not set (pre-upgrade backwards compat).
+        if (collateral != address(0) && p.maxNotional > 0) {
+            uint256 requiredLock = (p.maxNotional * p.slaMultiplierBps) / 10_000;
+            uint256 available;
+            // Use low-level call to avoid import dependency on Collateral
+            (bool ok, bytes memory ret) = collateral.staticcall(
+                abi.encodeWithSignature("getAvailable(address)", msg.sender)
+            );
+            if (ok && ret.length >= 32) {
+                available = abi.decode(ret, (uint256));
+            }
+            if (available < requiredLock) {
+                revert InsufficientCollateral(msg.sender, available, requiredLock);
+            }
         }
 
         _exists[p.signalId] = true;
@@ -363,6 +393,13 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
         emit PauserUpdated(_pauser);
     }
 
+    /// @notice Set the collateral contract for commit-time collateral checks
+    /// @param _collateral Collateral contract address (address(0) to disable check)
+    function setCollateral(address _collateral) external onlyOwner {
+        collateral = _collateral;
+        emit CollateralUpdated(_collateral);
+    }
+
     /// @notice Pause signal commitment
     function pause() external {
         if (msg.sender != pauser && msg.sender != owner()) revert NotPauserOrOwner(msg.sender);
@@ -379,5 +416,5 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
     /// @dev Reserved storage gap for future upgrades.
-    uint256[46] private __gap;
+    uint256[45] private __gap;
 }

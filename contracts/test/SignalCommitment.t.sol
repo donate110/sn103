@@ -735,4 +735,92 @@ contract SignalCommitmentTest is Test {
         sc.commit(p);
         assertTrue(sc.signalExists(6005));
     }
+
+    // ─── Collateral Gate Tests ──────────────────────────────
+
+    function test_setCollateral_onlyOwner() public {
+        address mockCollateral = address(0xC01);
+        sc.setCollateral(mockCollateral);
+        assertEq(sc.collateral(), mockCollateral);
+    }
+
+    function test_setCollateral_revertNonOwner() public {
+        vm.prank(genius);
+        vm.expectRevert();
+        sc.setCollateral(address(0xC01));
+    }
+
+    function test_commit_noCollateralSetAllowed() public {
+        // Without collateral contract set, commit should work (backwards compat)
+        assertEq(sc.collateral(), address(0));
+        _commitDefault(7001);
+        assertTrue(sc.signalExists(7001));
+    }
+
+    function test_commit_withCollateralSufficientPasses() public {
+        // Deploy a mock collateral that returns enough available
+        MockCollateral mock = new MockCollateral();
+        // Default params: maxNotional=10_000e6, slaMultiplierBps=15_000
+        // Required: 10_000e6 * 15_000 / 10_000 = 15_000e6
+        mock.setAvailable(genius, 15_000e6);
+        sc.setCollateral(address(mock));
+
+        _commitDefault(7002);
+        assertTrue(sc.signalExists(7002));
+    }
+
+    function test_commit_withCollateralInsufficientReverts() public {
+        MockCollateral mock = new MockCollateral();
+        // Set available below required (15_000e6)
+        mock.setAvailable(genius, 10_000e6);
+        sc.setCollateral(address(mock));
+
+        vm.prank(genius);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                SignalCommitment.InsufficientCollateral.selector,
+                genius,
+                10_000e6,
+                15_000e6
+            )
+        );
+        sc.commit(_defaultParams(7003));
+    }
+
+    function test_commit_withCollateralZeroAvailableReverts() public {
+        MockCollateral mock = new MockCollateral();
+        mock.setAvailable(genius, 0);
+        sc.setCollateral(address(mock));
+
+        vm.prank(genius);
+        vm.expectRevert();
+        sc.commit(_defaultParams(7004));
+    }
+
+    function test_commit_unlimitedNotionalSkipsCollateralCheck() public {
+        MockCollateral mock = new MockCollateral();
+        mock.setAvailable(genius, 0); // zero collateral
+        sc.setCollateral(address(mock));
+
+        // maxNotional=0 means unlimited, collateral check is skipped
+        SignalCommitment.CommitParams memory p = _defaultParams(7005);
+        p.maxNotional = 0;
+
+        vm.prank(genius);
+        sc.commit(p);
+        assertTrue(sc.signalExists(7005));
+    }
+}
+
+/// @dev Mock collateral contract for testing
+contract MockCollateral {
+    mapping(address => uint256) private _available;
+
+    function setAvailable(address genius, uint256 amount) external {
+        _available[genius] = amount;
+    }
+
+    function getAvailable(address genius) external view returns (uint256) {
+        return _available[genius];
+    }
 }
