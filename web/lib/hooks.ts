@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ethers } from "ethers";
 import { useAccount, useWalletClient } from "wagmi";
 import { parseAbi, keccak256, encodePacked, type Hex } from "viem";
+import { base, baseSepolia } from "viem/chains";
 import { waitForTransactionReceipt, getBlockNumber } from "@wagmi/core";
 import { wagmiConfig } from "../app/providers";
 import {
@@ -61,8 +62,9 @@ const REVERT_PATTERNS: [RegExp, string][] = [
   [/ACTION_REJECTED/i, "Transaction cancelled by user"],
   [/nonce.*already.*used/i, "Transaction nonce conflict, please wait and try again"],
   [/replacement.*underpriced/i, "Gas price too low, try increasing gas"],
-  [/insufficient funds for gas/i, "Not enough ETH to cover gas fees"],
+  [/insufficient funds for gas/i, "Not enough ETH to cover gas fees. Get testnet ETH from a faucet."],
   [/No request found/i, "Wallet lost track of the request, please try again"],
+  [/chain.*mismatch|wrong.*network|Wrong network/i, "Wrong network: switch to Base Sepolia in your wallet settings."],
   [/execution reverted/i, "Transaction reverted on-chain, check your balances and try again"],
 ];
 
@@ -95,6 +97,19 @@ export function humanizeError(err: unknown, fallback = "Transaction failed"): st
 // ---------------------------------------------------------------------------
 
 const EXPECTED_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "84532");
+const expectedChain = EXPECTED_CHAIN_ID === 8453 ? base : baseSepolia;
+
+/** Throw a descriptive error if the wallet is on the wrong chain. */
+function assertCorrectChain(walletClient: { chain?: { id: number } }) {
+  const chainId = walletClient.chain?.id;
+  // Only block if we positively know the chain is wrong. Skip if chain info
+  // is unavailable (e.g. in tests or wallets that don't expose it).
+  if (chainId !== undefined && chainId !== EXPECTED_CHAIN_ID) {
+    throw new Error(
+      `Wrong network: please switch to ${expectedChain.name} (chain ID ${EXPECTED_CHAIN_ID}) in your wallet.`
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Read-only provider — uses public RPC for reliable reads
@@ -499,6 +514,7 @@ export function useCommitSignal() {
   const commit = useCallback(
     async (params: CommitParams) => {
       if (!walletClient || !address) throw new Error("Wallet not connected");
+      assertCorrectChain(walletClient);
       setLoading(true);
       setError(null);
       setTxHash(null);
@@ -510,6 +526,8 @@ export function useCommitSignal() {
           address: signalCommitmentAddr,
           abi: SIGNAL_COMMITMENT_VIEM_ABI,
           functionName: "commit",
+          account: address,
+          chain: expectedChain,
           args: [{
             signalId: params.signalId,
             encryptedBlob: params.encryptedBlob as Hex,
@@ -552,6 +570,7 @@ export function usePurchaseSignal() {
   const purchase = useCallback(
     async (signalId: bigint, notional: bigint, odds: bigint) => {
       if (!walletClient || !address) throw new Error("Wallet not connected");
+      assertCorrectChain(walletClient);
       setLoading(true);
       setError(null);
       setTxHash(null);
@@ -563,6 +582,8 @@ export function usePurchaseSignal() {
           address: escrowAddr,
           abi: ESCROW_ABI,
           functionName: "purchase",
+          account: address,
+          chain: expectedChain,
           args: [signalId, notional, odds],
         });
         debug("[purchase-signal] tx:", hash);
@@ -593,6 +614,7 @@ export function useDepositEscrow() {
   const deposit = useCallback(
     async (amount: bigint) => {
       if (!walletClient || !address) throw new Error("Wallet not connected");
+      assertCorrectChain(walletClient);
       setLoading(true);
       setError(null);
       try {
@@ -617,6 +639,8 @@ export function useDepositEscrow() {
             address: usdcAddr,
             abi: ERC20_ABI,
             functionName: "approve",
+            account: address,
+            chain: expectedChain,
             args: [escrowAddr, MAX_UINT256],
           });
           debug("[escrow-deposit] approve tx:", approveHash);
@@ -632,6 +656,8 @@ export function useDepositEscrow() {
           address: escrowAddr,
           abi: ESCROW_ABI,
           functionName: "deposit",
+          account: address,
+          chain: expectedChain,
           args: [amount],
         });
         debug("[escrow-deposit] deposit tx:", depositHash);
@@ -674,6 +700,7 @@ export function useDepositCollateral() {
   const deposit = useCallback(
     async (amount: bigint) => {
       if (!walletClient || !address) throw new Error("Wallet not connected");
+      assertCorrectChain(walletClient);
       setLoading(true);
       setError(null);
       try {
@@ -698,6 +725,8 @@ export function useDepositCollateral() {
             address: usdcAddr,
             abi: ERC20_ABI,
             functionName: "approve",
+            account: address,
+            chain: expectedChain,
             args: [collateralAddr, MAX_UINT256],
           });
           debug("[collateral-deposit] approve tx:", approveHash);
@@ -712,6 +741,8 @@ export function useDepositCollateral() {
           address: collateralAddr,
           abi: COLLATERAL_ABI,
           functionName: "deposit",
+          account: address,
+          chain: expectedChain,
           args: [amount],
         });
         debug("[collateral-deposit] deposit tx:", depositHash);
@@ -756,6 +787,7 @@ export function useWithdrawEscrow() {
   const withdraw = useCallback(
     async (amount: bigint) => {
       if (!walletClient || !address) throw new Error("Wallet not connected");
+      assertCorrectChain(walletClient);
       setLoading(true);
       setError(null);
       try {
@@ -765,6 +797,8 @@ export function useWithdrawEscrow() {
           address: escrowAddr,
           abi: ESCROW_ABI,
           functionName: "withdraw",
+          account: address,
+          chain: expectedChain,
           args: [amount],
         });
         debug("[escrow-withdraw] tx:", hash);
@@ -793,6 +827,7 @@ export function useWithdrawCollateral() {
   const withdraw = useCallback(
     async (amount: bigint) => {
       if (!walletClient || !address) throw new Error("Wallet not connected");
+      assertCorrectChain(walletClient);
       setLoading(true);
       setError(null);
       try {
@@ -802,6 +837,8 @@ export function useWithdrawCollateral() {
           address: collateralAddr,
           abi: COLLATERAL_ABI,
           functionName: "withdraw",
+          account: address,
+          chain: expectedChain,
           args: [amount],
         });
         debug("[collateral-withdraw] tx:", hash);
@@ -834,6 +871,7 @@ export function useApproveUsdc() {
   const approve = useCallback(
     async (spender: string, amount: bigint) => {
       if (!walletClient || !address) throw new Error("Wallet not connected");
+      assertCorrectChain(walletClient);
       setLoading(true);
       setError(null);
       try {
@@ -843,6 +881,8 @@ export function useApproveUsdc() {
           address: usdcAddr,
           abi: ERC20_ABI,
           functionName: "approve",
+          account: address,
+          chain: expectedChain,
           args: [spender as Hex, amount],
         });
         debug("[approve-usdc] tx:", hash);
@@ -876,6 +916,7 @@ export function useEarlyExit() {
   const earlyExit = useCallback(
     async (genius: string, idiot: string) => {
       if (!walletClient || !address) throw new Error("Wallet not connected");
+      assertCorrectChain(walletClient);
       setLoading(true);
       setError(null);
       setTxHash(null);
@@ -886,6 +927,8 @@ export function useEarlyExit() {
           address: auditAddr,
           abi: AUDIT_VIEM_ABI,
           functionName: "earlyExit",
+          account: address,
+          chain: expectedChain,
           args: [genius as Hex, idiot as Hex],
         });
         debug("[early-exit] tx:", hash);
@@ -962,6 +1005,7 @@ export function useCancelSignal() {
   const cancelSignal = useCallback(
     async (signalId: bigint) => {
       if (!walletClient || !address) throw new Error("Wallet not connected");
+      assertCorrectChain(walletClient);
       setLoading(true);
       setError(null);
       setTxHash(null);
@@ -970,6 +1014,8 @@ export function useCancelSignal() {
           address: ADDRESSES.signalCommitment as Hex,
           abi: SIGNAL_COMMITMENT_VIEM_ABI,
           functionName: "cancelSignal",
+          account: address,
+          chain: expectedChain,
           args: [signalId],
         });
         setTxHash(hash);

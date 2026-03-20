@@ -48,6 +48,15 @@ if (typeof window !== "undefined" && process.env.NODE_ENV === "production") {
   }
 }
 
+// Warn if USDC address is the mainnet default but chain is testnet
+const _chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "84532");
+if (_chainId === 84532 && ADDRESSES.usdc === "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913") {
+  console.warn(
+    "[Djinn] NEXT_PUBLIC_USDC_ADDRESS is not set — using Base mainnet USDC address on testnet. " +
+    "Set NEXT_PUBLIC_USDC_ADDRESS to your deployed MockUSDC contract address."
+  );
+}
+
 // Minimal ABIs — only the functions used by the client
 
 export const SIGNAL_COMMITMENT_ABI = [
@@ -101,7 +110,7 @@ export const CREDIT_LEDGER_ABI = [
 ] as const;
 
 export const ACCOUNT_ABI = [
-  "function getAccountState(address genius, address idiot) external view returns (tuple(uint256 currentCycle, uint256 signalCount, int256 qualityScore, uint256[] purchaseIds, bool settled))",
+  "function getAccountState(address genius, address idiot) external view returns (tuple(uint256 currentCycle, uint256 signalCount, int256 outcomeBalance, uint256[] purchaseIds, bool settled))",
   "function getCurrentCycle(address genius, address idiot) external view returns (uint256)",
   "function isAuditReady(address genius, address idiot) external view returns (bool)",
   "function getSignalCount(address genius, address idiot) external view returns (uint256)",

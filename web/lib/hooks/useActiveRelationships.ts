@@ -105,7 +105,7 @@ export function useActiveRelationships(
               genius,
               idiot,
               signalCount,
-              qualityScore: Number(state.qualityScore),
+              qualityScore: Number(state.outcomeBalance),
               currentCycle: Number(state.currentCycle),
               isAuditReady: signalCount >= 10,
             });

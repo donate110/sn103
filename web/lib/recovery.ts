@@ -161,7 +161,7 @@ const KEY_RECOVERY_VIEM_ABI = [
 ] as const;
 
 export async function storeRecoveryBlobOnChain(
-  walletClient: { writeContract: (args: any) => Promise<`0x${string}`> },
+  walletClient: { writeContract: (args: any) => Promise<`0x${string}`>; account?: { address: `0x${string}` }; chain?: { id: number } },
   blob: Uint8Array,
   waitForTxFn: (hash: `0x${string}`) => Promise<void>,
 ): Promise<`0x${string}`> {
@@ -177,6 +177,8 @@ export async function storeRecoveryBlobOnChain(
     address: ADDRESSES.keyRecovery as `0x${string}`,
     abi: KEY_RECOVERY_VIEM_ABI,
     functionName: "storeRecoveryBlob",
+    account: walletClient.account?.address,
+    chain: walletClient.chain,
     args: [`0x${toHex(blob)}`],
   });
 
