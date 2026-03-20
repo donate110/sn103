@@ -25,7 +25,7 @@ describe("next.config.js", () => {
     expect(headerNames).toContain("Referrer-Policy");
     expect(headerNames).toContain("Permissions-Policy");
     expect(headerNames).toContain("Strict-Transport-Security");
-    expect(headerNames).toContain("Content-Security-Policy");
+    // CSP is set by middleware.ts, not in next.config.js headers
   });
 
   it("denies framing", async () => {
@@ -45,13 +45,15 @@ describe("next.config.js", () => {
     expect(hsts.value).toContain("preload");
   });
 
-  it("sets frame-ancestors none in CSP", async () => {
+  it("denies framing via X-Frame-Options", async () => {
+    // CSP frame-ancestors is set by middleware.ts; X-Frame-Options is the
+    // next.config.js fallback for static assets.
     const headerEntries = await nextConfig.headers();
     const headers = headerEntries[0].headers;
-    const csp = headers.find(
-      (h: { key: string }) => h.key === "Content-Security-Policy"
+    const xfo = headers.find(
+      (h: { key: string }) => h.key === "X-Frame-Options"
     );
-    expect(csp.value).toContain("frame-ancestors 'none'");
+    expect(xfo.value).toBe("DENY");
   });
 
   it("does not configure webpack overrides", () => {

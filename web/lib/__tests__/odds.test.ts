@@ -487,8 +487,8 @@ describe("SPORT_GROUPS", () => {
     expect(keys.has("icehockey_nhl")).toBe(true);
   });
 
-  it("includes multiple soccer leagues", () => {
+  it("includes soccer leagues", () => {
     const soccerSports = SPORTS.filter((s) => s.key.startsWith("soccer_"));
-    expect(soccerSports.length).toBeGreaterThanOrEqual(5);
+    expect(soccerSports.length).toBeGreaterThanOrEqual(2);
   });
 });

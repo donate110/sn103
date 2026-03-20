@@ -20,6 +20,16 @@ vi.mock("../WalletButton", () => ({
   default: () => <button>Mock Wallet</button>,
 }));
 
+// Mock TestnetFaucet
+vi.mock("../TestnetFaucet", () => ({
+  default: () => <button>Mock Faucet</button>,
+}));
+
+// Mock ReportError
+vi.mock("../ReportError", () => ({
+  default: () => null,
+}));
+
 describe("Layout", () => {
   it("renders children in the main content area", () => {
     render(

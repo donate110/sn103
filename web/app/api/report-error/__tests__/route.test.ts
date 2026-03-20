@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-// Mock fs/promises
-vi.mock("fs/promises", () => ({
-  appendFile: vi.fn().mockResolvedValue(undefined),
-  mkdir: vi.fn().mockResolvedValue(undefined),
+// Mock error-store
+const mockStoreError = vi.fn();
+vi.mock("@/lib/error-store", () => ({
+  storeError: (...args: unknown[]) => mockStoreError(...args),
 }));
 
 import { POST } from "../route";
@@ -79,16 +79,13 @@ describe("POST /api/report-error", () => {
     expect(resp.status).toBe(429);
   });
 
-  it("writes to local JSONL file", async () => {
-    const { appendFile } = await import("fs/promises");
+  it("stores error in memory via storeError", async () => {
     await POST(
       makeRequest({ message: "logged error", source: "error-boundary" }, "10.0.0.5"),
     );
-    expect(appendFile).toHaveBeenCalledTimes(1);
-    const [path, content] = (appendFile as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(path).toContain("errors.jsonl");
-    const parsed = JSON.parse(content.trim());
-    expect(parsed.message).toBe("logged error");
-    expect(parsed.source).toBe("error-boundary");
+    expect(mockStoreError).toHaveBeenCalledTimes(1);
+    const report = mockStoreError.mock.calls[0][0];
+    expect(report.message).toBe("logged error");
+    expect(report.source).toBe("error-boundary");
   });
 });
