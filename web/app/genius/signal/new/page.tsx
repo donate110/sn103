@@ -278,6 +278,16 @@ export default function CreateSignal() {
       return;
     }
 
+    // Collateral gate: block signal creation without sufficient collateral
+    const mn = parseFloat(maxNotional) || 0;
+    const sla = parseFloat(slaMultiplier) || 100;
+    const requiredCollateral = BigInt(Math.round(mn * (sla / 100) * 1e6));
+    if (collateralAvailable < requiredCollateral) {
+      const shortfall = Number(requiredCollateral - collateralAvailable) / 1e6;
+      setStepError(`Insufficient collateral. Deposit $${shortfall.toLocaleString("en-US")} more before creating this signal.`);
+      return;
+    }
+
     // Sync realPick.price from editOdds to prevent stale odds in serialized lines
     const minOddsDecimal = editOdds ? americanToDecimal(editOdds) : null;
     if (minOddsDecimal != null && realPick.price !== minOddsDecimal) {
@@ -1622,10 +1632,14 @@ export default function CreateSignal() {
               const sla = parseFloat(slaMultiplier);
               const hrs = parseFloat(expiresIn);
               const mn = parseFloat(maxNotional);
-              return isNaN(pct) || pct <= 0 || pct > 50
+              if (isNaN(pct) || pct <= 0 || pct > 50
                 || isNaN(sla) || sla < 100 || sla > 1000
                 || isNaN(hrs) || hrs < 1 || hrs > 168
-                || isNaN(mn) || mn < 1;
+                || isNaN(mn) || mn < 1) return true;
+              // Block submission if collateral is insufficient
+              const requiredCollateral = BigInt(Math.round(mn * (sla / 100) * 1e6));
+              if (collateralAvailable < requiredCollateral) return true;
+              return false;
             })()}
             className="btn-primary w-full py-3 text-base"
           >
