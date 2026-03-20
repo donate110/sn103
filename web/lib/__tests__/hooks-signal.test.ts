@@ -93,17 +93,18 @@ describe("useSignal", () => {
   });
 
   it("handles fetch error", async () => {
-    mockGetSignal.mockRejectedValueOnce(new Error("Signal not found"));
+    // useSignal retries up to 2 times with 3s delay — mock must reject all attempts
+    mockGetSignal.mockRejectedValue(new Error("Signal not found"));
 
     const { result } = renderHook(() => useSignal(1n));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
-    });
+    }, { timeout: 15000 });
 
     expect(result.current.signal).toBeNull();
     expect(result.current.error).toBe("Signal not found");
-  });
+  }, 20000);
 
   it("converts numeric fields to bigint", async () => {
     mockGetSignal.mockResolvedValueOnce({

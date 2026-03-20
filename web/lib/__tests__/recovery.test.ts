@@ -118,7 +118,7 @@ describe("encrypt/decrypt recovery blob roundtrip", () => {
     const key = await deriveRecoveryKey(MOCK_SIGNATURE);
     const badBlob = new TextEncoder().encode("no-colon-separator");
     await expect(decryptRecoveryBlob(badBlob, key)).rejects.toThrow(
-      "Invalid recovery blob format",
+      "Recovery blob is corrupted",
     );
   });
 

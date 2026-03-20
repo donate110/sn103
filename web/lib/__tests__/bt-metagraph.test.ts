@@ -135,9 +135,10 @@ describe("bt-metagraph", () => {
 
       const mod = await loadModule();
       await mod.discoverMetagraph();
+      const callsAfterFirst = mockFetch.mock.calls.length;
       await mod.discoverMetagraph();
-      // Only one RPC call despite two discoverMetagraph calls
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      // Second call should use cache — no additional fetch calls
+      expect(mockFetch).toHaveBeenCalledTimes(callsAfterFirst);
     });
   });
 
