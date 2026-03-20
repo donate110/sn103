@@ -60,12 +60,17 @@ export default function TestnetFaucet() {
   };
 
   return (
-    <button
-      onClick={handleMint}
-      disabled={loading}
-      className="underline hover:no-underline font-semibold disabled:opacity-50"
-    >
-      {loading ? "Minting..." : done ? "10,000 USDC added!" : error ? error : "Get free test USDC"}
-    </button>
+    <span>
+      <button
+        onClick={handleMint}
+        disabled={loading}
+        className="underline hover:no-underline font-semibold disabled:opacity-50"
+      >
+        {loading ? "Minting..." : done ? "10,000 USDC added!" : error ? error : "Get free test USDC"}
+      </button>
+      {error && /ETH for gas/i.test(error) && (
+        <>{" "}<a href="https://faucet.quicknode.com/base/sepolia" target="_blank" rel="noopener noreferrer" className="underline text-blue-600">Get free testnet ETH</a></>
+      )}
+    </span>
   );
 }
