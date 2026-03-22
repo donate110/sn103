@@ -142,16 +142,7 @@ class CachedError:
     expires_at: float
 
 
-@dataclass
-class BookmakerOdds:
-    """Parsed odds from a single bookmaker for a single outcome."""
-
-    bookmaker_key: str
-    bookmaker_title: str
-    market: str  # "spreads", "totals", "h2h"
-    name: str  # Team name or "Over"/"Under"
-    price: float  # Decimal odds
-    point: float | None = None  # Spread or total line value
+from djinn_miner.data.provider import BookmakerOdds  # noqa: F401 — re-exported for backwards compat
 
 
 class OddsApiClient:

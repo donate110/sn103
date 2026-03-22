@@ -1,8 +1,8 @@
 """Line availability checker — the miner's core responsibility.
 
-Phase 1 (immediate, <3-5s): Query sportsbook data via The Odds API,
-return which of the 10 candidate lines are currently available and
-at which bookmakers.
+Phase 1 (immediate, <3-5s): Query sportsbook data via the configured
+sports data provider, return which of the 10 candidate lines are
+currently available and at which bookmakers.
 
 Phase 2 (seconds later): Generate a TLSNotary proof of the same TLS
 session. Handled by proof.py (stub for now).
@@ -24,7 +24,7 @@ from djinn_miner.api.models import (
     LineResult,
 )
 from djinn_miner.core.health import HealthTracker
-from djinn_miner.data.odds_api import BookmakerOdds, OddsApiClient
+from djinn_miner.data.provider import BookmakerOdds, SportsDataProvider
 
 if TYPE_CHECKING:
     pass
@@ -45,7 +45,7 @@ class LineChecker:
 
     def __init__(
         self,
-        odds_client: OddsApiClient,
+        odds_client: SportsDataProvider,
         line_tolerance: float = 0.5,
         health_tracker: HealthTracker | None = None,
     ) -> None:
@@ -263,17 +263,16 @@ class LineChecker:
         """Extract a human-readable error description from an upstream API exception."""
         import httpx
 
-        from djinn_miner.data.odds_api import CircuitOpenError
-
         if isinstance(exc, httpx.HTTPStatusError):
             status = exc.response.status_code
             reason = exc.response.reason_phrase or "Unknown"
-            return f"Odds API returned {status} {reason}"
-        if isinstance(exc, CircuitOpenError):
-            return f"Odds API circuit breaker open: {exc}"
+            return f"Data provider returned {status} {reason}"
         if isinstance(exc, httpx.RequestError):
-            return f"Odds API request failed: {exc}"
-        return f"Odds API error: {exc}"
+            return f"Data provider request failed: {exc}"
+        # Check for CircuitOpenError by name (avoids hard import from odds_api)
+        if type(exc).__name__ == "CircuitOpenError":
+            return f"Data provider circuit breaker open: {exc}"
+        return f"Data provider error: {exc}"
 
     @staticmethod
     def _side_matches(candidate_side: str, odds_name: str) -> bool:

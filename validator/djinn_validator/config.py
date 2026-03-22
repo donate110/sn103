@@ -64,19 +64,19 @@ class Config:
 
     # Contract addresses (Base Sepolia UUPS proxy defaults, override via env for mainnet)
     escrow_address: str = os.getenv(
-        "ESCROW_ADDRESS", "0x34bf3E45e1c4A5780beaEC29CC43cf4Da4ffF8A8"
+        "ESCROW_ADDRESS", "0xb43BA175a6784973eB3825acF801Cd7920ac692a"
     )
     signal_commitment_address: str = os.getenv(
-        "SIGNAL_COMMITMENT_ADDRESS", "0x67985854D9859B8B512565f724A2A1323f84f6A2"
+        "SIGNAL_COMMITMENT_ADDRESS", "0x4712479Ba57c9ED40405607b2B18967B359209C0"
     )
     account_address: str = os.getenv(
-        "ACCOUNT_ADDRESS", "0x79FbfB5a71A50F6c71aFD095B1Ae8e70a486CE02"
+        "ACCOUNT_ADDRESS", "0x4546354Dd32a613B76Abf530F81c8359e7cE440B"
     )
     collateral_address: str = os.getenv(
-        "COLLATERAL_ADDRESS", "0x0a9Ac02077918e8bF12810eE832dD5CC5b0D20C6"
+        "COLLATERAL_ADDRESS", "0x71F0a8c6BBFc4C83c5203807fAdd305B0C0F4C88"
     )
     outcome_voting_address: str = os.getenv(
-        "OUTCOME_VOTING_ADDRESS", "0xc680f07072E522127c15d7910EE0a669553B4dFa"
+        "OUTCOME_VOTING_ADDRESS", "0xAD534f4CAB13707BD4d65e4EF086A455e6A643e5"
     )
 
     # Validator API

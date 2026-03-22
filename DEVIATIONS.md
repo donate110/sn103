@@ -362,3 +362,12 @@ See the whitepaper for design intent.
 **What we did:** Capped the maximum Shamir threshold at 3 (was 7). The formula `clamp(ceil(2/3 * healthy_validators), SHAMIR_MIN, SHAMIR_MAX)` now produces threshold <= 3.
 **Why:** Only 3 validators (UID 2, 41, 189) reliably participate in direct peer-to-peer MPC communication. Other validators in the metagraph pass health checks via the Next.js proxy but are unreachable for direct MPC traffic. Signals created with threshold=7 cannot be purchased because the MPC protocol requires all threshold participants, and only 3 are available.
 **Impact:** Lower security threshold during bootstrap. Will raise back to 7 once more validators come online with stable MPC connectivity. Temporary measure.
+
+## DEV-028: Pluggable Sports Data Provider
+
+**Date:** 2026-03-22
+**Whitepaper Section:** Validators and Miners
+**Whitepaper Says:** "Miners acquire their own data sources: paid odds APIs (e.g., The Odds API, OddsJam), direct sportsbook integrations, or their own scraping infrastructure."
+**What we did:** Created a `SportsDataProvider` protocol in `miner/djinn_miner/data/provider.py` that defines the interface any sports data source must implement. The Odds API client (`OddsApiClient`) remains the default but is now one implementation of the protocol instead of being hardcoded. Miners can set `SPORTS_DATA_PROVIDER` to a custom module path (e.g. `my_module.MyProvider`) to load an alternative data source. The `ODDS_API_KEY` requirement is now conditional on using the default `odds_api` provider.
+**Why:** The whitepaper explicitly states miners should bring their own data sources, but the codebase hardcoded The Odds API with no way to swap it out. This was the biggest adoption blocker ($59/month per miner for a paid API key). The validator scores miners via cross-miner consensus, not by checking against any specific API, so alternative data sources work naturally with the scoring system.
+**Impact:** Miners can now use any data source that implements `get_odds()`, `parse_bookmaker_odds()`, `last_query_id`, and `close()`. Existing miners using The Odds API are unaffected.

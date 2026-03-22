@@ -30,6 +30,7 @@ from djinn_miner.core.proof import ProofGenerator, SessionCapture
 from djinn_miner.core.notary_sidecar import NotarySidecar
 from djinn_miner.core.telemetry import TelemetryStore
 from djinn_miner.data.odds_api import OddsApiClient
+from djinn_miner.data.provider import SportsDataProvider
 from djinn_miner.utils.watchtower import watch_loop as watchtower_loop
 
 log = structlog.get_logger()
@@ -128,26 +129,48 @@ async def async_main() -> None:
     # Session capture for proof generation
     session_capture = SessionCapture()
 
-    odds_client = OddsApiClient(
-        api_key=config.odds_api_key,
-        base_url=config.odds_api_base_url,
-        cache_ttl=config.odds_cache_ttl,
-        session_capture=session_capture,
-    )
-
-    # Probe odds API at startup to verify key works (costs 0 credits)
+    data_provider: SportsDataProvider
     odds_api_ok = False
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as probe:
-            resp = await probe.get(
-                f"{config.odds_api_base_url}/v4/sports",
-                params={"apiKey": config.odds_api_key},
+
+    if config.sports_data_provider == "odds_api":
+        data_provider = OddsApiClient(
+            api_key=config.odds_api_key,
+            base_url=config.odds_api_base_url,
+            cache_ttl=config.odds_cache_ttl,
+            session_capture=session_capture,
+        )
+
+        # Probe odds API at startup to verify key works (costs 0 credits)
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as probe:
+                resp = await probe.get(
+                    f"{config.odds_api_base_url}/v4/sports",
+                    params={"apiKey": config.odds_api_key},
+                )
+                odds_api_ok = resp.status_code == 200
+                if not odds_api_ok:
+                    log.warning("odds_api_probe_failed", status=resp.status_code)
+        except Exception as e:
+            log.warning("odds_api_probe_error", err=str(e))
+    else:
+        # Load custom provider from module path (e.g. "my_module.MyProvider")
+        import importlib
+
+        module_path, _, class_name = config.sports_data_provider.rpartition(".")
+        if not module_path:
+            raise ValueError(
+                f"SPORTS_DATA_PROVIDER must be 'odds_api' or a full module path "
+                f"like 'my_module.MyProvider', got {config.sports_data_provider!r}"
             )
-            odds_api_ok = resp.status_code == 200
-            if not odds_api_ok:
-                log.warning("odds_api_probe_failed", status=resp.status_code)
-    except Exception as e:
-        log.warning("odds_api_probe_error", err=str(e))
+        mod = importlib.import_module(module_path)
+        provider_cls = getattr(mod, class_name)
+        data_provider = provider_cls(config=config, session_capture=session_capture)
+        if not isinstance(data_provider, SportsDataProvider):
+            raise TypeError(
+                f"Custom provider {config.sports_data_provider} does not implement SportsDataProvider protocol"
+            )
+        odds_api_ok = True  # Custom providers manage their own health
+        log.info("custom_provider_loaded", provider=config.sports_data_provider)
 
     # Persistent telemetry — stores all events to SQLite
     telemetry_path = os.getenv("TELEMETRY_DB", "miner_telemetry.db")
@@ -164,7 +187,7 @@ async def async_main() -> None:
     reap_stale_provers()
 
     checker = LineChecker(
-        odds_client=odds_client,
+        odds_client=data_provider,
         line_tolerance=config.line_tolerance,
         health_tracker=health_tracker,
     )
@@ -322,9 +345,9 @@ async def async_main() -> None:
     if notary_sidecar.enabled:
         await notary_sidecar.stop()
     try:
-        await odds_client.close()
+        await data_provider.close()
     except Exception as e:
-        log.warning("odds_client_close_error", error=str(e))
+        log.warning("data_provider_close_error", error=str(e))
     log.info("shutdown_complete")
 
 

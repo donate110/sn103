@@ -42,7 +42,11 @@ class Config:
     external_ip: str = os.getenv("EXTERNAL_IP", "")
     external_port: int = _int_env("EXTERNAL_PORT", "0")
 
-    # The Odds API
+    # Sports data provider: "odds_api" (default) or a custom module path
+    # e.g. "my_provider.MyClient" for a custom SportsDataProvider implementation
+    sports_data_provider: str = os.getenv("SPORTS_DATA_PROVIDER", "odds_api")
+
+    # The Odds API (only required when sports_data_provider = "odds_api")
     odds_api_key: str = os.getenv("ODDS_API_KEY", "")
     odds_api_base_url: str = os.getenv("ODDS_API_BASE_URL", "https://api.the-odds-api.com")
 
@@ -71,8 +75,8 @@ class Config:
         if strict is None:
             strict = self.bt_network in ("finney", "mainnet")
         warnings: list[str] = []
-        if not self.odds_api_key:
-            raise ValueError("ODDS_API_KEY is required. Get one at https://the-odds-api.com")
+        if self.sports_data_provider == "odds_api" and not self.odds_api_key:
+            raise ValueError("ODDS_API_KEY is required when using the default odds_api provider. Get one at https://the-odds-api.com")
         if not (1 <= self.bt_netuid <= 65535):
             raise ValueError(f"BT_NETUID must be 1-65535, got {self.bt_netuid}")
         if not self.odds_api_base_url.startswith(("http://", "https://")):
