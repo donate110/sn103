@@ -54,7 +54,8 @@ NOTARY_PORT = int(os.getenv("TLSN_NOTARY_PORT", "7047"))
 REDACT_HEADERS = os.getenv("TLSN_REDACT_HEADERS", "authorization,apikey,x-api-key")
 
 # Max receive data for MPC circuit (bytes). Smaller = faster proofs for small responses.
-# Default 0 = use binary default (2MB). Override for known-small API responses.
+# Default 0 = use dynamic sizing (512KB floor, scales up based on Content-Length preflight).
+# Set explicitly to override dynamic sizing (e.g. for known-large responses).
 MAX_RECV_DATA = int(os.getenv("TLSN_MAX_RECV_DATA", "0"))
 
 
@@ -145,8 +146,10 @@ async def generate_proof(
     # Right-size the MPC circuit based on preflight Content-Length.
     # Round up to the next power of two after doubling (2x headroom for
     # response variance, HTTP headers, and TLS framing overhead).
-    # Floor of 256KB; falls back to 256KB when Content-Length is absent.
-    _MIN_RECV = 262_144  # 256 KB floor
+    # Floor of 512KB; falls back to 512KB when Content-Length is absent.
+    # 256KB was too small for many real web pages, causing "connection closed
+    # before message completed" errors.
+    _MIN_RECV = 524_288  # 512 KB floor
     if preflight_content_length is not None and preflight_content_length > 0:
         raw = preflight_content_length * 2
         # Next power of two >= raw
