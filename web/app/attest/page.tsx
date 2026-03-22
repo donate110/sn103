@@ -206,7 +206,7 @@ export default function AttestPage() {
             id="attest-url"
             className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-slate-500 focus:border-slate-500"
             type="url"
-            placeholder="https://example.com/page"
+            placeholder="https://httpbin.org/get"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             required
@@ -287,7 +287,7 @@ export default function AttestPage() {
               <pre className="bg-slate-800 text-slate-100 rounded-lg p-3 text-xs overflow-x-auto">{`curl -X POST https://djinn.gg/api/attest \\
   -H "Content-Type: application/json" \\
   -d '{
-    "url": "https://example.com/page",
+    "url": "https://httpbin.org/get",
     "request_id": "my-unique-id"
   }'`}</pre>
               <p className="text-xs text-slate-400 mt-1">

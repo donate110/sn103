@@ -2152,7 +2152,7 @@ function AttestationsTab({
               type="url"
               value={testUrl}
               onChange={(e) => setTestUrl(e.target.value)}
-              placeholder="https://example.com/page-to-attest"
+              placeholder="https://httpbin.org/get"
               className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
             <select

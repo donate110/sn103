@@ -246,7 +246,7 @@ test.describe("Attest API", () => {
     test.setTimeout(300_000);
     const res = await request.post("/api/attest", {
       data: {
-        url: "https://example.com",
+        url: "https://httpbin.org/get",
         request_id: "test-e2e-valid",
       },
       timeout: 280_000,
