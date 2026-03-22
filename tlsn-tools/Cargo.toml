@@ -22,6 +22,7 @@ tlsn = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.14" 
 tlsn-formats = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.14" }
 
 anyhow = "1"
+pem = "3"
 bincode = "1"
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive"] }
@@ -37,4 +38,5 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "
 tokio-util = { version = "0.7", features = ["compat"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 webpki-root-certs = "1"

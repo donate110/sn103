@@ -26,6 +26,17 @@ from djinn_validator.core.tlsn_bootstrap import ensure_binary
 
 VERIFIER_BINARY = ensure_binary("djinn-tlsn-verifier")
 
+# Extra root certificates for CAs not in Mozilla's trust store (e.g. AAA Certificate Services).
+# Searched in: env override, validator dir, ~/.local/share/djinn/
+_EXTRA_ROOTS_CANDIDATES = [
+    os.getenv("TLSN_EXTRA_ROOTS", ""),
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "extra-roots.pem"),
+    os.path.expanduser("~/.local/share/djinn/extra-roots.pem"),
+]
+EXTRA_ROOTS_PEM: str | None = next((p for p in _EXTRA_ROOTS_CANDIDATES if p and os.path.isfile(p)), None)
+if EXTRA_ROOTS_PEM:
+    log.info("tlsn_extra_roots_loaded", path=EXTRA_ROOTS_PEM)
+
 import re as _re
 
 _HEX_KEY_RE = _re.compile(r"^[0-9a-fA-F]{64,130}$")
@@ -76,6 +87,8 @@ async def verify_proof(
         presentation_path = f.name
 
     base_cmd = [VERIFIER_BINARY, "--presentation", presentation_path]
+    if EXTRA_ROOTS_PEM:
+        base_cmd.extend(["--extra-roots", EXTRA_ROOTS_PEM])
 
     # Try the assigned peer key first, then accept any key as fallback.
     # Trust comes from the TLS certificate (server identity), binary hash

@@ -4,6 +4,7 @@
 //!
 //! Usage:
 //!   djinn-tlsn-verifier --presentation /tmp/proof.bin
+//!   djinn-tlsn-verifier --presentation /tmp/proof.bin --extra-roots /path/to/extra-roots.pem
 //!
 //! Outputs JSON to stdout with: server_name, timestamp, disclosed request/response.
 
@@ -17,6 +18,7 @@ use tlsn::attestation::{
     presentation::{Presentation, PresentationOutput},
     CryptoProvider,
 };
+use tlsn::webpki::{CertificateDer, RootCertStore, ServerCertVerifier};
 
 #[derive(Parser, Debug)]
 #[command(name = "djinn-tlsn-verifier", about = "Verify a TLSNotary presentation")]
@@ -29,6 +31,43 @@ struct Args {
     /// accepts any valid signature (dev mode).
     #[arg(long)]
     notary_pubkey: Option<String>,
+
+    /// Optional path to a PEM file containing additional root certificates.
+    /// These are added to the default Mozilla root store. Useful for sites
+    /// using CAs not yet in the Mozilla trust program (e.g. Cloudflare/SSL.com
+    /// cross-signed chains).
+    #[arg(long)]
+    extra_roots: Option<PathBuf>,
+}
+
+/// Build a CryptoProvider with Mozilla roots plus any extra PEM root certs.
+fn build_crypto_provider(extra_roots_path: Option<&PathBuf>) -> Result<CryptoProvider> {
+    let mut root_store = RootCertStore::mozilla();
+
+    if let Some(pem_path) = extra_roots_path {
+        let pem_data = std::fs::read(pem_path)
+            .with_context(|| format!("failed to read extra roots from {}", pem_path.display()))?;
+
+        // Parse all PEM certificates from the file
+        let mut count = 0;
+        for pem in pem::parse_many(&pem_data)
+            .map_err(|e| anyhow::anyhow!("failed to parse PEM: {}", e))?
+        {
+            if pem.tag() == "CERTIFICATE" {
+                root_store.roots.push(CertificateDer(pem.contents().to_vec()));
+                count += 1;
+            }
+        }
+        eprintln!("[verifier] Loaded {} extra root certificate(s) from {}", count, pem_path.display());
+    }
+
+    let cert_verifier = ServerCertVerifier::new(&root_store)
+        .map_err(|e| anyhow::anyhow!("failed to build cert verifier: {}", e))?;
+
+    Ok(CryptoProvider {
+        cert: cert_verifier,
+        ..CryptoProvider::default()
+    })
 }
 
 #[tokio::main]
@@ -41,7 +80,7 @@ async fn main() -> Result<()> {
     let presentation: Presentation = bincode::deserialize(&presentation_bytes)
         .context("failed to deserialize presentation")?;
 
-    let crypto_provider = CryptoProvider::default();
+    let crypto_provider = build_crypto_provider(args.extra_roots.as_ref())?;
 
     let verifying_key = presentation.verifying_key();
     let notary_key_hex = hex::encode(&verifying_key.data);
