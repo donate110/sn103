@@ -1762,6 +1762,48 @@ def create_app(
             } if breakdown else None,
         }
 
+    @app.get("/v1/miner/{uid}/history")
+    async def miner_history(uid: int, hours: int = 168) -> dict:
+        """Return historical weight/score data for a specific miner.
+
+        Public endpoint. Extracts per-miner data from weight_set telemetry
+        events so the dashboard can show score timeseries without admin auth.
+
+        Args:
+            uid: Miner UID to look up.
+            hours: How far back to look (default 7 days).
+        """
+        if telemetry is None:
+            return {"uid": uid, "history": []}
+
+        import time as _time
+
+        since = _time.time() - max(1, min(hours, 720)) * 3600
+        events = telemetry.query(
+            limit=1000,
+            since=since,
+            category="weight_set",
+        )
+
+        history = []
+        for event in reversed(events):  # oldest first
+            details = event.get("details", {})
+            top_miners = details.get("top_miners", [])
+            match = next((m for m in top_miners if m.get("uid") == uid), None)
+            if match:
+                history.append({
+                    "t": event.get("timestamp", 0),
+                    "weight": match.get("weight", 0),
+                    "accuracy": match.get("accuracy"),
+                    "speed": match.get("speed"),
+                    "coverage": match.get("coverage"),
+                    "uptime": match.get("uptime"),
+                    "sports_score": match.get("sports_score"),
+                    "attestation_score": match.get("attestation_score"),
+                })
+
+        return {"uid": uid, "history": history}
+
     @app.get("/v1/network/miners")
     async def network_miners() -> dict:
         """Return health and scoring data for all miners this validator tracks.
