@@ -399,7 +399,12 @@ class TestUnhandledException:
 
 
 class TestProofWithCapturedSession:
-    """Proof endpoint with a real captured session → http_attestation type."""
+    """Proof endpoint with a real captured session produces a valid proof.
+
+    When TLSNotary is available, the proof type is 'tlsnotary' (with a
+    presentation field). When TLSNotary is not available, the fallback
+    produces an 'http_attestation' type with events_found.
+    """
 
     def test_proof_with_session_returns_attestation(self, mock_odds_response: list[dict]) -> None:
         mock_http = httpx.AsyncClient(
@@ -429,8 +434,13 @@ class TestProofWithCapturedSession:
         assert resp.status_code == 200
         data = resp.json()
         msg = json.loads(data["message"])
-        assert msg["type"] == "http_attestation"
-        assert msg["events_found"] > 0
+        # TLSNotary available: proof type is "tlsnotary" with a presentation
+        # TLSNotary unavailable: fallback is "http_attestation" with events_found
+        assert msg["type"] in ("tlsnotary", "http_attestation")
+        if msg["type"] == "http_attestation":
+            assert msg["events_found"] > 0
+        else:
+            assert "presentation" in msg
 
 
 class TestCustomRateLimits:
@@ -606,7 +616,11 @@ class TestEndpointErrorHandling:
         assert any("event_id" in str(err) for err in body.get("detail", []))
 
     def test_attest_with_generate_proof_exception_returns_500(self) -> None:
-        """If tlsn.generate_proof() raises an unexpected exception, returns 500."""
+        """If tlsn.generate_proof() raises an unexpected exception, returns 500.
+
+        Must provide a peer notary so the code path actually calls
+        generate_proof (without a peer, it goes straight to ephemeral).
+        """
         mock_checker = AsyncMock()
         mock_proof = AsyncMock()
         health = HealthTracker()
@@ -624,7 +638,12 @@ class TestEndpointErrorHandling:
         ):
             resp = client.post(
                 "/v1/attest",
-                json={"url": "https://example.com", "request_id": "err-1"},
+                json={
+                    "url": "https://example.com",
+                    "request_id": "err-1",
+                    "notary_host": "10.0.0.1",
+                    "notary_port": 7047,
+                },
             )
         assert resp.status_code == 500
         assert resp.json()["detail"] == "Internal server error"
