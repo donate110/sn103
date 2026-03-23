@@ -34,6 +34,17 @@ async function probeHealth(
   }
 }
 
+function computeGini(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const n = sorted.length;
+  const total = sorted.reduce((a, b) => a + b, 0);
+  if (total === 0) return 0;
+  let weightedSum = 0;
+  for (let i = 0; i < n; i++) weightedSum += (i + 1) * sorted[i];
+  return (2 * weightedSum) / (n * total) - (n + 1) / n;
+}
+
 export async function GET() {
   try {
     const { nodes } = await discoverMetagraph();
@@ -50,7 +61,10 @@ export async function GET() {
     const validators = reachable.filter((n) => n.isValidator);
     const miners = reachable.filter((n) => !n.isValidator);
 
-    // Only probe validators (few nodes, fast). Miner detail is on /network/miner/[uid].
+    // Also include miners with 0.0.0.0 (ghost nodes) for completeness
+    const allMiners = nodes.filter((n) => !n.isValidator);
+
+    // Probe validators
     const valHealthResults = await Promise.allSettled(
       validators.map((v) => probeHealth(v.ip, v.port, v.uid)),
     );
@@ -61,9 +75,35 @@ export async function GET() {
 
     const validatorHealth = validators.map((v) => healthMap[v.uid]).filter(Boolean);
 
+    // IP clustering
+    const ipClusters: Record<string, number[]> = {};
+    const uniqueIps = new Set<string>();
+    for (const m of allMiners) {
+      const ip = m.ip;
+      if (ip && ip !== "0.0.0.0") {
+        uniqueIps.add(ip);
+        const subnet = ip.split(".").slice(0, 3).join(".");
+        (ipClusters[subnet] ??= []).push(m.uid);
+      }
+    }
+
+    // Gini coefficient of incentive distribution (miners only, excluding UID 0)
+    const incentiveValues = allMiners
+      .filter((m) => m.uid !== 0)
+      .map((m) => m.incentive);
+    const giniCoeff = computeGini(incentiveValues);
+
+    // Burn percentage (UID 0 share of total incentive)
+    const totalIncentive = nodes.reduce((s, n) => s + n.incentive, 0);
+    const uid0 = nodes.find((n) => n.uid === 0);
+    const burnPercent =
+      totalIncentive > 0 && uid0
+        ? (uid0.incentive / totalIncentive) * 100
+        : 0;
+
     const summary = {
       totalValidators: validators.length,
-      totalMiners: miners.length,
+      totalMiners: allMiners.length,
       validatorsHealthy: validatorHealth.filter((h) => h.status === "ok").length,
       validatorsHoldingShares: validatorHealth.filter((h) => (h.shares_held ?? 0) > 0).length,
       totalShares: validatorHealth.reduce((sum, h) => sum + (h.shares_held ?? 0), 0),
@@ -74,6 +114,9 @@ export async function GET() {
           .filter((v) => !isNaN(v)),
       ),
       timestamp: Date.now(),
+      uniqueIps: uniqueIps.size,
+      gini: Math.round(giniCoeff * 1000) / 1000,
+      burnPercent: Math.round(burnPercent * 10) / 10,
     };
 
     const validatorList = validators
@@ -90,17 +133,18 @@ export async function GET() {
         health: healthMap[n.uid] || null,
       }));
 
-    const minerList = miners
+    const minerList = allMiners
       .sort((a, b) => b.incentive - a.incentive)
       .map((n) => ({
         uid: n.uid,
+        ip: n.ip || "0.0.0.0",
         stake: n.totalStake.toString(),
         incentive: n.incentive,
         emission: n.emission.toString(),
       }));
 
     return NextResponse.json(
-      { summary, validators: validatorList, miners: minerList },
+      { summary, validators: validatorList, miners: minerList, ipClusters },
       {
         headers: {
           "Cache-Control": "public, s-maxage=120, stale-while-revalidate=300",
@@ -110,7 +154,7 @@ export async function GET() {
   } catch (err) {
     console.error("[network/status] Failed:", err);
     return NextResponse.json(
-      { error: "Network status unavailable", summary: null, validators: [], miners: [] },
+      { error: "Network status unavailable", summary: null, validators: [], miners: [], ipClusters: {} },
       { status: 500 },
     );
   }

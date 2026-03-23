@@ -3,6 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import dynamic from "next/dynamic";
+import StatCard from "@/components/network/StatCard";
+import MetricDropdown from "@/components/network/MetricDropdown";
+import { formatStake, u16ToPercent, useSortable, type SortDir } from "@/components/network/helpers";
+
+// Lazy-load chart (needs canvas/window)
+const IncentiveChart = dynamic(() => import("@/components/network/IncentiveChart"), {
+  ssr: false,
+  loading: () => <div className="h-80 bg-slate-50 rounded-lg animate-pulse" />,
+});
 
 // ---------- Types ----------
 
@@ -21,6 +31,7 @@ interface ValidatorData {
 
 interface MinerData {
   uid: number;
+  ip: string;
   incentive: number;
   emission: string;
 }
@@ -33,22 +44,12 @@ interface Summary {
   totalShares: number;
   highestVersion: number;
   timestamp: number;
+  uniqueIps: number;
+  gini: number;
+  burnPercent: number;
 }
 
-type SortDir = "asc" | "desc";
-
-// ---------- Helpers ----------
-
-function formatStake(raw: string): string {
-  const tao = parseFloat(raw) / 1e9;
-  if (tao >= 1000) return `${(tao / 1000).toFixed(1)}k`;
-  if (tao >= 1) return tao.toFixed(1);
-  return tao.toFixed(4);
-}
-
-function u16ToPercent(val: number): string {
-  return ((val / 65535) * 100).toFixed(1) + "%";
-}
+// ---------- Small components ----------
 
 function StatusBadge({ status }: { status: string }) {
   const color =
@@ -66,11 +67,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function Check({ ok }: { ok: boolean | undefined }) {
   if (ok === undefined) return <span className="text-slate-300">-</span>;
-  return ok ? (
-    <span className="text-emerald-500">&#10003;</span>
-  ) : (
-    <span className="text-red-400">&#10005;</span>
-  );
+  return ok ? <span className="text-emerald-500">&#10003;</span> : <span className="text-red-400">&#10005;</span>;
 }
 
 function SortArrow({ active, dir }: { active: boolean; dir: SortDir }) {
@@ -78,35 +75,7 @@ function SortArrow({ active, dir }: { active: boolean; dir: SortDir }) {
   return <span className="text-slate-600 ml-0.5">{dir === "asc" ? "\u25B2" : "\u25BC"}</span>;
 }
 
-function useSortable<T>(
-  items: T[],
-  defaultKey: string,
-  defaultDir: SortDir,
-  getVal: (item: T, key: string) => number | string,
-) {
-  const [sortKey, setSortKey] = useState(defaultKey);
-  const [sortDir, setSortDir] = useState<SortDir>(defaultDir);
-  const toggle = useCallback(
-    (key: string) => {
-      if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-      else { setSortKey(key); setSortDir("desc"); }
-    },
-    [sortKey],
-  );
-  const sorted = useMemo(() => {
-    const copy = [...items];
-    copy.sort((a, b) => {
-      const va = getVal(a, sortKey);
-      const vb = getVal(b, sortKey);
-      const cmp = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    return copy;
-  }, [items, sortKey, sortDir, getVal]);
-  return { sorted, sortKey, sortDir, toggle };
-}
-
-// ---------- Components ----------
+// ---------- Tables ----------
 
 function ValidatorTable({ validators }: { validators: ValidatorData[] }) {
   const getVal = useCallback((v: ValidatorData, key: string): number | string => {
@@ -121,7 +90,7 @@ function ValidatorTable({ validators }: { validators: ValidatorData[] }) {
     }
   }, []);
   const { sorted, sortKey, sortDir, toggle } = useSortable(validators, "stake", "desc", getVal);
-  if (!validators.length) return <p className="text-sm text-slate-400 py-4">No validators discovered.</p>;
+  if (!validators.length) return <p className="text-sm text-slate-400 py-4 px-3">No validators discovered.</p>;
   const Th = ({ k, children, align }: { k: string; children: React.ReactNode; align?: string }) => (
     <th className={`px-3 py-2 cursor-pointer select-none hover:text-slate-600 ${align || ""}`} onClick={() => toggle(k)}>
       {children}<SortArrow active={sortKey === k} dir={sortDir} />
@@ -165,13 +134,14 @@ function MinerTable({ miners }: { miners: MinerData[] }) {
   const getVal = useCallback((m: MinerData, key: string): number | string => {
     switch (key) {
       case "uid": return m.uid;
+      case "ip": return m.ip;
       case "incentive": return m.incentive;
       case "emission": return parseFloat(m.emission);
       default: return 0;
     }
   }, []);
   const { sorted, sortKey, sortDir, toggle } = useSortable(miners, "incentive", "desc", getVal);
-  if (!miners.length) return <p className="text-sm text-slate-400 py-4">No miners discovered.</p>;
+  if (!miners.length) return <p className="text-sm text-slate-400 py-4 px-3">No miners discovered.</p>;
   const Th = ({ k, children, align }: { k: string; children: React.ReactNode; align?: string }) => (
     <th className={`px-3 py-2 cursor-pointer select-none hover:text-slate-600 ${align || ""}`} onClick={() => toggle(k)}>
       {children}<SortArrow active={sortKey === k} dir={sortDir} />
@@ -183,6 +153,7 @@ function MinerTable({ miners }: { miners: MinerData[] }) {
         <thead>
           <tr className="text-left text-xs text-slate-400 uppercase tracking-wide border-b">
             <Th k="uid">UID</Th>
+            <Th k="ip">IP</Th>
             <Th k="incentive" align="text-right">Incentive</Th>
             <Th k="emission" align="text-right">Emission</Th>
             <th className="px-3 py-2 text-right">Details</th>
@@ -190,16 +161,17 @@ function MinerTable({ miners }: { miners: MinerData[] }) {
         </thead>
         <tbody>
           {sorted.map((m) => (
-            <tr key={m.uid} className="border-b border-slate-100 hover:bg-slate-50">
+            <tr key={m.uid} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => window.location.href = `/network/miner/${m.uid}`}>
               <td className="px-3 py-2 font-mono font-medium">
-                <Link href={`/network/miner/${m.uid}`} className="text-blue-600 hover:text-blue-800 hover:underline">
+                <Link href={`/network/miner/${m.uid}`} className="text-blue-600 hover:text-blue-800 hover:underline" onClick={(e) => e.stopPropagation()}>
                   {m.uid}
                 </Link>
               </td>
+              <td className="px-3 py-2 font-mono text-xs text-slate-500">{m.ip !== "0.0.0.0" ? m.ip : "-"}</td>
               <td className="px-3 py-2 text-right">{u16ToPercent(m.incentive)}</td>
               <td className="px-3 py-2 text-right font-mono">{formatStake(m.emission)}</td>
               <td className="px-3 py-2 text-right">
-                <Link href={`/network/miner/${m.uid}`} className="text-xs text-blue-600 hover:underline">
+                <Link href={`/network/miner/${m.uid}`} className="text-xs text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()}>
                   View
                 </Link>
               </td>
@@ -217,9 +189,7 @@ function MinerSearch() {
   return (
     <div className="card">
       <h2 className="text-lg font-semibold text-slate-900 mb-1">Miner Lookup</h2>
-      <p className="text-sm text-slate-500 mb-4">
-        Enter a miner UID or click any UID in the table above.
-      </p>
+      <p className="text-sm text-slate-500 mb-4">Enter a miner UID or click any UID in the table above.</p>
       <div className="flex gap-2">
         <input
           type="number" value={uid} onChange={(e) => setUid(e.target.value)}
@@ -238,10 +208,22 @@ function MinerSearch() {
 
 // ---------- Main Page ----------
 
+const METRIC_OPTIONS = [
+  { value: "incentive", label: "Incentive" },
+  { value: "emission", label: "Emission" },
+];
+
 export default function NetworkPage() {
-  const [data, setData] = useState<{ summary: Summary | null; validators: ValidatorData[]; miners: MinerData[] } | null>(null);
+  const [data, setData] = useState<{
+    summary: Summary | null;
+    validators: ValidatorData[];
+    miners: MinerData[];
+    ipClusters: Record<string, number[]>;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState("");
+  const [metric, setMetric] = useState<"incentive" | "emission">("incentive");
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     fetch("/api/network/status")
@@ -274,6 +256,7 @@ export default function NetworkPage() {
 
   return (
     <div className="max-w-6xl mx-auto">
+      {/* Header */}
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
           <Image src="/djinn-logo.png" alt="Djinn" width={36} height={36} />
@@ -285,37 +268,53 @@ export default function NetworkPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
-        <div className="card text-center">
-          <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Validators</p>
-          <p className="text-2xl font-bold">{s.validatorsHealthy}<span className="text-sm font-normal text-slate-400">/{s.totalValidators}</span></p>
-          <p className="text-[11px] text-slate-400">healthy</p>
-        </div>
-        <div className="card text-center">
-          <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Miners</p>
-          <p className="text-2xl font-bold">{s.totalMiners}</p>
-          <p className="text-[11px] text-slate-400">registered</p>
-        </div>
-        <div className="card text-center">
-          <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Key Shares</p>
-          <p className="text-2xl font-bold">{s.totalShares.toLocaleString()}</p>
-          <p className="text-[11px] text-slate-400">across {s.validatorsHoldingShares} validators</p>
-        </div>
-        <div className="card text-center">
-          <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Latest Version</p>
-          <p className="text-2xl font-bold">v{s.highestVersion}</p>
-        </div>
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-8">
+        <StatCard label="Miners" value={String(s.totalMiners)} sub="registered" />
+        <StatCard label="Unique IPs" value={String(s.uniqueIps)} sub={`${s.totalMiners - s.uniqueIps} shared`} />
+        <StatCard label="Gini" value={s.gini.toFixed(3)} sub="incentive concentration" />
+        <StatCard label="Burn" value={`${s.burnPercent}%`} sub="to UID 0" />
+        <StatCard
+          label="Validators"
+          value={`${s.validatorsHealthy}/${s.totalValidators}`}
+          sub="healthy"
+        />
       </div>
 
+      {/* Incentive curve chart */}
       <section className="mb-8">
-        <h2 className="text-lg font-semibold text-slate-900 mb-3">
-          Validators <span className="text-sm font-normal text-slate-400">{s.validatorsHealthy}/{s.totalValidators} healthy</span>
-        </h2>
-        <div className="card p-0 overflow-hidden">
-          <ValidatorTable validators={data.validators} />
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Miner Rank</h2>
+              <p className="text-sm text-slate-500">
+                Sorted by {metric}, color-coded by IP cluster
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <MetricDropdown
+                options={METRIC_OPTIONS}
+                selected={metric}
+                onChange={(v) => setMetric(v as "incentive" | "emission")}
+              />
+              <button
+                onClick={() => setShowAll(!showAll)}
+                className="text-xs text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                {showAll ? "Top 50" : `All ${s.totalMiners}`}
+              </button>
+            </div>
+          </div>
+          <IncentiveChart
+            miners={data.miners}
+            ipClusters={data.ipClusters}
+            metric={metric}
+            showAll={showAll}
+          />
         </div>
       </section>
 
+      {/* Miner table */}
       <section className="mb-8">
         <h2 className="text-lg font-semibold text-slate-900 mb-3">
           Miners <span className="text-sm font-normal text-slate-400">{s.totalMiners} registered</span>
@@ -325,6 +324,17 @@ export default function NetworkPage() {
         </div>
       </section>
 
+      {/* Validator table */}
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold text-slate-900 mb-3">
+          Validators <span className="text-sm font-normal text-slate-400">{s.validatorsHealthy}/{s.totalValidators} healthy</span>
+        </h2>
+        <div className="card p-0 overflow-hidden">
+          <ValidatorTable validators={data.validators} />
+        </div>
+      </section>
+
+      {/* Miner search */}
       <section className="mb-8">
         <MinerSearch />
       </section>

@@ -6,7 +6,7 @@ import { discoverMetagraph } from "@/lib/bt-metagraph";
  * in parallel from Vercel (single hop to each validator) instead of the
  * browser doing it sequentially through the proxy.
  *
- * Cached for 30s so repeated lookups of the same UID are instant.
+ * Also returns metagraph data (ip, incentive, emission) for display.
  */
 export async function GET(
   _request: Request,
@@ -20,6 +20,18 @@ export async function GET(
 
   try {
     const { nodes } = await discoverMetagraph();
+
+    // Find this miner in the metagraph
+    const minerNode = nodes.find((n) => n.uid === uid);
+    const metagraph = minerNode
+      ? {
+          ip: minerNode.ip || "0.0.0.0",
+          incentive: minerNode.incentive,
+          emission: minerNode.emission.toString(),
+          isValidator: minerNode.isValidator,
+          stake: minerNode.totalStake.toString(),
+        }
+      : null;
 
     // Find validators (nodes with public IPs that are validators)
     const validators = nodes.filter(
@@ -58,7 +70,7 @@ export async function GET(
       .filter((r) => r !== null && r.found !== false);
 
     return NextResponse.json(
-      { uid, scores },
+      { uid, scores, metagraph },
       {
         headers: {
           "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
@@ -67,6 +79,6 @@ export async function GET(
     );
   } catch (err) {
     console.error("[network/miner] Failed:", err);
-    return NextResponse.json({ uid, scores: [] }, { status: 500 });
+    return NextResponse.json({ uid, scores: [], metagraph: null }, { status: 500 });
   }
 }
