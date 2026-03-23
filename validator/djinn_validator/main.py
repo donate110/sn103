@@ -413,13 +413,13 @@ async def epoch_loop(
                 success = neuron.set_weights(weights)
                 if success:
                     neuron.record_weight_set()
-                    # All miners by weight (excluding UID 0 burn), capped at 50
+                    # All miners by weight (excluding UID 0 burn)
                     sorted_w = sorted(
                         ((uid, w) for uid, w in weights.items() if uid != 0),
                         key=lambda x: x[1], reverse=True,
                     )
                     top_miners = []
-                    for uid, w in sorted_w[:50]:
+                    for uid, w in sorted_w:
                         bd = breakdowns.get(uid, {})
                         top_miners.append({
                             "uid": uid,
