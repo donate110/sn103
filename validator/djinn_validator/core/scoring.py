@@ -318,6 +318,12 @@ class MinerScorer:
                     m.prev_accuracy = d.get("prev_accuracy", 0.0)
                     m.prev_latencies = d.get("prev_latencies", [])
                     m.prev_coverage = d.get("prev_coverage", 0.0)
+                    m.attestation_latencies = d.get("attestation_latencies", [])[:50]
+                    # Restore notary pair history (keys are JSON strings, convert to int)
+                    raw_successes = d.get("notary_pair_successes", {})
+                    m.notary_pair_successes = {int(k): v for k, v in raw_successes.items()}
+                    raw_failures = d.get("notary_pair_failures", {})
+                    m.notary_pair_failures = {int(k): v for k, v in raw_failures.items()}
                     self._miners[uid] = m
                     loaded += 1
                 except Exception:
@@ -361,6 +367,9 @@ class MinerScorer:
             "prev_accuracy": m.prev_accuracy,
             "prev_latencies": m.prev_latencies[:10],
             "prev_coverage": m.prev_coverage,
+            "attestation_latencies": m.attestation_latencies[-50:],
+            "notary_pair_successes": m.notary_pair_successes,
+            "notary_pair_failures": m.notary_pair_failures,
         })
         try:
             with self._db_lock:
@@ -404,6 +413,12 @@ class MinerScorer:
                         "lifetime_correct": m.lifetime_correct,
                         "lifetime_attestations": m.lifetime_attestations,
                         "lifetime_attestations_valid": m.lifetime_attestations_valid,
+                        "prev_accuracy": m.prev_accuracy,
+                        "prev_latencies": m.prev_latencies[:10],
+                        "prev_coverage": m.prev_coverage,
+                        "attestation_latencies": m.attestation_latencies[-50:],
+                        "notary_pair_successes": m.notary_pair_successes,
+                        "notary_pair_failures": m.notary_pair_failures,
                     })
                     self._db.execute(
                         "INSERT OR REPLACE INTO miner_scores (uid, hotkey, data, updated_at) "

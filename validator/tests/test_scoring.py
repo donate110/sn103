@@ -659,3 +659,57 @@ class TestAttestationWeightFairness:
             assert weights_empty[0] > weights_empty[uid], (
                 f"Empty: attester (uid=0) must beat idle (uid={uid})"
             )
+
+
+class TestScorerPersistence:
+    """Verify that persist/load roundtrips preserve all critical fields."""
+
+    def test_notary_pair_history_persisted(self, tmp_path) -> None:
+        db = str(tmp_path / "scores.db")
+        scorer = MinerScorer(db_path=db)
+        m = scorer.get_or_create(5, "hk5")
+        m.notary_pair_successes = {10: 3, 20: 1}
+        m.notary_pair_failures = {10: 1, 30: 5}
+        m.attestation_latencies = [10.0, 20.0, 30.0]
+        m.prev_accuracy = 0.85
+        m.prev_coverage = 0.7
+        m.prev_latencies = [0.1, 0.2, 0.3]
+        scorer.persist_all()
+
+        # Reload from same db
+        scorer2 = MinerScorer(db_path=db)
+        m2 = scorer2.get(5)
+        assert m2 is not None
+        assert m2.notary_pair_successes == {10: 3, 20: 1}
+        assert m2.notary_pair_failures == {10: 1, 30: 5}
+        assert m2.attestation_latencies == [10.0, 20.0, 30.0]
+        assert m2.prev_accuracy == 0.85
+        assert m2.prev_coverage == 0.7
+        assert m2.prev_latencies == [0.1, 0.2, 0.3]
+
+    def test_notary_pair_empty_roundtrip(self, tmp_path) -> None:
+        db = str(tmp_path / "scores.db")
+        scorer = MinerScorer(db_path=db)
+        scorer.get_or_create(1, "hk1")
+        scorer.persist_all()
+
+        scorer2 = MinerScorer(db_path=db)
+        m = scorer2.get(1)
+        assert m is not None
+        assert m.notary_pair_successes == {}
+        assert m.notary_pair_failures == {}
+        assert m.attestation_latencies == []
+
+    def test_attestation_latencies_capped_at_50(self, tmp_path) -> None:
+        db = str(tmp_path / "scores.db")
+        scorer = MinerScorer(db_path=db)
+        m = scorer.get_or_create(1, "hk1")
+        m.attestation_latencies = list(range(100))
+        scorer.persist_all()
+
+        scorer2 = MinerScorer(db_path=db)
+        m2 = scorer2.get(1)
+        assert m2 is not None
+        assert len(m2.attestation_latencies) == 50
+        # Should be the last 50 (saved from persist_all: [-50:])
+        assert m2.attestation_latencies == list(range(50, 100))

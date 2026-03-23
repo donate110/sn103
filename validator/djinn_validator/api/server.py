@@ -278,6 +278,24 @@ def create_app(
                 "Purchase endpoint will accept unsigned requests. "
                 "Set DJINN_REQUIRE_BUYER_AUTH=1 for production.",
             )
+
+        # Warm circuit breakers from persistent attestation history so we
+        # don't waste time re-discovering dead miners after a restart.
+        if attestation_log is not None:
+            try:
+                streaks = attestation_log.miner_failure_streaks(lookback_seconds=3600)
+                warmed = 0
+                for uid, failures in streaks.items():
+                    if failures >= 3:
+                        breaker = _get_miner_breaker(uid)
+                        for _ in range(failures):
+                            breaker.record_failure()
+                        warmed += 1
+                if warmed:
+                    log.info("circuit_breakers_warmed", count=warmed, from_log=True)
+            except Exception as e:
+                log.warning("circuit_breaker_warmup_failed", error=str(e))
+
         cleanup_task = asyncio.create_task(_periodic_state_cleanup())
         yield
         _shutdown_event.set()

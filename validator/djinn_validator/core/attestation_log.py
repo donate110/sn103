@@ -61,6 +61,11 @@ class AttestationLog:
             self._conn.execute("ALTER TABLE attestation_log ADD COLUMN notary_uid INTEGER")
         except sqlite3.OperationalError:
             pass  # Column already exists
+        # Index for efficient per-miner failure streak queries
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_attestation_miner_time "
+            "ON attestation_log (miner_uid, created_at)"
+        )
         self._conn.commit()
 
     def log_attestation(
@@ -176,6 +181,37 @@ class AttestationLog:
             }
             for r in rows
         ]
+
+    def miner_failure_streaks(self, lookback_seconds: int = 3600) -> dict[int, int]:
+        """Return consecutive recent failure counts per miner UID.
+
+        Scans attestations from the last ``lookback_seconds`` (default 1 hour)
+        and counts consecutive failures from the most recent attestation for
+        each miner.  A single success breaks the streak.
+
+        Returns:
+            Mapping of miner_uid -> consecutive failure count (only miners
+            with at least 1 failure are included).
+        """
+        cutoff = int(time.time()) - lookback_seconds
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT miner_uid, success FROM attestation_log "
+                "WHERE miner_uid IS NOT NULL AND created_at >= ? "
+                "ORDER BY id DESC",
+                (cutoff,),
+            ).fetchall()
+
+        streaks: dict[int, int] = {}
+        seen_success: set[int] = set()
+        for uid, success in rows:
+            if uid in seen_success:
+                continue
+            if success:
+                seen_success.add(uid)
+            else:
+                streaks[uid] = streaks.get(uid, 0) + 1
+        return streaks
 
     def close(self) -> None:
         """Close the database connection."""

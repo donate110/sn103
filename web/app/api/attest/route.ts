@@ -74,7 +74,7 @@ function humanizeError(raw: string): string {
   const lower = raw.toLowerCase();
 
   if (lower.includes("more data than was configured") || lower.includes("max_recv")) {
-    return "This page is too large to attest (over 2 MB uncompressed). Try attesting a specific article or API endpoint instead of a homepage.";
+    return "This page is too large to attest. Try attesting a specific article or API endpoint instead of a homepage.";
   }
   if (lower.includes("badcertificate") || lower.includes("certificate")) {
     return "Could not verify this site's TLS certificate. The site may use an unusual certificate authority or have an expired certificate.";

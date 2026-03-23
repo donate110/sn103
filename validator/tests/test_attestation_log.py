@@ -131,3 +131,102 @@ class TestAttestationLog:
         entries = log.recent_attestations(100)
         old_entries = [e for e in entries if "old.com" in e["url"]]
         assert len(old_entries) == 10, "Old entries should NOT be pruned below threshold"
+
+
+class TestMinerFailureStreaks:
+    def test_empty_log(self, log: AttestationLog) -> None:
+        assert log.miner_failure_streaks() == {}
+
+    def test_all_successes(self, log: AttestationLog) -> None:
+        for i in range(5):
+            log.log_attestation(
+                url="https://example.com",
+                request_id=f"req-{i}",
+                success=True,
+                verified=True,
+                miner_uid=10,
+            )
+        assert log.miner_failure_streaks() == {}
+
+    def test_consecutive_failures(self, log: AttestationLog) -> None:
+        for i in range(4):
+            log.log_attestation(
+                url="https://example.com",
+                request_id=f"req-{i}",
+                success=False,
+                verified=False,
+                miner_uid=5,
+                error="timeout",
+            )
+        streaks = log.miner_failure_streaks()
+        assert streaks == {5: 4}
+
+    def test_success_breaks_streak(self, log: AttestationLog) -> None:
+        # Oldest first: fail, fail, success, fail, fail, fail
+        for i, ok in enumerate([False, False, True, False, False, False]):
+            log.log_attestation(
+                url="https://example.com",
+                request_id=f"req-{i}",
+                success=ok,
+                verified=ok,
+                miner_uid=7,
+            )
+        # Newest first: fail, fail, fail, success -- streak is 3
+        streaks = log.miner_failure_streaks()
+        assert streaks == {7: 3}
+
+    def test_multiple_miners(self, log: AttestationLog) -> None:
+        # Miner 1: 2 recent failures
+        for i in range(2):
+            log.log_attestation(
+                url="https://example.com",
+                request_id=f"m1-{i}",
+                success=False,
+                verified=False,
+                miner_uid=1,
+            )
+        # Miner 2: success (no streak)
+        log.log_attestation(
+            url="https://example.com",
+            request_id="m2-0",
+            success=True,
+            verified=True,
+            miner_uid=2,
+        )
+        # Miner 3: 5 failures
+        for i in range(5):
+            log.log_attestation(
+                url="https://example.com",
+                request_id=f"m3-{i}",
+                success=False,
+                verified=False,
+                miner_uid=3,
+            )
+        streaks = log.miner_failure_streaks()
+        assert streaks == {1: 2, 3: 5}
+        assert 2 not in streaks
+
+    def test_ignores_null_miner_uid(self, log: AttestationLog) -> None:
+        log.log_attestation(
+            url="https://example.com",
+            request_id="req-null",
+            success=False,
+            verified=False,
+            miner_uid=None,
+        )
+        assert log.miner_failure_streaks() == {}
+
+    def test_lookback_window(self, log: AttestationLog) -> None:
+        old_ts = int(time.time()) - 7200  # 2 hours ago
+        # Insert old failure directly
+        log._conn.execute(
+            "INSERT INTO attestation_log "
+            "(url, request_id, success, verified, miner_uid, created_at) "
+            "VALUES (?, ?, 0, 0, 99, ?)",
+            ("https://example.com", "old-req", old_ts),
+        )
+        log._conn.commit()
+        # With 1 hour lookback, old failure should be excluded
+        assert log.miner_failure_streaks(lookback_seconds=3600) == {}
+        # With 3 hour lookback, old failure should be included
+        assert log.miner_failure_streaks(lookback_seconds=10800) == {99: 1}

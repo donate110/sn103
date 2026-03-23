@@ -741,6 +741,11 @@ async def async_main() -> None:
     except TimeoutError:
         log.warning("shutdown_timeout", msg="Tasks did not finish within 15s")
     try:
+        scorer.persist_all()
+        log.info("scorer_persisted_on_shutdown")
+    except Exception as e:
+        log.warning("scorer_persist_error", error=str(e))
+    try:
         await outcome_attestor.close()
     except Exception as e:
         log.warning("outcome_attestor_close_error", error=str(e))
