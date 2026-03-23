@@ -48,7 +48,7 @@ class Config:
     # Burn fraction is a protocol parameter, not operator-configurable.
     # Hardcoded so .env overrides can't cause validators to diverge.
     # If you previously had BT_BURN_FRACTION in your .env, it is now ignored.
-    bt_burn_fraction: float = 0.90
+    bt_burn_fraction: float = 0.80
 
     # Base chain (comma-separated URLs for failover)
     base_rpc_url: str = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
