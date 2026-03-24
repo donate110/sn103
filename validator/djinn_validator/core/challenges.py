@@ -379,7 +379,12 @@ def build_challenge_lines(games: list[ESPNGame], sport: str) -> list[dict]:
     real_count = min(5, len(real_lines))
     selected = random.sample(real_lines, real_count)
 
-    # Create synthetic unavailable lines — diversified to resist pattern matching
+    # Create synthetic unavailable lines — diversified to resist pattern matching.
+    # IMPORTANT: every synthetic must defeat the miner's team-name fallback in
+    # parse_bookmaker_odds.  Hashing the event_id alone is not enough because
+    # miners fall back to (home_team, away_team) matching when the event_id
+    # doesn't match the Odds API id.  We swap one team name from a *different*
+    # game so the pair never matches a real event while still looking plausible.
     synthetic_count = min(10 - real_count, 5)
     _synthetic_types = ["extreme_line", "fake_event", "wrong_market"]
     for i in range(synthetic_count):
@@ -395,13 +400,21 @@ def build_challenge_lines(games: list[ESPNGame], sport: str) -> list[dict]:
         else:  # wrong_market
             synth_market = "player_prop"
 
+        # Swap the away team with one from a different game so team-name
+        # matching can never resolve to a real event.
+        other_teams = [
+            r["away_team"] for r in real_lines
+            if r["away_team"] != base["away_team"]
+        ]
+        synth_away = random.choice(other_teams) if other_teams else f"Synthetic {i}"
+
         selected.append({
             "sport": sport,
             "event_id": hashlib.sha256(
                 f"{base['event_id']}:synthetic:{i}:{random.random()}".encode()
             ).hexdigest()[:24],
             "home_team": base["home_team"],
-            "away_team": base["away_team"],
+            "away_team": synth_away,
             "market": synth_market,
             "line": synth_line,
             "side": base["side"],

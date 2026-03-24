@@ -928,6 +928,34 @@ class TestSyntheticLineCount:
         ids = [s["event_id"] for s in synthetic]
         assert len(ids) == len(set(ids))
 
+    def test_synthetic_teams_dont_match_real_games(self) -> None:
+        """Synthetic lines must swap a team so team-name fallback can't match."""
+        games = [
+            _make_game("evt1", home="Los Angeles Lakers", away="Boston Celtics"),
+            _make_game("evt2", home="Golden State Warriors", away="Miami Heat"),
+        ]
+        lines = build_challenge_lines(games, "basketball_nba")
+        synthetic = [l for l in lines if l.get("is_synthetic")]
+        real = [l for l in lines if not l.get("is_synthetic")]
+        # Build set of real (home, away) pairs
+        real_pairs = {(r["home_team"], r["away_team"]) for r in real}
+        for s in synthetic:
+            pair = (s["home_team"], s["away_team"])
+            assert pair not in real_pairs, (
+                f"Synthetic line has real team pair {pair}, "
+                "team-name fallback will match a real event"
+            )
+
+    def test_synthetic_single_game_uses_fallback_name(self) -> None:
+        """With only one game (one away team), synthetic uses a fallback name."""
+        games = [_make_game("evt1")]
+        lines = build_challenge_lines(games, "basketball_nba")
+        synthetic = [l for l in lines if l.get("is_synthetic")]
+        assert len(synthetic) > 0
+        for s in synthetic:
+            # Away team should differ from the real game's away team
+            assert s["away_team"] != "Boston Celtics"
+
 
 class TestProofsRequestedTracking:
     """Tests for proofs_requested field on MinerMetrics."""
