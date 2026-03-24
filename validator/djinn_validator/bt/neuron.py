@@ -25,7 +25,7 @@ except ImportError:
 class DjinnValidator:
     """Bittensor validator neuron for Djinn Protocol subnet 103."""
 
-    # Minimum blocks between weight updates (Bittensor tempo is ~100 blocks)
+    # Minimum blocks between weight updates (SN103 tempo is 360 blocks = ~72 min)
     MIN_WEIGHT_INTERVAL = 100
 
     def __init__(

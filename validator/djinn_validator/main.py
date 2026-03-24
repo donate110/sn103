@@ -61,7 +61,7 @@ async def epoch_loop(
     chain_client: ChainClient | None = None,
     activity: ActivityBuffer | None = None,
     audit_set_store: AuditSetStore | None = None,
-    burn_fraction: float = 0.90,
+    burn_fraction: float = 0.80,
     espn_client: ESPNClient | None = None,
     shares_threshold: int = 3,
     telemetry: TelemetryStore | None = None,
@@ -456,6 +456,7 @@ async def epoch_loop(
                             total_miners=len(sorted_w),
                             success=True,
                         )
+                        telemetry.record_miner_weights(top_miners)
                 else:
                     weight_error = neuron.last_weight_error or "Unknown error"
                     if activity is not None:
@@ -525,7 +526,7 @@ async def epoch_loop(
             await asyncio.sleep(backoff)
             continue
 
-        # Wait for next epoch (~12 seconds per Bittensor block, tempo ~100 blocks)
+        # Wait for next epoch (~12 seconds per Bittensor block, SN103 tempo = 360 blocks)
         await asyncio.sleep(12)
 
 
