@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAccount, useWalletClient } from "wagmi";
 import QualityScore from "@/components/QualityScore";
 import { useCollateral, useDepositCollateral, useWithdrawCollateral, useWalletUsdcBalance, useEarlyExit, useCancelSignal, humanizeError } from "@/lib/hooks";
+import { invalidateSignalCache } from "@/lib/events";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
 import { useAuditHistory } from "@/lib/hooks/useAuditHistory";
 import { useEncryptedSignals } from "@/lib/hooks/useEncryptedSignals";
@@ -19,7 +20,7 @@ export default function GeniusDashboard() {
   const { balance: walletUsdc, loading: walletUsdcLoading, refresh: refreshWalletUsdc } = useWalletUsdcBalance(address);
   const { deposit: depositCollateral, loading: depositLoading } = useDepositCollateral();
   const { withdraw: withdrawCollateral, loading: withdrawLoading } = useWithdrawCollateral();
-  const { signals: mySignals, loading: signalsLoading } = useActiveSignals(undefined, address, true);
+  const { signals: mySignals, loading: signalsLoading, forceRefresh: forceRefreshSignals } = useActiveSignals(undefined, address, true);
   const { audits, loading: auditsLoading, aggregateQualityScore } = useAuditHistory(address);
   const { data: walletClient } = useWalletClient();
 
@@ -133,6 +134,8 @@ export default function GeniusDashboard() {
     setCancellingAll(false);
     setCancelProgress("");
     if (cancelled > 0 || skipped > 0) {
+      invalidateSignalCache(address);
+      forceRefreshSignals();
       const parts = [];
       if (cancelled > 0) parts.push(`Cancelled ${cancelled}`);
       if (skipped > 0) parts.push(`${skipped} already cancelled`);

@@ -80,11 +80,12 @@ export default function PurchaseSignal() {
   const [purchaseBtnVisible, setPurchaseBtnVisible] = useState(false);
   const checkResultRef = useRef<CheckResponse | null>(null);
 
-  // Check if any validator holds shares for this signal (lightweight GET check)
+  // Check if any validator holds shares for this signal (polls every 15s)
   useEffect(() => {
     if (!signalId || signalLoading) return;
     let cancelled = false;
-    (async () => {
+
+    const checkShares = async () => {
       try {
         const validators = await discoverValidatorClients();
         const probes = await Promise.allSettled(
@@ -104,8 +105,11 @@ export default function PurchaseSignal() {
       } catch {
         if (!cancelled) setSignalAvailable(true); // assume available on error
       }
-    })();
-    return () => { cancelled = true; };
+    };
+
+    checkShares();
+    const interval = setInterval(checkShares, 15_000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [signalId, signalLoading]);
 
   // Hide sticky mobile bar when the form submit button scrolls into view
@@ -748,10 +752,11 @@ export default function PurchaseSignal() {
 
             {signalAvailable === false && isActive && (
               <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 mb-4" role="alert">
-                <p className="text-sm font-medium text-amber-800 mb-1">Signal Unavailable</p>
+                <p className="text-sm font-medium text-amber-800 mb-1">Signal Temporarily Unavailable</p>
                 <p className="text-xs text-amber-700">
-                  This signal&apos;s encryption keys are not held by any active validator.
-                  It may have been created during a network reset and cannot be purchased.
+                  Validators are still distributing encryption key shares for this signal.
+                  This page re-checks automatically every 15 seconds. If you just created
+                  this signal, wait a moment for the network to sync.
                 </p>
               </div>
             )}

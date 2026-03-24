@@ -2,8 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getReadProvider } from "../hooks";
-import { getActiveSignals, getSignalsByGenius } from "../events";
+import { getActiveSignals, getSignalsByGenius, invalidateSignalCache } from "../events";
 import type { SignalEvent } from "../events";
+
+/** Default polling interval: 30 seconds */
+const POLL_INTERVAL_MS = 30_000;
 
 export function useActiveSignals(sport?: string, geniusAddress?: string, includeAll: boolean = false) {
   const [signals, setSignals] = useState<SignalEvent[]>([]);
@@ -41,13 +44,33 @@ export function useActiveSignals(sport?: string, geniusAddress?: string, include
     }
   }, [sport, geniusAddress, includeAll]);
 
+  /** Force-refresh: invalidates cache first so we get fresh on-chain data. */
+  const forceRefresh = useCallback(async () => {
+    invalidateSignalCache(geniusAddress);
+    return refresh();
+  }, [geniusAddress, refresh]);
+
+  // Initial fetch + polling
   useEffect(() => {
     cancelledRef.current = false;
     refresh();
+    const interval = setInterval(() => {
+      if (!cancelledRef.current) refresh();
+    }, POLL_INTERVAL_MS);
     return () => {
       cancelledRef.current = true;
+      clearInterval(interval);
     };
   }, [refresh]);
 
-  return { signals, loading, error, refresh };
+  // Refresh on window focus (tab switch back)
+  useEffect(() => {
+    const onFocus = () => {
+      if (!cancelledRef.current) refresh();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refresh]);
+
+  return { signals, loading, error, refresh, forceRefresh };
 }

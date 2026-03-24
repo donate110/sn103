@@ -5,6 +5,9 @@ import { getReadProvider } from "../hooks";
 import { getAuditsByGenius, getAuditsByIdiot } from "../events";
 import type { AuditEvent } from "../events";
 
+/** Polling interval for audit history: 60 seconds */
+const AUDIT_POLL_MS = 60_000;
+
 export function useAuditHistory(geniusAddress?: string) {
   const [audits, setAudits] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(false);
@@ -35,12 +38,26 @@ export function useAuditHistory(geniusAddress?: string) {
     }
   }, [geniusAddress]);
 
+  // Initial fetch + polling
   useEffect(() => {
     cancelledRef.current = false;
     refresh();
+    const interval = setInterval(() => {
+      if (!cancelledRef.current) refresh();
+    }, AUDIT_POLL_MS);
     return () => {
       cancelledRef.current = true;
+      clearInterval(interval);
     };
+  }, [refresh]);
+
+  // Refresh on window focus
+  useEffect(() => {
+    const onFocus = () => {
+      if (!cancelledRef.current) refresh();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
   const aggregateQualityScore = audits.reduce(
@@ -81,12 +98,26 @@ export function useIdiotAuditHistory(idiotAddress?: string) {
     }
   }, [idiotAddress]);
 
+  // Initial fetch + polling
   useEffect(() => {
     cancelledRef.current = false;
     refresh();
+    const interval = setInterval(() => {
+      if (!cancelledRef.current) refresh();
+    }, AUDIT_POLL_MS);
     return () => {
       cancelledRef.current = true;
+      clearInterval(interval);
     };
+  }, [refresh]);
+
+  // Refresh on window focus
+  useEffect(() => {
+    const onFocus = () => {
+      if (!cancelledRef.current) refresh();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
   return { audits, loading, error, refresh };

@@ -610,6 +610,7 @@ export function useDepositEscrow() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsApproval, setNeedsApproval] = useState(false);
+  const justApprovedRef = useRef(false);
 
   const deposit = useCallback(
     async (amount: bigint) => {
@@ -628,29 +629,32 @@ export function useDepositEscrow() {
           throw new Error(`Insufficient USDC balance: have ${balance}, need ${amount}`);
         }
 
-        // Check existing allowance — skip approve if already sufficient
-        const allowance: bigint = await usdcRead.allowance(address, escrowAddr);
-        if (allowance < amount) {
-          // Coinbase Smart Wallet can only handle one popup per user action.
-          // Do ONLY the approve here, then return. Caller clicks again for deposit.
-          const MAX_UINT256 = 2n ** 256n - 1n;
-          debug("[escrow-deposit] approving (max allowance)");
-          const approveHash = await walletClient.writeContract({
-            address: usdcAddr,
-            abi: ERC20_ABI,
-            functionName: "approve",
-            account: address,
-            chain: expectedChain,
-            args: [escrowAddr, MAX_UINT256],
-          });
-          debug("[escrow-deposit] approve tx:", approveHash);
-          await waitForTx(approveHash);
-          setNeedsApproval(false);
-          // Return "approved" so caller knows to retry for the actual deposit
-          return "approved" as const;
+        // Skip allowance check if we just approved (RPC may lag behind on-chain state)
+        if (!justApprovedRef.current) {
+          const allowance: bigint = await usdcRead.allowance(address, escrowAddr);
+          if (allowance < amount) {
+            // Coinbase Smart Wallet can only handle one popup per user action.
+            // Do ONLY the approve here, then return. Caller clicks again for deposit.
+            const MAX_UINT256 = 2n ** 256n - 1n;
+            debug("[escrow-deposit] approving (max allowance)");
+            const approveHash = await walletClient.writeContract({
+              address: usdcAddr,
+              abi: ERC20_ABI,
+              functionName: "approve",
+              account: address,
+              chain: expectedChain,
+              args: [escrowAddr, MAX_UINT256],
+            });
+            debug("[escrow-deposit] approve tx:", approveHash);
+            await waitForTx(approveHash);
+            setNeedsApproval(false);
+            justApprovedRef.current = true;
+            return "approved" as const;
+          }
         }
 
         // Deposit into escrow (single popup)
+        justApprovedRef.current = false;
         debug("[escrow-deposit] depositing", amount.toString());
         const depositHash = await walletClient.writeContract({
           address: escrowAddr,
@@ -666,6 +670,7 @@ export function useDepositEscrow() {
         return depositHash;
       } catch (err) {
         console.error("[escrow-deposit] FAILED:", err);
+        justApprovedRef.current = false;
         const msg = err instanceof Error ? err.message : String(err);
         setError(`Deposit failed: ${msg}`);
         throw err;
@@ -696,6 +701,7 @@ export function useDepositCollateral() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsApproval, setNeedsApproval] = useState(false);
+  const justApprovedRef = useRef(false);
 
   const deposit = useCallback(
     async (amount: bigint) => {
@@ -714,28 +720,32 @@ export function useDepositCollateral() {
           throw new Error(`Insufficient USDC balance: have ${balance}, need ${amount}`);
         }
 
-        // Check existing allowance — skip approve if already sufficient
-        const allowance: bigint = await usdcRead.allowance(address, collateralAddr);
-        if (allowance < amount) {
-          // Coinbase Smart Wallet can only handle one popup per user action.
-          // Do ONLY the approve here, then return. Caller clicks again for deposit.
-          const MAX_UINT256 = 2n ** 256n - 1n;
-          debug("[collateral-deposit] approving (max allowance)");
-          const approveHash = await walletClient.writeContract({
-            address: usdcAddr,
-            abi: ERC20_ABI,
-            functionName: "approve",
-            account: address,
-            chain: expectedChain,
-            args: [collateralAddr, MAX_UINT256],
-          });
-          debug("[collateral-deposit] approve tx:", approveHash);
-          await waitForTx(approveHash);
-          setNeedsApproval(false);
-          return "approved" as const;
+        // Skip allowance check if we just approved (RPC may lag behind on-chain state)
+        if (!justApprovedRef.current) {
+          const allowance: bigint = await usdcRead.allowance(address, collateralAddr);
+          if (allowance < amount) {
+            // Coinbase Smart Wallet can only handle one popup per user action.
+            // Do ONLY the approve here, then return. Caller clicks again for deposit.
+            const MAX_UINT256 = 2n ** 256n - 1n;
+            debug("[collateral-deposit] approving (max allowance)");
+            const approveHash = await walletClient.writeContract({
+              address: usdcAddr,
+              abi: ERC20_ABI,
+              functionName: "approve",
+              account: address,
+              chain: expectedChain,
+              args: [collateralAddr, MAX_UINT256],
+            });
+            debug("[collateral-deposit] approve tx:", approveHash);
+            await waitForTx(approveHash);
+            setNeedsApproval(false);
+            justApprovedRef.current = true;
+            return "approved" as const;
+          }
         }
 
         // Deposit into collateral (single popup)
+        justApprovedRef.current = false;
         debug("[collateral-deposit] depositing", amount.toString());
         const depositHash = await walletClient.writeContract({
           address: collateralAddr,
@@ -751,6 +761,7 @@ export function useDepositCollateral() {
         return depositHash;
       } catch (err) {
         console.error("[collateral-deposit] FAILED:", err);
+        justApprovedRef.current = false;
         const msg = err instanceof Error ? err.message : String(err);
         setError(`Deposit failed: ${msg}`);
         throw err;

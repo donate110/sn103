@@ -504,8 +504,8 @@ export default function CreateSignal() {
         setStep("configure");
         return;
       }
-      if (isNaN(slaNum) || !Number.isFinite(slaNum) || slaNum < 100 || slaNum > 1000) {
-        setStepError("Invalid SLA multiplier (must be 100-1000%)");
+      if (isNaN(slaNum) || !Number.isFinite(slaNum) || slaNum < 100 || slaNum > 300) {
+        setStepError("Invalid SLA multiplier (must be 100-300%)");
         setStep("configure");
         return;
       }
@@ -1367,7 +1367,7 @@ export default function CreateSignal() {
             onChange={(e) => setSlaMultiplier(e.target.value)}
             placeholder="100"
             min="100"
-            max="1000"
+            max="300"
             step="1"
             className="input"
             required
@@ -1375,16 +1375,17 @@ export default function CreateSignal() {
           {(() => {
             const sla = parseFloat(slaMultiplier);
             if (slaMultiplier && !isNaN(sla) && sla < 100) {
-              return <p className="text-xs text-red-500 mt-1">SLA multiplier must be at least 100%</p>;
+              return <p className="text-xs text-red-500 mt-1">Minimum is 100%. Buyers must be guaranteed at least their full stake back on a wrong pick.</p>;
             }
-            if (sla > 1000) {
-              return <p className="text-xs text-red-500 mt-1">SLA multiplier cannot exceed 1000%</p>;
+            if (sla > 300) {
+              return <p className="text-xs text-red-500 mt-1">SLA multiplier cannot exceed 300% (contract limit)</p>;
             }
             return (
               <p className="text-xs text-slate-500 mt-1">
-                If your pick is wrong, you pay the buyer up to this % of their stake
-                from your locked collateral. 100% means the buyer gets their full
-                stake back. Higher = more collateral commitment per purchase.
+                Skin in the game: if your pick is wrong, you pay the buyer this % of
+                their stake from your locked collateral. 100% = full refund on loss.
+                200% = buyer profits even when you&apos;re wrong. Higher multipliers
+                signal more confidence and attract more buyers.
               </p>
             );
           })()}
@@ -1633,7 +1634,7 @@ export default function CreateSignal() {
               const hrs = parseFloat(expiresIn);
               const mn = parseFloat(maxNotional);
               if (isNaN(pct) || pct <= 0 || pct > 50
-                || isNaN(sla) || sla < 100 || sla > 1000
+                || isNaN(sla) || sla < 100 || sla > 300
                 || isNaN(hrs) || hrs < 1 || hrs > 168
                 || isNaN(mn) || mn < 1) return true;
               // Block submission if collateral is insufficient

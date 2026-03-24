@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAccount } from "wagmi";
 import { useSignal, useCancelSignal, useSignalPurchases, useSignalNotionalFilled, humanizeError } from "@/lib/hooks";
+import { invalidateSignalCache } from "@/lib/events";
 import { useEncryptedSignals } from "@/lib/hooks/useEncryptedSignals";
 import { SignalStatus, formatUsdc, formatBps, truncateAddress } from "@/lib/types";
 import { parseLine, formatLine, type StructuredLine } from "@/lib/odds";
@@ -63,6 +64,7 @@ export default function GeniusSignalDetail() {
     setActionError(null);
     try {
       await cancelSignal(BigInt(signalId));
+      invalidateSignalCache(address);
       setCancelSuccess(true);
       setShowConfirmCancel(false);
     } catch (err) {
@@ -74,7 +76,7 @@ export default function GeniusSignalDetail() {
     setActionError(null);
     try {
       await cancelSignal(BigInt(signalId));
-      // Redirect to create new signal page
+      invalidateSignalCache(address);
       router.push("/genius/signal/new");
     } catch (err) {
       setActionError(humanizeError(err, "Failed to cancel signal"));

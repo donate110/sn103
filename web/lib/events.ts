@@ -116,6 +116,10 @@ class EventCache<T extends { blockNumber: number }> {
     return Date.now() - entry.updatedAt < CACHE_TTL_MS;
   }
 
+  delete(key: string): void {
+    this.cache.delete(key);
+  }
+
   clear(): void {
     this.cache.clear();
   }
@@ -130,6 +134,18 @@ export function resetEventCaches(): void {
   signalCache.clear();
   purchaseCache.clear();
   auditCache.clear();
+}
+
+/**
+ * Invalidate signal cache for a specific genius address (or all signals).
+ * Call after on-chain mutations (cancel, create) so the next fetch gets fresh data.
+ */
+export function invalidateSignalCache(geniusAddress?: string): void {
+  if (geniusAddress) {
+    signalCache.delete(`signals:genius:${geniusAddress.toLowerCase()}`);
+  }
+  // Always invalidate the global active signals cache too
+  signalCache.delete("signals:active");
 }
 
 // ---------------------------------------------------------------------------
@@ -305,23 +321,27 @@ export async function getSignalsByGenius(
   );
   const filter = contract.filters.SignalCommitted(null, geniusAddress);
 
+  let all: SignalEvent[];
+
   if (cached && signalCache.isFresh(cacheKey)) {
-    if (includeAll) return cached.events;
-    const now = BigInt(Math.floor(Date.now() / 1000));
-    return cached.events.filter((s) => s.expiresAt > now);
-  }
+    if (!includeAll) {
+      const now = BigInt(Math.floor(Date.now() / 1000));
+      return cached.events.filter((s) => s.expiresAt > now);
+    }
+    all = cached.events;
+  } else {
+    const startBlock = cached ? cached.lastBlock + 1 : effectiveFrom;
+    const events = await queryFilterChunked(contract, filter, startBlock);
+    const parsed = parseSignalEvents(events);
 
-  const startBlock = cached ? cached.lastBlock + 1 : effectiveFrom;
-  const events = await queryFilterChunked(contract, filter, startBlock);
-  const parsed = parseSignalEvents(events);
-
-  const all = cached ? signalCache.merge(cacheKey, parsed, getMaxBlock(parsed, cached.lastBlock)) : parsed;
-  if (!cached) {
-    signalCache.set(cacheKey, all, getMaxBlock(parsed, effectiveFrom));
+    all = cached ? signalCache.merge(cacheKey, parsed, getMaxBlock(parsed, cached.lastBlock)) : parsed;
+    if (!cached) {
+      signalCache.set(cacheKey, all, getMaxBlock(parsed, effectiveFrom));
+    }
   }
 
   if (includeAll) {
-    // Mark cancelled signals by fetching SignalCancelled events
+    // Always re-check cancel events so the UI reflects recent cancellations
     const cancelFilter = contract.filters.SignalCancelled(null, geniusAddress);
     const cancelEvents = await queryFilterChunked(contract, cancelFilter, effectiveFrom).catch(() => []);
     const cancelledIds = new Set<string>();
