@@ -280,21 +280,30 @@ function getMinerUrl(): string {
  * Each client routes through a UID-specific proxy: /api/validators/{uid}/...
  * This ensures Shamir shares go to different validators.
  */
+// Cache validator discovery for 30 seconds to avoid redundant network calls
+// during multi-step flows (purchase, signal creation)
+let _discoveryCache: { clients: ValidatorClient[]; ts: number } | null = null;
+const DISCOVERY_CACHE_MS = 30_000;
+
 export async function discoverValidatorClients(): Promise<ValidatorClient[]> {
   if (typeof window === "undefined") {
-    // Server-side: use direct URLs from env or metagraph
     return getValidatorUrls().map((url) => new ValidatorClient(url.trim()));
   }
 
-  // Browser: call the discovery endpoint and create per-UID proxy clients
+  // Return cached result if fresh
+  if (_discoveryCache && Date.now() - _discoveryCache.ts < DISCOVERY_CACHE_MS) {
+    return _discoveryCache.clients;
+  }
+
   try {
     const res = await fetch("/api/validators/discover");
     if (!res.ok) throw new Error(`Discovery failed: ${res.status}`);
     const { validators } = await res.json() as { validators: { uid: number }[] };
     if (validators.length === 0) throw new Error("No validators discovered");
-    return validators.map((v) => new ValidatorClient(`/api/validators/${v.uid}`));
+    const clients = validators.map((v) => new ValidatorClient(`/api/validators/${v.uid}`));
+    _discoveryCache = { clients, ts: Date.now() };
+    return clients;
   } catch {
-    // Fallback to single proxy
     return [new ValidatorClient("/api/validator")];
   }
 }

@@ -270,12 +270,18 @@ export default function PurchaseSignal() {
         buyer_signature: buyerSig,
       };
 
-      // First call: validators run MPC to check if real index ∈ available set.
-      // In production, they return "payment_required" (available=true) or
-      // "unavailable" (available=false). In dev mode, shares may be released
-      // immediately.
+      // MPC availability check: race validators, stop early once we have
+      // enough responses (no need to wait for slow/dead validators).
+      const MPC_TIMEOUT_MS = 15_000;
       const availabilityResults = await Promise.allSettled(
-        validators.map((v) => v.purchaseSignal(signalId.toString(), purchaseReq)),
+        validators.map((v) =>
+          Promise.race([
+            v.purchaseSignal(signalId.toString(), purchaseReq),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("MPC check timeout")), MPC_TIMEOUT_MS)
+            ),
+          ])
+        ),
       );
 
       // Check if any validator confirmed the signal is available
@@ -584,12 +590,12 @@ export default function PurchaseSignal() {
     step === "decrypting";
 
   const stepLabel: Record<string, string> = {
-    checking_lines: "Checking line availability...",
-    purchasing_validator: "Verifying signal availability with validators...",
+    checking_lines: "Checking sportsbook lines (5-10s)...",
+    purchasing_validator: "Verifying with validator network (5-15s)...",
     purchasing_chain: purchaseLoading && !txHash
       ? "Confirm the transaction in your wallet..."
-      : "Waiting for on-chain confirmation... (10\u201330s)",
-    collecting_shares: "Collecting key shares from validators...",
+      : "Confirming on Base Sepolia (10-30s)...",
+    collecting_shares: "Collecting decryption keys (5s)...",
     decrypting: "Decrypting your signal...",
   };
 
