@@ -858,6 +858,10 @@ async def challenge_miners(
                 metrics.proofs_submitted += 1
                 if proof_valid:
                     metrics.proofs_verified += 1
+                # Sliding window for coverage scoring
+                metrics.coverage_outcomes.append(proof_valid)
+                if len(metrics.coverage_outcomes) > 20:
+                    metrics.coverage_outcomes = metrics.coverage_outcomes[-20:]
                 result.proofs_submitted += 1
                 log.info(
                     "challenge_proof_result", uid=target.uid,

@@ -52,6 +52,8 @@ class MinerMetrics:
     latencies: list[float] = field(default_factory=list)
     proofs_submitted: int = 0  # queries where miner returned a proof
     proofs_verified: int = 0  # proofs that passed TLSNotary verification
+    accuracy_outcomes: list[bool] = field(default_factory=list)  # sliding window (last 20)
+    coverage_outcomes: list[bool] = field(default_factory=list)  # sliding window (last 20)
 
     # ── Attestation challenge metrics (separate from sports) ──
     attestations_total: int = 0
@@ -106,22 +108,26 @@ class MinerMetrics:
     lifetime_attestations_valid: int = 0
 
     def accuracy_score(self) -> float:
-        """Fraction of sports queries where Phase 1 result matched ground truth.
+        """Fraction of recent sports queries where result matched ground truth.
 
-        Falls back to previous epoch's accuracy if no challenges have
-        happened yet in the current epoch. This prevents miners from
-        being scored as 0% accuracy between challenge rounds.
+        Uses a sliding window of the last 20 outcomes so declining miners
+        lose their advantage quickly. Falls back to lifetime ratio or
+        previous epoch carry-forward for backwards compatibility.
         """
+        if self.accuracy_outcomes:
+            return sum(self.accuracy_outcomes) / len(self.accuracy_outcomes)
         if self.queries_total == 0:
             return self.prev_accuracy
         return self.queries_correct / self.queries_total
 
     def coverage_score(self) -> float:
-        """Fraction of proof requests where miner's proof was verified.
+        """Fraction of recent proof requests where miner's proof was verified.
 
-        Only TLSNotary-verified proofs count. Falls back to previous
-        epoch's coverage if no proofs requested in current epoch.
+        Uses a sliding window of the last 20 outcomes. Falls back to
+        lifetime ratio or previous epoch carry-forward.
         """
+        if self.coverage_outcomes:
+            return sum(self.coverage_outcomes) / len(self.coverage_outcomes)
         if self.proofs_requested == 0:
             return self.prev_coverage
         return self.proofs_verified / self.proofs_requested
@@ -161,6 +167,7 @@ class MinerMetrics:
         """
         self.queries_total += 1
         self.lifetime_queries += 1
+        is_correct = False
         if proof_status == "unverified":
             log.warning(
                 "unverified_proof_zero_accuracy",
@@ -168,8 +175,13 @@ class MinerMetrics:
                 hotkey=self.hotkey,
             )
         elif correct:
+            is_correct = True
             self.queries_correct += 1
             self.lifetime_correct += 1
+        # Sliding window: track last 20 accuracy outcomes
+        self.accuracy_outcomes.append(is_correct)
+        if len(self.accuracy_outcomes) > 20:
+            self.accuracy_outcomes = self.accuracy_outcomes[-20:]
         self.latencies.append(latency)
         if proof_submitted:
             self.proofs_submitted += 1
@@ -324,6 +336,8 @@ class MinerScorer:
                     m.proofs_submitted = d.get("proofs_submitted", 0)
                     m.proofs_verified = d.get("proofs_verified", 0)
                     m.proofs_requested = d.get("proofs_requested", 0)
+                    m.accuracy_outcomes = d.get("accuracy_outcomes", [])[-20:]
+                    m.coverage_outcomes = d.get("coverage_outcomes", [])[-20:]
                     m.attestations_total = d.get("attestations_total", 0)
                     m.attestations_valid = d.get("attestations_valid", 0)
                     m.health_checks_total = d.get("health_checks_total", 0)
@@ -374,6 +388,8 @@ class MinerScorer:
             "proofs_submitted": m.proofs_submitted,
             "proofs_verified": m.proofs_verified,
             "proofs_requested": m.proofs_requested,
+            "accuracy_outcomes": m.accuracy_outcomes[-20:],
+            "coverage_outcomes": m.coverage_outcomes[-20:],
             "attestations_total": m.attestations_total,
             "attestations_valid": m.attestations_valid,
             "health_checks_total": m.health_checks_total,
@@ -424,6 +440,8 @@ class MinerScorer:
                         "proofs_submitted": m.proofs_submitted,
                         "proofs_verified": m.proofs_verified,
                         "proofs_requested": m.proofs_requested,
+                        "accuracy_outcomes": m.accuracy_outcomes[-20:],
+                        "coverage_outcomes": m.coverage_outcomes[-20:],
                         "attestations_total": m.attestations_total,
                         "attestations_valid": m.attestations_valid,
                         "health_checks_total": m.health_checks_total,
