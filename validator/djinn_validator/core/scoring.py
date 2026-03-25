@@ -57,6 +57,7 @@ class MinerMetrics:
     attestations_total: int = 0
     attestations_valid: int = 0  # TLSNotary proof verified
     attestation_latencies: list[float] = field(default_factory=list)
+    attestation_outcomes: list[bool] = field(default_factory=list)  # sliding window (last 10)
 
     # ── Proof-request tracking ──
     proofs_requested: int = 0  # times miner was asked to submit proof
@@ -132,7 +133,15 @@ class MinerMetrics:
         return self.health_checks_responded / self.health_checks_total
 
     def attestation_validity_score(self) -> float:
-        """Fraction of attestation challenges with valid TLSNotary proof."""
+        """Fraction of recent attestation challenges with valid TLSNotary proof.
+
+        Uses a sliding window of the last 10 outcomes so declining miners
+        lose their advantage and new miners can catch up quickly.
+        Falls back to lifetime ratio if no sliding window data exists
+        (backwards compatibility with persisted state).
+        """
+        if self.attestation_outcomes:
+            return sum(self.attestation_outcomes) / len(self.attestation_outcomes)
         if self.attestations_total == 0:
             return 0.0
         return self.attestations_valid / self.attestations_total
@@ -171,13 +180,30 @@ class MinerMetrics:
         if responded:
             self.health_checks_responded += 1
 
-    def record_attestation(self, latency: float, proof_valid: bool) -> None:
-        """Record a web attestation challenge result (separate from sports)."""
+    def record_attestation(
+        self, latency: float, proof_valid: bool, *, validator_timeout: bool = False,
+    ) -> None:
+        """Record a web attestation challenge result (separate from sports).
+
+        Args:
+            latency: Time taken for the attestation.
+            proof_valid: Whether the proof was valid.
+            validator_timeout: If True, the failure was a validator-side
+                verification timeout (not the miner's fault). The attempt
+                is still counted in lifetime stats but excluded from the
+                sliding window so it doesn't penalize the miner's score.
+        """
         self.attestations_total += 1
         self.lifetime_attestations += 1
         if proof_valid:
             self.attestations_valid += 1
             self.lifetime_attestations_valid += 1
+        # Sliding window: track last 10 outcomes for recency-weighted scoring.
+        # Validator-side timeouts are excluded since the miner can't control them.
+        if not validator_timeout:
+            self.attestation_outcomes.append(proof_valid)
+            if len(self.attestation_outcomes) > 10:
+                self.attestation_outcomes = self.attestation_outcomes[-10:]
         # Only record real latencies (skip latency=0 from known-broken miner
         # auto-scoring, which would pollute speed normalization)
         if latency > 0:
@@ -319,6 +345,7 @@ class MinerScorer:
                     m.prev_latencies = d.get("prev_latencies", [])
                     m.prev_coverage = d.get("prev_coverage", 0.0)
                     m.attestation_latencies = d.get("attestation_latencies", [])[:50]
+                    m.attestation_outcomes = d.get("attestation_outcomes", [])[-10:]
                     # Restore notary pair history (keys are JSON strings, convert to int)
                     raw_successes = d.get("notary_pair_successes", {})
                     m.notary_pair_successes = {int(k): v for k, v in raw_successes.items()}
@@ -368,6 +395,7 @@ class MinerScorer:
             "prev_latencies": m.prev_latencies[:10],
             "prev_coverage": m.prev_coverage,
             "attestation_latencies": m.attestation_latencies[-50:],
+            "attestation_outcomes": m.attestation_outcomes[-10:],
             "notary_pair_successes": m.notary_pair_successes,
             "notary_pair_failures": m.notary_pair_failures,
         })
@@ -417,6 +445,7 @@ class MinerScorer:
                         "prev_latencies": m.prev_latencies[:10],
                         "prev_coverage": m.prev_coverage,
                         "attestation_latencies": m.attestation_latencies[-50:],
+                        "attestation_outcomes": m.attestation_outcomes[-10:],
                         "notary_pair_successes": m.notary_pair_successes,
                         "notary_pair_failures": m.notary_pair_failures,
                     })
@@ -795,7 +824,7 @@ class MinerScorer:
             return {uid: 0.0 for uid in result}
         return result
 
-    def select_attest_miners(self, candidate_uids: list[int], max_results: int = 5) -> list[tuple[int, str]]:
+    def select_attest_miners(self, candidate_uids: list[int], max_results: int = 8) -> list[tuple[int, str]]:
         """Select the best miners for attestation dispatch.
 
         Returns list of (uid, tier) tuples where tier is:
@@ -806,6 +835,9 @@ class MinerScorer:
         Miners cycle through tiers naturally: excluded miners get a redemption
         slot (1 per dispatch, short timeout) so they can recover after fixing
         issues like missing TLSNotary binaries.
+
+        Unproven miners always get at least 2 reserved slots so new joiners
+        can earn attestation scores without being crowded out by proven miners.
 
         Args:
             candidate_uids: UIDs with valid axon info (IP/port).
@@ -851,14 +883,20 @@ class MinerScorer:
 
         proven.sort(key=_proven_sort_key)
 
+        # Reserve guaranteed slots for unproven miners so new joiners
+        # aren't crowded out when the network has many proven miners.
+        reserved_unproven = min(2, len(unproven))
+        proven_limit = max_results - reserved_unproven - 1  # -1 for redemption slot
+
         result: list[tuple[int, str]] = []
         for uid, _, _ in proven:
-            if len(result) >= max_results:
+            if len(result) >= proven_limit:
                 break
             result.append((uid, "proven"))
 
-        # Fill remaining slots with up to 2 random unproven miners
-        unproven_limit = min(2, max_results - len(result))
+        # Unproven miners: guaranteed 2 reserved slots, plus any remaining
+        # space if fewer proven miners filled up.
+        unproven_limit = max(reserved_unproven, min(len(unproven), max_results - len(result) - 1))
         random.shuffle(unproven)
         for uid in unproven[:unproven_limit]:
             result.append((uid, "unproven"))

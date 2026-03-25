@@ -1282,6 +1282,17 @@ async def challenge_miners_attestation(
                                         expected_hash=challenge_nonce[:16],
                                     )
                             mr["nonce_verified"] = nonce_verified
+                        except (TimeoutError, asyncio.TimeoutError) as e:
+                            log.warning("attest_verify_timeout", uid=uid, err=str(e))
+                            # Validator-side timeout: not the miner's fault.
+                            # Record the attempt but exclude from sliding window.
+                            metrics.record_attestation(
+                                latency=latency, proof_valid=False, validator_timeout=True,
+                            )
+                            mr["valid"] = False
+                            mr["validator_timeout"] = True
+                            per_miner.append(mr)
+                            return True, False
                         except Exception as e:
                             log.debug("attest_challenge_verify_error", uid=uid, err=str(e))
                             proof_valid = False
