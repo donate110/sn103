@@ -1092,28 +1092,23 @@ async def challenge_miners_attestation(
         ]
         if not verified_notaries:
             peer_notaries = all_notaries
+            notaries_by_hash: dict[str, list] = {}
         else:
-            # Group verified notaries by binary hash
-            by_hash: dict[str, list] = {}
+            # Group verified notaries by binary hash so we can match
+            # each prover to a compatible notary at assignment time.
+            notaries_by_hash = {}
             for n in verified_notaries:
                 m = scorer.get(n.uid)
                 bh = m.tlsn_binary_hash if m else ""
-                by_hash.setdefault(bh or "unknown", []).append(n)
+                notaries_by_hash.setdefault(bh or "unknown", []).append(n)
 
-            # Find the most common binary hash (largest compatible group)
-            largest_group = max(by_hash.values(), key=len) if by_hash else []
-            if len(largest_group) >= 3:
-                peer_notaries = largest_group
-                log.info("attest_challenge_notaries_version_matched",
-                         matched=len(largest_group), verified=len(verified_notaries),
-                         total=len(all_notaries),
-                         hash=next((k for k,v in by_hash.items() if v is largest_group), "?"))
-            else:
-                peer_notaries = verified_notaries
+            # Default pool: all verified notaries (used when prover hash unknown)
+            peer_notaries = verified_notaries
 
         log.info("attest_challenge_notaries_filtered",
                  total=len(all_notaries), verified=len(verified_notaries),
-                 selected=len(peer_notaries))
+                 selected=len(peer_notaries),
+                 hash_groups=len(notaries_by_hash))
 
         ar.capable = len(capable)
 
@@ -1185,9 +1180,17 @@ async def challenge_miners_attestation(
             request_id = f"challenge-{uid}-{int(time.time())}"
             mr: dict = {"uid": uid}
 
-            # Assign a peer notary so the miner can't self-notarize.
+            # Assign a version-compatible peer notary so the miner can't
+            # self-notarize. Match the prover's binary hash to a notary
+            # running the same version when possible.
+            prover_hash = ""
+            pm = scorer.get(uid)
+            if pm and pm.tlsn_binary_hash:
+                prover_hash = pm.tlsn_binary_hash
+            compatible_notaries = notaries_by_hash.get(prover_hash, []) if prover_hash else []
+            notary_pool = compatible_notaries if compatible_notaries else peer_notaries
             assigned_notary = assign_peer_notary(
-                uid, peer_notaries, prover_ip=axon.get("ip"),
+                uid, notary_pool, prover_ip=axon.get("ip"),
                 assignment_counts=_notary_counts, max_per_notary=_max_per_notary,
             )
 
