@@ -1,4 +1,4 @@
-import { test as base, expect, type Page, type BrowserContext } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 import { installMockWallet } from "@johanneskares/wallet-mock";
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia } from "viem/chains";
@@ -62,14 +62,18 @@ export async function setupAuthenticatedPage(page: Page) {
   // Mock RPC eth_call responses (balances, allowances) so pages render
   // without a real chain connection
   await page.route("**/sepolia.base.org**", async (route) => {
-    const body = await route.request().postDataJSON().catch(() => null);
+    let body: { method?: string; id?: number } | null = null;
+    try {
+      body = route.request().postDataJSON();
+    } catch {
+      // GET requests or non-JSON bodies
+    }
     if (!body) {
       await route.continue();
       return;
     }
     const method = body.method;
     if (method === "eth_call") {
-      // Return a reasonable balance for any contract read
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -89,13 +93,12 @@ export async function setupAuthenticatedPage(page: Page) {
 
 /**
  * Extended test fixture with authenticated page and wallet mock.
- * Injects a mock wallet via EIP-6963 (auto-connects to RainbowKit).
+ * wallet-mock auto-connects via EIP-6963 (no click-through needed).
  */
 export const test = base.extend<{ authenticatedPage: Page }>({
-  authenticatedPage: async ({ context, page }, use) => {
-    // Install mock wallet at the browser context level (before any page loads)
+  authenticatedPage: async ({ page }, use) => {
     await installMockWallet({
-      browserContext: context,
+      page,
       account: privateKeyToAccount(TEST_PRIVATE_KEY),
       defaultChain: baseSepolia,
     });
