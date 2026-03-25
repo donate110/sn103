@@ -132,19 +132,22 @@ class TestMarketValidation:
             )
             assert line.market == market
 
-    def test_invalid_market_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="market"):
-            CandidateLine(
-                index=1, sport="basketball_nba", event_id="ev-1",
-                home_team="A", away_team="B", market="moneyline", side="A",
-            )
+    def test_unknown_market_accepted(self) -> None:
+        """Unknown markets are accepted (not rejected) so validators can send
+        synthetic challenge markets without getting 422 errors."""
+        line = CandidateLine(
+            index=1, sport="basketball_nba", event_id="ev-1",
+            home_team="A", away_team="B", market="moneyline", side="A",
+        )
+        assert line.market == "moneyline"
 
-    def test_empty_market_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="market"):
-            CandidateLine(
-                index=1, sport="basketball_nba", event_id="ev-1",
-                home_team="A", away_team="B", market="", side="A",
-            )
+    def test_empty_market_accepted(self) -> None:
+        """Empty market string is accepted; miner reports it as unavailable."""
+        line = CandidateLine(
+            index=1, sport="basketball_nba", event_id="ev-1",
+            home_team="A", away_team="B", market="", side="A",
+        )
+        assert line.market == ""
 
 
 class TestCheckResponseQueryId:
