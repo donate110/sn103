@@ -691,6 +691,17 @@ class MinerScorer:
         breakdowns: dict[int, dict] = {}
         for m in miners:
             history = math.log1p(m.consecutive_epochs) / math.log1p(max_history) if max_history > 0 else 0.0
+            # Floor: any miner that participated this epoch gets at least 30% history
+            # credit. Without this, new miners get 0% on 50% of their weight, making
+            # it nearly impossible to earn emissions in their first epochs.
+            participated = (
+                m.health_checks_responded > 0
+                or m.queries_total > 0
+                or m.attestations_total > 0
+                or m.notary_duties_assigned > 0
+            )
+            if participated and history < 0.3:
+                history = 0.3
             attest = attestation_scores.get(m.uid, 0.0)
             if has_attestation_data:
                 score = (

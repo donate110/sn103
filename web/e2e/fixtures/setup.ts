@@ -1,10 +1,17 @@
-import { test as base, expect, type Page } from "@playwright/test";
+import { test as base, expect, type Page, type BrowserContext } from "@playwright/test";
+import { installMockWallet } from "@johanneskares/wallet-mock";
+import { privateKeyToAccount } from "viem/accounts";
+import { baseSepolia } from "viem/chains";
 import {
   MOCK_ODDS_EVENTS,
   MOCK_NFL_EVENTS,
   ZERO_ENCODED,
   USDC_1000_ENCODED,
 } from "./mock-data";
+
+// Anvil default private key (account #0) for deterministic wallet in tests
+const TEST_PRIVATE_KEY =
+  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as `0x${string}`;
 
 /**
  * Set up common page interceptors for authenticated E2E tests.
@@ -51,13 +58,47 @@ export async function setupAuthenticatedPage(page: Page) {
       }),
     });
   });
+
+  // Mock RPC eth_call responses (balances, allowances) so pages render
+  // without a real chain connection
+  await page.route("**/sepolia.base.org**", async (route) => {
+    const body = await route.request().postDataJSON().catch(() => null);
+    if (!body) {
+      await route.continue();
+      return;
+    }
+    const method = body.method;
+    if (method === "eth_call") {
+      // Return a reasonable balance for any contract read
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: USDC_1000_ENCODED }),
+      });
+    } else if (method === "eth_chainId") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: "0x14a34" }),
+      });
+    } else {
+      await route.continue();
+    }
+  });
 }
 
 /**
- * Extended test fixture with authenticated page setup.
+ * Extended test fixture with authenticated page and wallet mock.
+ * Injects a mock wallet via EIP-6963 (auto-connects to RainbowKit).
  */
 export const test = base.extend<{ authenticatedPage: Page }>({
-  authenticatedPage: async ({ page }, use) => {
+  authenticatedPage: async ({ context, page }, use) => {
+    // Install mock wallet at the browser context level (before any page loads)
+    await installMockWallet({
+      browserContext: context,
+      account: privateKeyToAccount(TEST_PRIVATE_KEY),
+      defaultChain: baseSepolia,
+    });
     await setupAuthenticatedPage(page);
     await use(page);
   },
