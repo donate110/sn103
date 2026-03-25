@@ -12,8 +12,6 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 // import {Escrow} from "../src/Escrow.sol";
 // import {Audit} from "../src/Audit.sol";
 // import {OutcomeVoting} from "../src/OutcomeVoting.sol";
-// import {TrackRecord} from "../src/TrackRecord.sol";
-// import {ZKVerifier} from "../src/ZKVerifier.sol";
 
 /// @title Upgrade
 /// @notice Template script for upgrading a UUPS proxy to a new implementation.

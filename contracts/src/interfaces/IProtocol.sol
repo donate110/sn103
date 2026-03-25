@@ -61,22 +61,3 @@ interface IAudit {
     function earlyExitByVote(address genius, address idiot, int256 qualityScore, uint256 totalNotional) external;
 }
 
-/// @notice ZKVerifier — used by TrackRecord
-interface IZKVerifier {
-    function verifyTrackRecordProof(
-        uint256[2] calldata _pA,
-        uint256[2][2] calldata _pB,
-        uint256[2] calldata _pC,
-        uint256[106] calldata _pubSignals
-    ) external view returns (bool);
-}
-
-/// @notice Groth16 verifier — used by ZKVerifier to delegate to snarkjs-generated contracts
-interface IGroth16Verifier {
-    function verifyProof(
-        uint256[2] calldata _pA,
-        uint256[2][2] calldata _pB,
-        uint256[2] calldata _pC,
-        uint256[] calldata _pubSignals
-    ) external view returns (bool);
-}

@@ -127,10 +127,6 @@ type Genius @entity {
   accounts: [Account!]! @derivedFrom(field: "genius")
   "All audit results for this Genius"
   auditResults: [AuditResult!]! @derivedFrom(field: "genius")
-  "All verified track record proofs for this Genius"
-  trackRecordProofs: [TrackRecordProof!]! @derivedFrom(field: "genius")
-  "Number of verified track record proofs"
-  totalTrackRecordProofs: BigInt!
   "Total favorable outcomes across all purchases"
   totalFavorable: BigInt!
   "Total unfavorable outcomes across all purchases"
@@ -265,37 +261,6 @@ type CreditBalance @entity {
 }
 
 """
-A verified track record proof submitted on-chain by a Genius.
-Created on TrackRecordSubmitted event.
-"""
-type TrackRecordProof @entity {
-  "On-chain recordId"
-  id: ID!
-  "The Genius who submitted the proof"
-  genius: Genius!
-  "Number of signals in the proof"
-  signalCount: BigInt!
-  "Total gain from favorable signals (USDC, 6 decimals)"
-  totalGain: BigInt!
-  "Total loss from unfavorable signals (USDC, 6 decimals)"
-  totalLoss: BigInt!
-  "Number of favorable outcomes"
-  favCount: BigInt!
-  "Number of unfavorable outcomes"
-  unfavCount: BigInt!
-  "Number of void outcomes"
-  voidCount: BigInt!
-  "Hash of the proof data for deduplication"
-  proofHash: Bytes!
-  "Block timestamp when submitted"
-  submittedAt: BigInt!
-  "Block number when submitted"
-  submittedAtBlock: BigInt!
-  "Transaction hash of the submission"
-  submittedAtTx: Bytes!
-}
-
-"""
 Global protocol statistics. Singleton entity with id '1'.
 """
 type ProtocolStats @entity {
@@ -327,6 +292,4 @@ type ProtocolStats @entity {
   uniqueGeniuses: BigInt!
   "Number of unique Idiots"
   uniqueIdiots: BigInt!
-  "Total track record proofs submitted"
-  totalTrackRecordProofs: BigInt!
 }

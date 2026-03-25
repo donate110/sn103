@@ -232,28 +232,6 @@ Credits are minted as Tranche B during negative audit settlements and burned by 
 - `burn(from, amount)`: Called by Escrow during purchase.
 - `balanceOf(account)`: Returns credit balance.
 
-### TrackRecord.sol
-
-**Purpose:** Stores ZK-verified track record proofs submitted by Geniuses.
-
-Each proof demonstrates aggregate performance statistics (total signals, gains, losses, favorable/unfavorable/void counts) without revealing individual signal details. Proofs are Groth16 proofs verified on-chain via the ZKVerifier contract.
-
-**Commit-reveal pattern (anti-front-running):**
-1. Genius calls `commitProof(commitHash)` where `commitHash = keccak256(abi.encodePacked(_pA, _pB, _pC, _pubSignals))`.
-2. At least 1 block later (but within `COMMIT_EXPIRY_BLOCKS` = 32 blocks, roughly 96 seconds on Base), the genius calls `submit()` with the proof.
-3. The commitment is cleared after use to prevent replay.
-
-**Public signals layout (106 elements):**
-- `[0..19]` commitHash: Poseidon hashes of (preimage, index) for each signal.
-- `[20..39]` outcome: 1=Favorable, 2=Unfavorable, 3=Void.
-- `[40..59]` notional: Bet amounts.
-- `[60..79]` odds: 6-decimal fixed point.
-- `[80..99]` slaBps: SLA basis points.
-- `[100]` signalCount (1..20).
-- `[101..105]` Aggregate statistics: totalGain, totalLoss, favCount, unfavCount, voidCount.
-
-**Deduplication:** Proof hashes are tracked to prevent duplicate submissions.
-
 ### KeyRecovery.sol
 
 **Purpose:** Stores encrypted wallet recovery blobs for users.
@@ -261,24 +239,6 @@ Each proof demonstrates aggregate performance statistics (total signals, gains, 
 Users encrypt their signal decryption keys to their wallet public key and store the blob on-chain (max 4 KB). This enables key recovery from any device: the user logs in with their wallet, retrieves the blob, and decrypts locally. The blob is encrypted, so reading it reveals nothing without the wallet's private key.
 
 This is a plain (non-upgradeable) contract with no admin functions. Only `msg.sender` can store their own blob. Anyone can read any blob.
-
-### ZKVerifier.sol
-
-**Purpose:** Routes ZK proof verification to the appropriate snarkjs-generated Groth16 verifier contract.
-
-Acts as an abstraction layer over the circuit-specific verifiers:
-- `verifyAuditProof()`: Delegates to `Groth16AuditVerifier` (52 public signals).
-- `verifyTrackRecordProof()`: Delegates to `Groth16TrackRecordVerifier` (106 public signals).
-
-The verifier addresses are set by the owner post-deployment. Uses `staticcall` to the generated verifiers.
-
-### Groth16AuditVerifier.sol / Groth16TrackRecordVerifier.sol
-
-**Purpose:** Auto-generated Groth16 verifier contracts produced by snarkjs from circom circuits.
-
-These implement the BN254 elliptic curve pairing check for Groth16 proofs. They are generated code. Auditors should verify that:
-- The verification key constants match the trusted setup ceremony output.
-- The `verifyProof` function signature matches what `ZKVerifier` expects.
 
 ---
 
@@ -417,7 +377,6 @@ Contracts authorize each other for specific cross-contract calls:
 - `Escrow.purchase()`: Any address (except the genius) can purchase a signal.
 - `SignalCommitment.commit()`: Any address can commit a signal.
 - `KeyRecovery.storeRecoveryBlob()`: Any address can store their own recovery blob.
-- `TrackRecord.commitProof()` / `TrackRecord.submit()`: Any address can submit track record proofs.
 
 ---
 
@@ -436,9 +395,6 @@ All upgradeable contracts use the UUPS (Universal Upgradeable Proxy Standard) pa
 | Account | `onlyOwner` + `whenPaused` |
 | CreditLedger | `onlyOwner` + `whenPaused` |
 | OutcomeVoting | `onlyOwner` + `whenPaused` |
-| ZKVerifier | `onlyOwner` |
-| TrackRecord | `onlyOwner` |
-
 Contracts that hold USDC (Escrow, Collateral) or orchestrate USDC movement (Audit) require the contract to be paused before an upgrade can be authorized. This prevents upgrades while funds are in active transit.
 
 **Storage gaps:** Every upgradeable contract reserves a `__gap` array for future storage variables. Gap sizes vary by contract (33 to 48 slots) to bring total storage slots to a consistent ceiling.
@@ -464,7 +420,6 @@ Contracts that hold USDC (Escrow, Collateral) or orchestrate USDC movement (Audi
 | `MAX_BLOB_SIZE` | 65,536 (64 KB) | SignalCommitment | Maximum encrypted blob size |
 | `MAX_SPORTSBOOKS` | 50 | SignalCommitment | Maximum sportsbooks per signal |
 | `MAX_DECOY_LINE_LENGTH` | 1,024 (1 KB) | SignalCommitment | Maximum length per decoy line |
-| `COMMIT_EXPIRY_BLOCKS` | 32 (~96s on Base) | TrackRecord | Window for commit-reveal proof submission |
 | `MAX_BLOB_SIZE` (recovery) | 4,096 (4 KB) | KeyRecovery | Maximum recovery blob size |
 | `QUORUM_NUMERATOR/DENOMINATOR` | 2 / 3 | OutcomeVoting | 2/3 supermajority quorum |
 | `MIN_VALIDATORS` | 3 | OutcomeVoting | Minimum validator set size |
@@ -535,8 +490,6 @@ The test suite uses Foundry and includes unit tests, integration tests, and fuzz
 | `Reentrancy.t.sol` | Reentrancy attack resistance |
 | `SafetyFeatures.t.sol` | Safety invariants and edge cases |
 | `SignalCommitment.t.sol` | Signal commit, cancel, status transitions |
-| `TrackRecord.t.sol` | ZK proof submission and verification |
-| `ZKVerifier.t.sol` | Verifier routing |
 | `EdgeCases.t.sol` | Boundary conditions and corner cases |
 
 **Configuration** (from `foundry.toml`):

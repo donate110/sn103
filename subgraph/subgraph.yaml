@@ -173,27 +173,3 @@ dataSources:
         - event: CreditsBurned(indexed address,uint256)
           handler: handleCreditsBurned
       file: ./src/credit-ledger.ts
-  - kind: ethereum
-    name: TrackRecord
-    network: base-sepolia
-    source:
-      # TODO: Update to live UUPS proxy address once TrackRecord is deployed
-      address: "0x0000000000000000000000000000000000000000"
-      abi: TrackRecord
-      startBlock: 38024000
-    mapping:
-      kind: ethereum/events
-      apiVersion: 0.0.9
-      language: wasm/assemblyscript
-      entities:
-        - TrackRecordProof
-        - Genius
-        - ProtocolStats
-      abis:
-        - name: TrackRecord
-          file: ./abis/TrackRecord.json
-      eventHandlers:
-        - event: TrackRecordSubmitted(indexed uint256,indexed
-            address,uint256,uint256,uint256,uint256,uint256,uint256,bytes32)
-          handler: handleTrackRecordSubmitted
-      file: ./src/track-record.ts

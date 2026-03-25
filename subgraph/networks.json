@@ -23,10 +23,6 @@
     "CreditLedger": {
       "address": "0xA65296cd11B65629641499024AD905FAcAB64C3E",
       "startBlock": 38024000
-    },
-    "TrackRecord": {
-      "address": "0x0000000000000000000000000000000000000000",
-      "startBlock": 38024000
     }
   },
   "base": {
@@ -51,10 +47,6 @@
       "startBlock": 0
     },
     "CreditLedger": {
-      "address": "0x0000000000000000000000000000000000000000",
-      "startBlock": 0
-    },
-    "TrackRecord": {
       "address": "0x0000000000000000000000000000000000000000",
       "startBlock": 0
     }

@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
-import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
@@ -11,15 +10,12 @@ import {Audit} from "../src/Audit.sol";
 import {Collateral} from "../src/Collateral.sol";
 import {Escrow} from "../src/Escrow.sol";
 import {OutcomeVoting} from "../src/OutcomeVoting.sol";
-import {TrackRecord} from "../src/TrackRecord.sol";
-
 /// @title UpgradeAuditFixes
 /// @notice Deploys new implementations and schedules UUPS upgrades through the TimelockController.
 ///         Step 1 (this script): Deploy impls + schedule batch. Takes effect after 72h.
 ///         Step 2 (ExecuteUpgrade.s.sol): Execute the batch after the delay.
 ///
 ///         The batch atomically: pause Collateral/Escrow/Audit, upgrade all 5 proxies, unpause.
-///         Also deploys a fresh TrackRecord proxy (not previously deployed).
 contract UpgradeAuditFixes is Script {
     // ---- Salt for this upgrade batch (prevents collisions with other scheduled ops) ----
     bytes32 constant UPGRADE_SALT = keccak256("audit-fixes-2026-03-13");
@@ -49,8 +45,6 @@ contract UpgradeAuditFixes is Script {
         address collateral;
         address escrow;
         address voting;
-        address trackRecord;
-        address trackRecordProxy;
     }
 
     function run() external {
@@ -83,15 +77,6 @@ contract UpgradeAuditFixes is Script {
         console.log("OutcomeVoting impl:", im.voting);
 
         _scheduleBatch(px, im);
-
-        im.trackRecord = address(new TrackRecord());
-        im.trackRecordProxy = address(
-            new ERC1967Proxy(
-                im.trackRecord,
-                abi.encodeCall(TrackRecord.initialize, (deployer))
-            )
-        );
-        console.log("TrackRecord proxy (NEW):", im.trackRecordProxy);
 
         vm.stopBroadcast();
 
@@ -172,7 +157,6 @@ contract UpgradeAuditFixes is Script {
         console.log("  Collateral:", px.collateral);
         console.log("  Escrow:", px.escrow);
         console.log("  OutcomeVoting:", px.outcomeVoting);
-        console.log("  TrackRecord (NEW):", im.trackRecordProxy);
         console.log("");
         console.log("New implementations:");
         console.log("  Account:", im.account);
@@ -180,6 +164,5 @@ contract UpgradeAuditFixes is Script {
         console.log("  Collateral:", im.collateral);
         console.log("  Escrow:", im.escrow);
         console.log("  OutcomeVoting:", im.voting);
-        console.log("  TrackRecord:", im.trackRecord);
     }
 }

@@ -140,7 +140,7 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     ///      initializer function and requires no initialization. All UUPS proxy behavior is
     ///      handled by the constructor (_disableInitializers) and _authorizeUpgrade override.
     ///      This applies to all contracts in the protocol: Account, Collateral, Escrow,
-    ///      OutcomeVoting, SignalCommitment, and TrackRecord.
+    ///      OutcomeVoting, and SignalCommitment.
     /// @param _owner Address that will own this contract
     function initialize(address _owner) public initializer {
         __Ownable_init(_owner);
