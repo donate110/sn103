@@ -284,7 +284,7 @@ class TestDistributedMPC:
         share = Share(x=1, y=42)
 
         result = await orch._distributed_mpc("sig-1", share, {1, 3, 5}, peers)
-        assert result is None
+        assert result is not None and not result.available
 
     @pytest.mark.asyncio
     async def test_all_peers_reject_init_returns_none(self, httpx_mock) -> None:
@@ -310,7 +310,7 @@ class TestDistributedMPC:
             )
 
         result = await orch._distributed_mpc("sig-1", share, {1, 3}, peers)
-        assert result is None
+        assert result is not None and not result.available
 
     @pytest.mark.asyncio
     async def test_peer_init_http_error_handled(self, httpx_mock) -> None:
@@ -337,7 +337,7 @@ class TestDistributedMPC:
                 )
 
         result = await orch._distributed_mpc("sig-1", share, {1}, peers)
-        assert result is None
+        assert result is not None and not result.available
 
     @pytest.mark.asyncio
     async def test_peer_init_json_decode_error(self, httpx_mock) -> None:
@@ -363,7 +363,7 @@ class TestDistributedMPC:
             )
 
         result = await orch._distributed_mpc("sig-1", share, {1}, peers)
-        assert result is None
+        assert result is not None and not result.available
 
     @pytest.mark.asyncio
     async def test_duplicate_x_coords_deduplicated(self) -> None:
@@ -377,7 +377,7 @@ class TestDistributedMPC:
 
         # Only 1 unique participant (x=2), well below threshold 7
         result = await orch._distributed_mpc("sig-1", share, {1}, peers)
-        assert result is None
+        assert result is not None and not result.available
 
 
 class TestFallbackBehavior:
@@ -495,7 +495,7 @@ class TestGatherTimeouts:
         monkeypatch.setattr(orch, "_peer_request", _slow_request)
 
         result = await orch._distributed_mpc("sig-1", share, {1, 3}, peers)
-        assert result is None
+        assert result is not None and not result.available
 
     @pytest.mark.asyncio
     async def test_empty_available_indices_returns_unavailable(self) -> None:

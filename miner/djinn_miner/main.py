@@ -89,6 +89,23 @@ async def bt_sync_loop(neuron: DjinnMiner, health: HealthTracker, telemetry: Tel
         except Exception as e:
             consecutive_errors += 1
             health.record_bt_failure()
+
+            # After 3 consecutive failures, the subtensor connection is likely
+            # stale. Recreate it from scratch to avoid permanent disconnection
+            # that leads to deregistration.
+            if consecutive_errors >= 3 and consecutive_errors % 3 == 0:
+                log.warning(
+                    "bt_connection_stale",
+                    consecutive=consecutive_errors,
+                    msg="Attempting subtensor reconnection",
+                )
+                if neuron.reconnect_subtensor():
+                    log.info("bt_reconnect_success", consecutive=consecutive_errors)
+                    consecutive_errors = 0
+                    continue
+                else:
+                    log.error("bt_reconnect_failed", consecutive=consecutive_errors)
+
             base = min(60 * (2**consecutive_errors), 600)
             backoff = base * (0.5 + random.random())  # jitter: 50-150% of base
             level = "critical" if consecutive_errors >= 10 else "error"

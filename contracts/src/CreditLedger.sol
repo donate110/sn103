@@ -119,10 +119,8 @@ contract CreditLedger is Initializable, OwnableUpgradeable, PausableUpgradeable,
             revert InsufficientCreditBalance(from, balance, amount);
         }
 
-        unchecked {
-            _balances[from] = balance - amount;
-            _totalSupply -= amount;
-        }
+        _balances[from] = balance - amount;
+        _totalSupply -= amount;
 
         emit CreditsBurned(from, amount);
     }

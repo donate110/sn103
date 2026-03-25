@@ -40,6 +40,7 @@ function getOrCreateGenius(address: Bytes, timestamp: BigInt): Genius {
     genius.totalPurchases = BigInt.zero();
     genius.totalVolume = BigInt.zero();
     genius.totalFeesEarned = BigInt.zero();
+    genius.totalFeesClaimed = BigInt.zero();
     genius.aggregateQualityScore = BigInt.zero();
     genius.totalAudits = BigInt.zero();
     genius.collateralDeposited = BigInt.zero();
@@ -50,6 +51,10 @@ function getOrCreateGenius(address: Bytes, timestamp: BigInt): Genius {
     genius.totalUnfavorable = BigInt.zero();
     genius.totalVoid = BigInt.zero();
     genius.createdAt = timestamp;
+
+    let stats = getOrCreateProtocolStats();
+    stats.uniqueGeniuses = stats.uniqueGeniuses.plus(BigInt.fromI32(1));
+    stats.save();
   }
   return genius;
 }

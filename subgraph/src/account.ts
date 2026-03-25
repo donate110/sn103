@@ -5,7 +5,7 @@ import {
   NewCycleStarted,
   SettledChanged,
 } from "../generated/Account/Account";
-import { Account, Genius, Idiot } from "../generated/schema";
+import { Account, Genius, Idiot, ProtocolStats } from "../generated/schema";
 
 function accountId(genius: Bytes, idiot: Bytes): string {
   // Mirror the Solidity keccak256(abi.encodePacked(genius, idiot)) for a
@@ -37,6 +37,28 @@ function getOrCreateAccount(
   return acct;
 }
 
+function getOrCreateProtocolStats(): ProtocolStats {
+  let stats = ProtocolStats.load("1");
+  if (stats == null) {
+    stats = new ProtocolStats("1");
+    stats.totalSignals = BigInt.zero();
+    stats.totalPurchases = BigInt.zero();
+    stats.totalVolume = BigInt.zero();
+    stats.totalFees = BigInt.zero();
+    stats.totalCreditsMinted = BigInt.zero();
+    stats.totalCreditsBurned = BigInt.zero();
+    stats.totalAudits = BigInt.zero();
+    stats.totalEarlyExits = BigInt.zero();
+    stats.totalProtocolFees = BigInt.zero();
+    stats.totalCollateralDeposited = BigInt.zero();
+    stats.totalCollateralSlashed = BigInt.zero();
+    stats.uniqueGeniuses = BigInt.zero();
+    stats.uniqueIdiots = BigInt.zero();
+    stats.totalTrackRecordProofs = BigInt.zero();
+  }
+  return stats;
+}
+
 function ensureGenius(address: Bytes, timestamp: BigInt): void {
   let id = address.toHexString();
   let genius = Genius.load(id);
@@ -47,6 +69,7 @@ function ensureGenius(address: Bytes, timestamp: BigInt): void {
     genius.totalPurchases = BigInt.zero();
     genius.totalVolume = BigInt.zero();
     genius.totalFeesEarned = BigInt.zero();
+    genius.totalFeesClaimed = BigInt.zero();
     genius.aggregateQualityScore = BigInt.zero();
     genius.totalAudits = BigInt.zero();
     genius.collateralDeposited = BigInt.zero();
@@ -57,6 +80,11 @@ function ensureGenius(address: Bytes, timestamp: BigInt): void {
     genius.totalUnfavorable = BigInt.zero();
     genius.totalVoid = BigInt.zero();
     genius.createdAt = timestamp;
+
+    let stats = getOrCreateProtocolStats();
+    stats.uniqueGeniuses = stats.uniqueGeniuses.plus(BigInt.fromI32(1));
+    stats.save();
+
     genius.save();
   }
 }

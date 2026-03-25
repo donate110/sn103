@@ -15,6 +15,7 @@ function getOrCreateGenius(address: string, timestamp: BigInt): Genius {
     genius.totalPurchases = BigInt.zero();
     genius.totalVolume = BigInt.zero();
     genius.totalFeesEarned = BigInt.zero();
+    genius.totalFeesClaimed = BigInt.zero();
     genius.aggregateQualityScore = BigInt.zero();
     genius.totalAudits = BigInt.zero();
     genius.collateralDeposited = BigInt.zero();

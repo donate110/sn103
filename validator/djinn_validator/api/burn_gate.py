@@ -138,13 +138,20 @@ def verify_burn_tx(
 
     Returns (valid, error_message).
     """
-    # Check cache first. Once a burn is verified, it stays valid permanently.
+    # Check cache first.
     cached = _cache_get(tx_hash)
     if cached is not None:
         if not cached["valid"]:
             return False, cached["error"]
         if cached["coldkey"] != expected_coldkey:
             return False, "Burn coldkey does not match request coldkey"
+        # Re-check age: a previously valid burn may have expired.
+        block_ts = cached.get("block_ts", 0)
+        if block_ts and (time.time() - block_ts) > BURN_WINDOW_SECONDS:
+            age = int(time.time() - block_ts)
+            expired_err = f"Burn too old ({age}s > {BURN_WINDOW_SECONDS}s)"
+            _cache_set(tx_hash, {"valid": False, "error": expired_err, "coldkey": cached["coldkey"], "block_ts": block_ts})
+            return False, expired_err
         return True, ""
 
     tx_hash_clean = tx_hash.lower().removeprefix("0x")
@@ -271,9 +278,21 @@ async def verify_burn_via_peers(
     peer (or MITM) could forge a positive response to bypass the burn gate.
     Until a protocol-level signing mechanism is added, we mitigate this by
     requiring at least 2 independent peers to confirm the burn (quorum of 2).
+
+    TODO: Responses should be signed with the peer validator's hotkey so the
+    coordinator can verify authenticity. Without signatures, a network-level
+    attacker (or a compromised peer) can forge confirmations. Implement
+    hotkey-signed responses before removing the quorum mitigation.
     """
     if not peer_urls:
         return False, "No peer validators to query"
+
+    log.warning(
+        "burn_peer_verification_unsigned",
+        tx_hash=tx_hash[:16] + "...",
+        peer_count=len(peer_urls),
+        note="Peer responses are not hotkey-signed; relies on quorum for integrity",
+    )
 
     _PEER_QUORUM = 2  # minimum confirmations required
 

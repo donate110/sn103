@@ -209,3 +209,15 @@ web/test-results/
 
 # Next.js build cache (root-level)
 .next/
+
+# Private keys
+*.pem
+!validator/extra-roots.pem
+
+# SQLite databases (root-level)
+*.db
+*.db-shm
+*.db-wal
+
+# Log rotation files
+*.log.*

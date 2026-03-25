@@ -72,40 +72,9 @@ class ProactiveAttester:
 
     async def _spawn_ephemeral_notary(self) -> tuple[asyncio.subprocess.Process, int] | None:
         """Spawn a short-lived notary on a random port for one proof."""
-        import shutil
-        import socket
-        from djinn_miner.core.tlsn_bootstrap import ensure_binary
+        from djinn_miner.core.notary_utils import spawn_ephemeral_notary
 
-        binary = shutil.which(ensure_binary("djinn-tlsn-notary"))
-        if not binary:
-            return None
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-        sock.close()
-        env = os.environ.copy()
-        env["RUST_LOG"] = "warn"
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                binary, "--port", str(port), "--key", self._notary_key_path,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-                env=env,
-            )
-            for _ in range(40):
-                await asyncio.sleep(0.1)
-                try:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.connect(("127.0.0.1", port))
-                    s.close()
-                    return proc, port
-                except ConnectionRefusedError:
-                    continue
-            proc.kill()
-            return None
-        except Exception as e:
-            log.warning("ephemeral_notary_spawn_failed", error=str(e))
-            return None
+        return await spawn_ephemeral_notary(key_path=self._notary_key_path)
 
     @staticmethod
     def _compute_binary_hash() -> str:

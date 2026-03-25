@@ -13,11 +13,14 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class TelemetryStore:
@@ -65,8 +68,8 @@ class TelemetryStore:
                 (ts, category, summary, details_json),
             )
             conn.commit()
-        except Exception:
-            pass  # Fire-and-forget — never disrupt the caller
+        except Exception as e:
+            logger.warning("telemetry record failed: %s", e)
 
     def query(
         self,

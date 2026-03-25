@@ -56,6 +56,7 @@ class NotarySidecar:
         self._process: asyncio.subprocess.Process | None = None
         self._pubkey_hex: str = ""
         self._started = False
+        self._session_count = 0
 
     def _kill_orphaned_notary(self) -> None:
         """Kill any djinn-tlsn-notary process listening on our port.
@@ -149,7 +150,7 @@ class NotarySidecar:
         cmd = [
             binary,
             "--port", str(self._port),
-            "--bind", "0.0.0.0",
+            "--bind", "127.0.0.1",
             "--key", self._key_path,
         ]
 

@@ -235,7 +235,7 @@ def get_cors_origins(env_value: str = "", bt_network: str = "") -> list[str]:
 # ---------------------------------------------------------------------------
 
 # Paths that require validator authentication
-_PROTECTED_PATHS = {"/v1/check", "/v1/proof", "/v1/attest"}
+_PROTECTED_PATHS = {"/v1/check", "/v1/proof", "/v1/attest", "/v1/notary/ws"}
 
 
 def verify_hotkey_signature(
@@ -374,7 +374,7 @@ class ValidatorAuthMiddleware(BaseHTTPMiddleware):
     # Allow unauthenticated requests for this many seconds after startup
     # so the metagraph has time to sync. Without this, miners reject all
     # challenges immediately after restart until the metagraph loads.
-    STARTUP_GRACE_SECONDS = 180  # 3 minutes
+    STARTUP_GRACE_SECONDS = 30
 
     def __init__(self, app: object, neuron: Any = None) -> None:
         super().__init__(app)  # type: ignore[arg-type]

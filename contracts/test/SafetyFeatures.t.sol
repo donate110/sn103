@@ -160,6 +160,7 @@ contract SafetyFeaturesTest is Test {
         account.recordPurchase(genius, idiot, 1);
         assertEq(account.activePairCount(), 1);
 
+        account.setSettled(genius, idiot, true);
         account.startNewCycle(genius, idiot);
         assertEq(account.activePairCount(), 0);
     }

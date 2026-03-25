@@ -138,6 +138,30 @@ class DjinnMiner:
             return int(tensor_or_val.item())
         return int(tensor_or_val)
 
+    def reconnect_subtensor(self) -> bool:
+        """Recreate the subtensor connection and re-sync the metagraph.
+
+        Called when consecutive sync failures suggest the connection is stale.
+        Returns True if reconnection and sync succeed.
+        """
+        if bt is None:
+            return False
+        try:
+            log.info("subtensor_reconnecting", network=self.network)
+            self.subtensor = bt.Subtensor(network=self.network)
+            self.metagraph = self.subtensor.metagraph(self.netuid)
+            log.info(
+                "subtensor_reconnected",
+                network=self.network,
+                n=self._safe_item(self.metagraph.n),
+            )
+            # Re-serve axon so validators can find us
+            self._setup_axon()
+            return True
+        except Exception as e:
+            log.error("subtensor_reconnect_failed", error=str(e))
+            return False
+
     def sync_metagraph(self, timeout: float = 30.0) -> None:
         """Re-sync the metagraph with a timeout to prevent hangs."""
         if self.subtensor and self.metagraph:

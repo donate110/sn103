@@ -148,6 +148,12 @@ async def epoch_loop(
                 if not ip or not port:
                     metrics.record_health_check(responded=False)
                     return
+                # SSRF protection: skip miners with non-public IPs
+                from djinn_validator.core.mpc_orchestrator import _is_public_ip
+                if not _is_public_ip(ip):
+                    log.debug("health_check_skip_non_public_ip", uid=uid, ip=ip)
+                    metrics.record_health_check(responded=False)
+                    return
                 url = f"http://{ip}:{port}/health"
                 try:
                     resp = await client.get(url)

@@ -650,7 +650,9 @@ class TestMultiValidatorMPC:
                     peers=peers,
                 )
 
-            assert result is None
+            assert result is not None
+            assert result.available is False
+            assert "insufficient_peers" in (result.failure_reason or "")
         finally:
             store.close()
 
@@ -926,7 +928,8 @@ class TestAuthenticatedDistributedMPC:
         assert session.is_authenticated
         assert len(session.authenticated_triples) > 0
         assert len(session.mac_key_shares) == 3
-        assert session.mac_alpha != 0
+        # mac_alpha removed from session state for security (C-6 audit finding).
+        # The global MAC key must never be persisted in a single location.
 
     @pytest.mark.asyncio
     async def test_authenticated_triple_shares_extraction(self) -> None:

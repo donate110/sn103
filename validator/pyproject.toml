@@ -38,3 +38,8 @@ ignore = ["E501", "E402", "N806"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.10.8",
+]

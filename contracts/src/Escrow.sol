@@ -335,7 +335,9 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
             revert NotionalTooSmall(notional, sig.minNotional);
         }
         if (sig.maxNotional > 0) {
-            uint256 remaining = sig.maxNotional - signalNotionalFilled[signalId];
+            uint256 remaining = sig.maxNotional > signalNotionalFilled[signalId]
+                ? sig.maxNotional - signalNotionalFilled[signalId]
+                : 0;
             if (notional > remaining) {
                 revert NotionalExceedsSignalMax(notional, remaining);
             }
@@ -429,7 +431,7 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     /// @param idiot The Idiot address
     /// @param cycle The settlement cycle
     /// @param amount Amount to reduce (capped at current pool balance)
-    function reduceFeePool(address genius, address idiot, uint256 cycle, uint256 amount) external {
+    function reduceFeePool(address genius, address idiot, uint256 cycle, uint256 amount) external whenNotPaused {
         if (msg.sender != auditContract) revert Unauthorized();
         uint256 pool = feePool[genius][idiot][cycle];
         if (amount >= pool) {
@@ -514,7 +516,9 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         if (block.timestamp >= sig.expiresAt) return (false, "Signal expired");
         if (sig.minNotional > 0 && notional < sig.minNotional) return (false, "Below minimum notional");
         if (sig.maxNotional > 0) {
-            uint256 remaining = sig.maxNotional - signalNotionalFilled[signalId];
+            uint256 remaining = sig.maxNotional > signalNotionalFilled[signalId]
+                ? sig.maxNotional - signalNotionalFilled[signalId]
+                : 0;
             if (notional > remaining) return (false, "Notional exceeds remaining capacity");
         }
         if (notional < MIN_NOTIONAL) return (false, "Notional too small");

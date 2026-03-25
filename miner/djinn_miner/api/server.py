@@ -290,46 +290,11 @@ def create_app(
 
     async def _spawn_ephemeral_notary() -> tuple[asyncio.subprocess.Process, int] | None:
         """Spawn a short-lived notary process on a random port for one session."""
-        import socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-        sock.close()
+        from djinn_miner.core.notary_utils import spawn_ephemeral_notary
 
         if notary_sidecar is None:
             return None
-        binary = shutil.which(ensure_binary("djinn-tlsn-notary"))
-        if not binary:
-            return None
-        key_path = notary_sidecar._key_path
-        env = os.environ.copy()
-        env["RUST_LOG"] = "warn"
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                binary, "--port", str(port), "--key", key_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-                env=env,
-            )
-            # Wait for the notary to be ready (listens on port)
-            for _ in range(40):  # 4 seconds max
-                await asyncio.sleep(0.1)
-                try:
-                    r, w = await asyncio.wait_for(
-                        asyncio.open_connection("127.0.0.1", port), timeout=0.5,
-                    )
-                    w.close()
-                    await w.wait_closed()
-                    return proc, port
-                except (ConnectionRefusedError, TimeoutError, OSError):
-                    if proc.returncode is not None:
-                        return None
-            log.warning("ephemeral_notary_start_timeout", port=port)
-            proc.kill()
-            return None
-        except Exception as e:
-            log.warning("ephemeral_notary_spawn_failed", error=str(e))
-            return None
+        return await spawn_ephemeral_notary(key_path=notary_sidecar._key_path)
 
     @app.websocket("/v1/notary/ws")
     async def notary_ws_proxy(ws: WebSocket) -> None:

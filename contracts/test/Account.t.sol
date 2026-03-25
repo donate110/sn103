@@ -197,6 +197,8 @@ contract AccountTest is Test {
         assertEq(acct.getCurrentCycle(genius, idiot), 0);
 
         vm.prank(authorizedCaller);
+        acct.setSettled(genius, idiot, true);
+        vm.prank(authorizedCaller);
         acct.startNewCycle(genius, idiot);
 
         assertEq(acct.getCurrentCycle(genius, idiot), 1);
@@ -207,6 +209,9 @@ contract AccountTest is Test {
     }
 
     function test_startNewCycle_emitsEvent() public {
+        vm.prank(authorizedCaller);
+        acct.setSettled(genius, idiot, true);
+
         vm.expectEmit(true, true, false, true);
         emit DjinnAccount.NewCycleStarted(genius, idiot, 1);
 
@@ -220,6 +225,8 @@ contract AccountTest is Test {
         }
 
         vm.prank(authorizedCaller);
+        acct.setSettled(genius, idiot, true);
+        vm.prank(authorizedCaller);
         acct.startNewCycle(genius, idiot);
 
         // Can now record purchases in the new cycle
@@ -229,6 +236,12 @@ contract AccountTest is Test {
 
         assertEq(acct.getSignalCount(genius, idiot), 10);
         assertTrue(acct.isAuditReady(genius, idiot));
+    }
+
+    function test_startNewCycle_revertIfNotSettled() public {
+        vm.expectRevert(abi.encodeWithSelector(DjinnAccount.CycleNotSettled.selector, genius, idiot, 0));
+        vm.prank(authorizedCaller);
+        acct.startNewCycle(genius, idiot);
     }
 
     // ─── Tests: Revert duplicate purchase recording
@@ -319,9 +332,13 @@ contract AccountTest is Test {
         assertEq(acct.getCurrentCycle(genius, idiot), 0);
 
         vm.prank(authorizedCaller);
+        acct.setSettled(genius, idiot, true);
+        vm.prank(authorizedCaller);
         acct.startNewCycle(genius, idiot);
         assertEq(acct.getCurrentCycle(genius, idiot), 1);
 
+        vm.prank(authorizedCaller);
+        acct.setSettled(genius, idiot, true);
         vm.prank(authorizedCaller);
         acct.startNewCycle(genius, idiot);
         assertEq(acct.getCurrentCycle(genius, idiot), 2);

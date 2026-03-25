@@ -198,20 +198,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      # TODO: Remove continue-on-error before mainnet. Security scans must hard-fail in production.
       - name: Scan validator dependencies
+        continue-on-error: true
         run: |
           pip install pip-audit
           pip install -e validator/.[dev]
-          pip-audit --strict --desc 2>&1 || echo "::warning::Validator dependency vulnerabilities found"
+          pip-audit --strict --desc
       - name: Scan miner dependencies
+        continue-on-error: true
         run: |
           pip install -e miner/.[dev]
-          pip-audit --strict --desc 2>&1 || echo "::warning::Miner dependency vulnerabilities found"
+          pip-audit --strict --desc
       - name: Scan web dependencies
+        continue-on-error: true
         working-directory: web
         run: |
           pnpm install --frozen-lockfile
-          pnpm audit --audit-level=high 2>&1 || echo "::warning::Web dependency vulnerabilities found"
+          pnpm audit --audit-level=high
 
   docker:
     name: Docker Build (${{ matrix.service }})

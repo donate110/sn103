@@ -103,8 +103,10 @@ type Genius @entity {
   totalPurchases: BigInt!
   "Total USDC volume (sum of notional across purchases)"
   totalVolume: BigInt!
-  "Total USDC fees earned"
+  "Total USDC fees earned (accumulated at purchase time)"
   totalFeesEarned: BigInt!
+  "Total USDC fees claimed (withdrawn) by this Genius"
+  totalFeesClaimed: BigInt!
   "Aggregate Quality Score across all audits"
   aggregateQualityScore: BigInt!
   "Number of audits settled"

@@ -67,7 +67,12 @@ class MPCSessionState:
     # SPDZ authenticated triples (used when use_authenticated_mpc=True)
     authenticated_triples: list[AuthenticatedBeaverTriple] = field(default_factory=list)
     mac_key_shares: list[MACKeyShare] = field(default_factory=list)
-    mac_alpha: int = 0  # Global MAC key (coordinator only, for triple generation)
+    # SECURITY: mac_alpha (the global MAC key) must NEVER be stored in session state.
+    # In SPDZ, the global MAC key is a shared secret; storing it in one place
+    # would break the security guarantee. Authenticated mode is not currently
+    # supported. If it is ever attempted, this field must remain absent and
+    # the key must be reconstructed from shares only.
+    # mac_alpha: int = 0  # REMOVED -- see security note above
 
     # Round 1 messages collected from participants (gate_idx -> list of messages)
     round1_messages: dict[int, list[Round1Message]] = field(default_factory=dict)
@@ -206,7 +211,6 @@ class MPCCoordinator:
             triples=triples,
             authenticated_triples=authenticated_triples,
             mac_key_shares=mac_key_shares,
-            mac_alpha=mac_alpha,
             status=SessionStatus.ROUND1_COLLECTING,
         )
 

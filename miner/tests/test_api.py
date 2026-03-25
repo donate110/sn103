@@ -697,7 +697,12 @@ class TestAttestEndpoint:
         ):
             resp = app.post(
                 "/v1/attest",
-                json={"url": "https://example.com", "request_id": "test-3"},
+                json={
+                    "url": "https://example.com",
+                    "request_id": "test-3",
+                    "notary_host": "10.0.0.1",
+                    "notary_port": 7047,
+                },
             )
         assert resp.status_code == 200
         data = resp.json()
@@ -722,7 +727,12 @@ class TestAttestEndpoint:
         ):
             resp = app.post(
                 "/v1/attest",
-                json={"url": "https://example.com", "request_id": "test-4"},
+                json={
+                    "url": "https://example.com",
+                    "request_id": "test-4",
+                    "notary_host": "10.0.0.1",
+                    "notary_port": 7047,
+                },
             )
         assert resp.status_code == 200
         data = resp.json()

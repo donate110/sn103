@@ -3,7 +3,6 @@ import {
   Deposited,
   Withdrawn,
   SignalPurchased,
-  Refunded,
   OutcomeUpdated,
   FeesClaimed,
 } from "../generated/Escrow/Escrow";
@@ -53,6 +52,7 @@ function getOrCreateGenius(address: string, timestamp: BigInt): Genius {
     genius.totalPurchases = BigInt.zero();
     genius.totalVolume = BigInt.zero();
     genius.totalFeesEarned = BigInt.zero();
+    genius.totalFeesClaimed = BigInt.zero();
     genius.aggregateQualityScore = BigInt.zero();
     genius.totalAudits = BigInt.zero();
     genius.collateralDeposited = BigInt.zero();
@@ -63,6 +63,10 @@ function getOrCreateGenius(address: string, timestamp: BigInt): Genius {
     genius.totalUnfavorable = BigInt.zero();
     genius.totalVoid = BigInt.zero();
     genius.createdAt = timestamp;
+
+    let stats = getOrCreateProtocolStats();
+    stats.uniqueGeniuses = stats.uniqueGeniuses.plus(BigInt.fromI32(1));
+    stats.save();
   }
   return genius;
 }
@@ -160,12 +164,6 @@ export function handleSignalPurchased(event: SignalPurchased): void {
   stats.save();
 }
 
-export function handleRefunded(event: Refunded): void {
-  let idiot = getOrCreateIdiot(event.params.idiot, event.block.timestamp);
-  idiot.escrowBalance = idiot.escrowBalance.plus(event.params.amount);
-  idiot.save();
-}
-
 export function handleOutcomeUpdated(event: OutcomeUpdated): void {
   let purchaseId = event.params.purchaseId.toString();
   let purchase = Purchase.load(purchaseId);
@@ -211,7 +209,9 @@ export function handleFeesClaimed(event: FeesClaimed): void {
   let geniusId = event.params.genius.toHexString();
   let genius = Genius.load(geniusId);
   if (genius != null) {
-    genius.totalFeesEarned = genius.totalFeesEarned.plus(event.params.amount);
+    // Fees are already counted in totalFeesEarned at purchase time (handleSignalPurchased).
+    // FeesClaimed represents the genius withdrawing accumulated fees, not earning new ones.
+    genius.totalFeesClaimed = genius.totalFeesClaimed.plus(event.params.amount);
     genius.save();
   }
 }

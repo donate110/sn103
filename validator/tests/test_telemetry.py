@@ -107,3 +107,47 @@ class TestTelemetryStore:
     def test_empty_query(self, store: TelemetryStore) -> None:
         assert store.query() == []
         assert store.count() == 0
+
+    def test_record_and_query_miner_weights(self, store: TelemetryStore) -> None:
+        miners = [
+            {"uid": 10, "weight": 0.05, "accuracy": 0.9, "speed": 0.8,
+             "coverage": 0.7, "uptime": 1.0, "sports_score": 0.85, "attestation_score": 0.6},
+            {"uid": 20, "weight": 0.03, "accuracy": 0.5, "speed": 0.4,
+             "coverage": 0.3, "uptime": 0.9, "sports_score": 0.45, "attestation_score": 0.2},
+        ]
+        store.record_miner_weights(miners)
+
+        since = time.time() - 60
+        history = store.miner_history(10, since)
+        assert len(history) == 1
+        assert history[0]["weight"] == 0.05
+        assert history[0]["accuracy"] == 0.9
+
+        history_20 = store.miner_history(20, since)
+        assert len(history_20) == 1
+        assert history_20[0]["weight"] == 0.03
+
+        # UID with no data returns empty
+        assert store.miner_history(99, since) == []
+
+    def test_miner_history_ordering(self, store: TelemetryStore) -> None:
+        """Miner history returns oldest first for chart rendering."""
+        miners = [{"uid": 5, "weight": 0.01, "accuracy": 0.1}]
+        store.record_miner_weights(miners)
+        # Second batch (slightly later)
+        import time as t
+        t.sleep(0.01)
+        miners2 = [{"uid": 5, "weight": 0.02, "accuracy": 0.2}]
+        store.record_miner_weights(miners2)
+
+        since = time.time() - 60
+        history = store.miner_history(5, since)
+        assert len(history) == 2
+        assert history[0]["weight"] == 0.01
+        assert history[1]["weight"] == 0.02
+        assert history[0]["t"] <= history[1]["t"]
+
+    def test_miner_weights_empty_list(self, store: TelemetryStore) -> None:
+        """Empty miner list is a no-op."""
+        store.record_miner_weights([])
+        assert store.miner_history(1, 0.0) == []

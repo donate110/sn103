@@ -99,10 +99,11 @@ class TestEpochLoop:
 
         mock_neuron.sync_metagraph = counting_sync
 
-        # Provide ip/port so health checks actually attempt HTTP requests
+        # Provide ip/port so health checks actually attempt HTTP requests.
+        # Use a public IP (not 127.0.0.1) because _is_public_ip rejects non-global addresses.
         mock_neuron.get_axon_info.side_effect = lambda uid: {
             "hotkey": f"key-{uid}",
-            "ip": "127.0.0.1",
+            "ip": "8.8.8.8",
             "port": 9999,
         }
 

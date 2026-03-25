@@ -298,6 +298,9 @@ class TestNotaryDiscoveryEdgeCases:
     @pytest.mark.asyncio
     async def test_discover_multiple_notaries(self) -> None:
         """Multiple notaries are discovered correctly."""
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
         axons = [
             {"uid": i, "hotkey": f"hk{i}", "ip": f"10.0.0.{i}", "port": 8422}
             for i in range(1, 6)
@@ -317,7 +320,13 @@ class TestNotaryDiscoveryEdgeCases:
         client = MagicMock()
         client.get = mock_get
 
-        notaries = await discover_peer_notaries(client, axons)
+        # Mock TCP probe so it succeeds without a real server
+        mock_writer = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+
+        with patch("asyncio.open_connection", AsyncMock(return_value=(MagicMock(), mock_writer))):
+            notaries = await discover_peer_notaries(client, axons)
         assert len(notaries) == 5
         uids = {n.uid for n in notaries}
         assert uids == {1, 2, 3, 4, 5}

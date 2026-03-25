@@ -19,6 +19,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+import structlog
+
+logger = structlog.get_logger()
+
 
 class TelemetryStore:
     """Thread-safe, SQLite-backed event store."""
@@ -57,6 +61,25 @@ class TelemetryStore:
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_events_cat ON events (category)
         """)
+        # Per-miner weight history for fast lookups (avoids scanning all
+        # miners in every weight_set event when querying one miner).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS miner_weights (
+                uid INTEGER NOT NULL,
+                timestamp REAL NOT NULL,
+                weight REAL NOT NULL,
+                accuracy REAL,
+                speed REAL,
+                coverage REAL,
+                uptime REAL,
+                sports_score REAL,
+                attestation_score REAL,
+                PRIMARY KEY (uid, timestamp)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_mw_ts ON miner_weights (timestamp)
+        """)
         conn.commit()
 
     def record(self, category: str, summary: str, **details: Any) -> None:
@@ -71,8 +94,8 @@ class TelemetryStore:
             )
             conn.commit()
             self._maybe_prune(conn)
-        except Exception:
-            pass  # Fire-and-forget — never disrupt the caller
+        except Exception as e:
+            logger.warning("telemetry record failed", error=str(e))
 
     def _maybe_prune(self, conn: sqlite3.Connection) -> None:
         """Lazy pruning: delete rows >30d when count >10k. Runs every N inserts."""
@@ -84,6 +107,7 @@ class TelemetryStore:
             if row and row[0] > self._PRUNE_THRESHOLD:
                 cutoff = time.time() - self._PRUNE_AGE_SECONDS
                 conn.execute("DELETE FROM events WHERE timestamp < ?", (cutoff,))
+                conn.execute("DELETE FROM miner_weights WHERE timestamp < ?", (cutoff,))
                 conn.commit()
         except Exception:
             pass
@@ -178,6 +202,73 @@ class TelemetryStore:
                 "details": parsed,
             })
         return result
+
+    def record_miner_weights(self, miners: list[dict[str, Any]]) -> None:
+        """Batch-insert per-miner weight records for fast history lookups.
+
+        Called alongside the weight_set event so per-miner data is
+        queryable without scanning the full event JSON.
+        """
+        if not miners:
+            return
+        ts = time.time()
+        try:
+            conn = self._get_conn()
+            conn.executemany(
+                """INSERT OR REPLACE INTO miner_weights
+                   (uid, timestamp, weight, accuracy, speed, coverage,
+                    uptime, sports_score, attestation_score)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        m.get("uid", 0),
+                        ts,
+                        m.get("weight", 0),
+                        m.get("accuracy"),
+                        m.get("speed"),
+                        m.get("coverage"),
+                        m.get("uptime"),
+                        m.get("sports_score"),
+                        m.get("attestation_score"),
+                    )
+                    for m in miners
+                ],
+            )
+            conn.commit()
+        except Exception:
+            pass
+
+    def miner_history(
+        self, uid: int, since: float, limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Return weight history for a single miner, oldest first.
+
+        Uses the indexed miner_weights table instead of scanning
+        weight_set events.
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            """SELECT timestamp, weight, accuracy, speed, coverage,
+                      uptime, sports_score, attestation_score
+               FROM miner_weights
+               WHERE uid = ? AND timestamp >= ?
+               ORDER BY timestamp
+               LIMIT ?""",
+            (uid, since, max(1, min(limit, 2000))),
+        ).fetchall()
+        return [
+            {
+                "t": row[0],
+                "weight": row[1],
+                "accuracy": row[2],
+                "speed": row[3],
+                "coverage": row[4],
+                "uptime": row[5],
+                "sports_score": row[6],
+                "attestation_score": row[7],
+            }
+            for row in rows
+        ]
 
     def count(self, category: str | None = None) -> int:
         conn = self._get_conn()

@@ -21,8 +21,10 @@ Inter-validator MPC endpoints:
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import os
 import re
+import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
@@ -920,6 +922,29 @@ def create_app(
         except Exception as e:
             log.debug("attest_redirect_check_failed", url=req.url, error=str(e))
 
+        # SSRF protection: verify the resolved URL's hostname resolves to a public IP.
+        # Prevents redirects to internal/private network addresses.
+        try:
+            from urllib.parse import urlparse
+            _parsed = urlparse(req.url)
+            _hostname = _parsed.hostname or ""
+            if _hostname:
+                _resolved_ip = socket.gethostbyname(_hostname)
+                if not ipaddress.ip_address(_resolved_ip).is_global:
+                    log.warning(
+                        "attest_ssrf_blocked",
+                        url=req.url,
+                        resolved_ip=_resolved_ip,
+                    )
+                    return AttestResponse(
+                        request_id=req.request_id,
+                        url=req.url,
+                        success=False,
+                        error="URL resolves to a non-public IP address",
+                    )
+        except Exception as e:
+            log.debug("attest_ssrf_check_failed", url=req.url, error=str(e))
+
         # Build axon lookup by UID
         axon_by_uid: dict[int, dict] = {}
         if neuron:
@@ -1218,7 +1243,7 @@ def create_app(
                 except Exception:
                     continue
                 if result is not None:
-                    axon, _data, _phex, elapsed = result
+                    axon, _data, _phex, elapsed, _notary_uid, _notary_pubkey = result
                     if _scorer is not None and axon["uid"] >= 0:
                         m = _scorer.get_or_create(axon["uid"], axon.get("hotkey", ""))
                         m.record_attestation(latency=elapsed, proof_valid=True)
@@ -1779,28 +1804,7 @@ def create_app(
         import time as _time
 
         since = _time.time() - max(1, min(hours, 720)) * 3600
-        events = telemetry.query(
-            limit=1000,
-            since=since,
-            category="weight_set",
-        )
-
-        history = []
-        for event in reversed(events):  # oldest first
-            details = event.get("details", {})
-            top_miners = details.get("top_miners", [])
-            match = next((m for m in top_miners if m.get("uid") == uid), None)
-            if match:
-                history.append({
-                    "t": event.get("timestamp", 0),
-                    "weight": match.get("weight", 0),
-                    "accuracy": match.get("accuracy"),
-                    "speed": match.get("speed"),
-                    "coverage": match.get("coverage"),
-                    "uptime": match.get("uptime"),
-                    "sports_score": match.get("sports_score"),
-                    "attestation_score": match.get("attestation_score"),
-                })
+        history = telemetry.miner_history(uid, since)
 
         return {"uid": uid, "history": history}
 

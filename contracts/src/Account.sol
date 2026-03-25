@@ -106,6 +106,9 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     /// @notice Address must not be zero
     error ZeroAddress();
 
+    /// @notice Current cycle must be settled before starting a new one
+    error CycleNotSettled(address genius, address idiot, uint256 cycle);
+
     /// @notice Caller is not the pauser or the owner
     error NotPauserOrOwner(address caller);
 
@@ -210,6 +213,10 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     function startNewCycle(address genius, address idiot) external onlyAuthorized whenNotPaused {
         _validatePair(genius, idiot);
         bytes32 key = _accountKey(genius, idiot);
+        AccountState storage acct = _accounts[key];
+        if (!acct.settled) {
+            revert CycleNotSettled(genius, idiot, acct.currentCycle);
+        }
         _resetCycle(key);
         emit NewCycleStarted(genius, idiot, _accounts[key].currentCycle);
     }

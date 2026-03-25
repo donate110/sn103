@@ -202,8 +202,14 @@ class Config:
         if self.rate_limit_capacity < self.rate_limit_rate:
             warnings.append(
                 f"RATE_LIMIT_CAPACITY ({self.rate_limit_capacity}) < RATE_LIMIT_RATE ({self.rate_limit_rate}) "
-                "— bucket will never fill above rate"
+                "-- bucket will never fill above rate"
             )
+        if is_production and not self.admin_api_key:
+            import structlog as _sl
+            _sl.get_logger().warning(
+                "ADMIN_API_KEY not set - admin endpoints are unprotected"
+            )
+            warnings.append("ADMIN_API_KEY not set - admin endpoints are unprotected on a production network")
         # Warnings are logged but never fatal. Real config errors use
         # raise ValueError() above. The old strict-mode crash prevented
         # validators from starting when they had deprecated env vars

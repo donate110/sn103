@@ -413,7 +413,7 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
 
     /// @dev Only the owner (TimelockController) can authorize upgrades.
     ///      SignalCommitment holds no USDC — no balance guard needed.
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
 
     /// @dev Reserved storage gap for future upgrades.
     uint256[45] private __gap;

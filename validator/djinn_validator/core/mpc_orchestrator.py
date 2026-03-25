@@ -557,18 +557,17 @@ class MPCOrchestrator:
         auth_r_map: dict[int, AuthenticatedShare] = {}
         auth_secret_map: dict[int, AuthenticatedShare] = {}
         if is_auth:
-            alpha = session.mac_alpha
-            r_auth = authenticate_value(r, alpha, participant_xs, t, p)
-            auth_r_map = {s.x: s for s in r_auth}
+            # SECURITY: mac_alpha was removed from session state (C-6 audit finding).
+            # The global MAC key must never be stored in a single location.
             # Authenticated MPC requires pre-authenticated shares created at
             # signal submission time. The coordinator must NOT reconstruct
-            # the secret — doing so defeats the purpose of MPC. Until the
+            # the secret, as doing so defeats the purpose of MPC. Until the
             # Genius creates authenticated shares during signal commitment,
             # the authenticated mode is not available.
             log.error(
                 "authenticated_mpc_not_supported",
                 signal_id=signal_id,
-                reason="coordinator must not reconstruct secret; pre-authenticated shares required",
+                reason="mac_alpha removed from session state; pre-authenticated shares required",
             )
             self._mark_session_failed(session)
             return None

@@ -54,7 +54,7 @@ test.describe("No console errors on page load", () => {
 test.describe("Beta gate", () => {
   test("page loads with or without beta password", async ({ page }) => {
     // Without beta access set, page should either show beta gate or content
-    // (depends on whether NEXT_PUBLIC_BETA_PASSWORD is set in the build)
+    // (depends on whether BETA_PASSWORD is set server-side)
     await page.goto("/genius");
     await page.waitForLoadState("networkidle");
     const body = await page.locator("body").textContent();

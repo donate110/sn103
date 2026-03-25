@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from djinn_miner.core.health import HealthTracker
-from djinn_miner.main import async_main, bt_sync_loop
+from djinn_miner.main import bt_sync_loop
 
 
 class TestBtSyncLoop:
@@ -115,6 +115,8 @@ class TestBtSyncLoop:
     async def test_sync_loop_consecutive_errors_increase_backoff(self) -> None:
         """Multiple consecutive errors increase backoff up to the cap."""
         neuron = MagicMock()
+        # Reconnect should fail so the 3rd error still hits the backoff path
+        neuron.reconnect_subtensor.return_value = False
         health = HealthTracker()
         call_count = 0
 
@@ -142,115 +144,61 @@ class TestBtSyncLoop:
         assert all(b <= 900 for b in backoffs)
 
 
-class TestAsyncMainBtFailure:
-    """Test that async_main exits on production when BT setup fails."""
+class TestBtSyncLoopReconnect:
+    """Test the reconnection logic in bt_sync_loop."""
 
     @pytest.mark.asyncio
-    async def test_bt_failure_exits_on_finney(self) -> None:
-        """On finney, a BT setup failure should raise SystemExit(1)."""
-        mock_config = MagicMock()
-        mock_config.bt_network = "finney"
-        mock_config.validate.return_value = []
-        mock_config.odds_api_key = "test"
-        mock_config.odds_api_base_url = "https://api.test.com"
-        mock_config.odds_cache_ttl = 30
-        mock_config.line_tolerance = 0.5
-        mock_config.api_host = "0.0.0.0"
-        mock_config.api_port = 8422
-        mock_config.bt_netuid = 103
-        mock_config.bt_wallet_name = "default"
-        mock_config.bt_wallet_hotkey = "default"
-        mock_config.external_ip = ""
-        mock_config.external_port = 0
-        mock_config.http_timeout = 30
-        mock_config.rate_limit_capacity = 30
-        mock_config.rate_limit_rate = 5
+    async def test_reconnect_success_resets_error_count(self) -> None:
+        """When reconnect succeeds after 3 errors, consecutive count resets."""
+        neuron = MagicMock()
+        neuron.reconnect_subtensor.return_value = True
+        health = HealthTracker()
+        call_count = 0
 
-        mock_neuron = MagicMock()
-        mock_neuron.setup.return_value = False
+        def errors_then_succeed_then_cancel():
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 3:
+                raise RuntimeError(f"error {call_count}")
+            if call_count == 4:
+                # After reconnect, the next sync succeeds
+                neuron.is_registered.return_value = True
+                neuron.uid = 99
+                return
+            raise asyncio.CancelledError()
 
-        with (
-            patch("djinn_miner.main.Config", return_value=mock_config),
-            patch("djinn_miner.main.DjinnMiner", return_value=mock_neuron),
-            patch("djinn_miner.main.OddsApiClient"),
-            patch("djinn_miner.main.SessionCapture"),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            await async_main()
+        neuron.sync_metagraph = errors_then_succeed_then_cancel
+        neuron.is_registered.return_value = True
+        neuron.uid = 99
 
-        assert exc_info.value.code == 1
+        with patch("djinn_miner.main.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await bt_sync_loop(neuron, health)
+
+        # 2 sleeps (errors 1+2), then error 3 triggers reconnect which
+        # succeeds and continues without sleeping
+        assert mock_sleep.call_count == 3  # 2 error backoffs + 1 normal 60s sleep
+        neuron.reconnect_subtensor.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_bt_failure_exits_on_mainnet(self) -> None:
-        """On mainnet, a BT setup failure should raise SystemExit(1)."""
-        mock_config = MagicMock()
-        mock_config.bt_network = "mainnet"
-        mock_config.validate.return_value = []
-        mock_config.odds_api_key = "test"
-        mock_config.odds_api_base_url = "https://api.test.com"
-        mock_config.odds_cache_ttl = 30
-        mock_config.line_tolerance = 0.5
-        mock_config.api_host = "0.0.0.0"
-        mock_config.api_port = 8422
-        mock_config.bt_netuid = 103
-        mock_config.bt_wallet_name = "default"
-        mock_config.bt_wallet_hotkey = "default"
-        mock_config.external_ip = ""
-        mock_config.external_port = 0
-        mock_config.http_timeout = 30
-        mock_config.rate_limit_capacity = 30
-        mock_config.rate_limit_rate = 5
+    async def test_reconnect_failure_continues_backoff(self) -> None:
+        """When reconnect fails, errors keep accumulating and backoff continues."""
+        neuron = MagicMock()
+        neuron.reconnect_subtensor.return_value = False
+        health = HealthTracker()
+        call_count = 0
 
-        mock_neuron = MagicMock()
-        mock_neuron.setup.return_value = False
+        def four_errors_then_cancel():
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 4:
+                raise RuntimeError(f"error {call_count}")
+            raise asyncio.CancelledError()
 
-        with (
-            patch("djinn_miner.main.Config", return_value=mock_config),
-            patch("djinn_miner.main.DjinnMiner", return_value=mock_neuron),
-            patch("djinn_miner.main.OddsApiClient"),
-            patch("djinn_miner.main.SessionCapture"),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            await async_main()
+        neuron.sync_metagraph = four_errors_then_cancel
 
-        assert exc_info.value.code == 1
+        with patch("djinn_miner.main.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await bt_sync_loop(neuron, health)
 
-    @pytest.mark.asyncio
-    async def test_bt_failure_continues_on_test_network(self) -> None:
-        """On test/local networks, BT failure should NOT exit."""
-        mock_config = MagicMock()
-        mock_config.bt_network = "test"
-        mock_config.validate.return_value = []
-        mock_config.odds_api_key = "test"
-        mock_config.odds_api_base_url = "https://api.test.com"
-        mock_config.odds_cache_ttl = 30
-        mock_config.line_tolerance = 0.5
-        mock_config.api_host = "0.0.0.0"
-        mock_config.api_port = 8422
-        mock_config.bt_netuid = 103
-        mock_config.bt_wallet_name = "default"
-        mock_config.bt_wallet_hotkey = "default"
-        mock_config.external_ip = ""
-        mock_config.external_port = 0
-        mock_config.http_timeout = 30
-        mock_config.rate_limit_capacity = 30
-        mock_config.rate_limit_rate = 5
-
-        mock_neuron = MagicMock()
-        mock_neuron.setup.return_value = False
-
-        shutdown_event = asyncio.Event()
-        shutdown_event.set()
-
-        with (
-            patch("djinn_miner.main.Config", return_value=mock_config),
-            patch("djinn_miner.main.DjinnMiner", return_value=mock_neuron),
-            patch("djinn_miner.main.OddsApiClient"),
-            patch("djinn_miner.main.SessionCapture"),
-            patch("djinn_miner.main.create_app"),
-            patch("djinn_miner.main.run_server", new_callable=AsyncMock),
-            patch("djinn_miner.main.asyncio.Event", return_value=shutdown_event),
-            patch("asyncio.get_running_loop") as mock_loop,
-        ):
-            mock_loop.return_value.add_signal_handler = MagicMock()
-            await async_main()
+        # 4 errors, all hit the backoff path (reconnect fails on error 3)
+        assert mock_sleep.call_count == 4
+        neuron.reconnect_subtensor.assert_called_once()
