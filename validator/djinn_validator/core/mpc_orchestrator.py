@@ -517,8 +517,9 @@ class MPCOrchestrator:
         r_shares = _split_secret_at_points(r, participant_xs, t, p)
         r_share_map = {s.x: s.y for s in r_shares}
 
-        # Attempt distributed OT triple generation if enabled
-        use_network_ot = os.getenv("USE_NETWORK_OT", "").lower() in ("1", "true", "yes")
+        # OT-based Beaver triple generation is the default for 2-party MPC.
+        # Set USE_NETWORK_OT=false to disable and always use the trusted dealer.
+        use_network_ot = os.getenv("USE_NETWORK_OT", "true").lower() not in ("0", "false", "no")
         pre_generated_triples: list[BeaverTriple] | None = None
         if use_network_ot and len(peers) == 1:
             ot_session_id = f"ot-{signal_id}-{secrets.token_hex(4)}"

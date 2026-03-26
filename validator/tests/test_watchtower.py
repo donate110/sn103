@@ -16,6 +16,7 @@ from djinn_validator.utils.watchtower import (
     _local_sha,
     _pull,
     _remote_sha,
+    _verify_commit_signature,
     watch_loop,
 )
 
@@ -112,6 +113,59 @@ class TestInstallDeps:
         assert _install_deps(Path("/fake")) is True
 
 
+class TestVerifyCommitSignature:
+    @patch("djinn_validator.utils.watchtower._run")
+    def test_good_signature_logs_info(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="G|abc123def456|Alice\n",
+        )
+        # Should not raise; just logs info
+        _verify_commit_signature(Path("/fake"))
+        mock_run.assert_called_once()
+
+    @patch("djinn_validator.utils.watchtower._run")
+    def test_untrusted_signature_logs_info(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="U|abc123def456|Bob\n",
+        )
+        _verify_commit_signature(Path("/fake"))
+        mock_run.assert_called_once()
+
+    @patch("djinn_validator.utils.watchtower._run")
+    def test_unsigned_commit_logs_warning(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="N|abc123def456|Charlie\n",
+        )
+        _verify_commit_signature(Path("/fake"))
+        mock_run.assert_called_once()
+
+    @patch("djinn_validator.utils.watchtower._run")
+    def test_bad_signature_logs_warning(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="B|abc123def456|Eve\n",
+        )
+        _verify_commit_signature(Path("/fake"))
+        mock_run.assert_called_once()
+
+    @patch("djinn_validator.utils.watchtower._run")
+    def test_git_failure_logs_warning(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="fatal: not a repo",
+        )
+        _verify_commit_signature(Path("/fake"))
+
+    @patch("djinn_validator.utils.watchtower._run")
+    def test_parse_error_logs_warning(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="garbage\n",
+        )
+        _verify_commit_signature(Path("/fake"))
+
+    @patch("djinn_validator.utils.watchtower._run", side_effect=Exception("boom"))
+    def test_exception_logs_warning(self, mock_run: MagicMock) -> None:
+        _verify_commit_signature(Path("/fake"))
+
+
 class TestWatchLoop:
     @pytest.mark.asyncio
     async def test_disabled_by_default(self) -> None:
@@ -133,6 +187,7 @@ class TestWatchLoop:
              patch.object(watchtower, "_local_sha", return_value="aaa"), \
              patch.object(watchtower, "_remote_sha", return_value="bbb"), \
              patch.object(watchtower, "_pull", return_value=True) as mock_pull, \
+             patch.object(watchtower, "_verify_commit_signature"), \
              patch.object(watchtower, "_install_deps", return_value=True) as mock_deps, \
              patch.object(watchtower, "_restart") as mock_restart:
             mock_restart.side_effect = SystemExit(0)

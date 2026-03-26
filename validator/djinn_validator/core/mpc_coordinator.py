@@ -188,17 +188,24 @@ class MPCCoordinator:
                 participants=len(participant_xs),
             )
         else:
+            # Trusted dealer fallback: used when OT is not possible (single
+            # participant dev mode) or when the caller did not provide
+            # pre-generated OT triples (e.g., network OT failed).
+            reason = (
+                "single_participant" if len(participant_xs) < 2
+                else "ot_not_requested_or_failed"
+            )
+            log.warning(
+                "beaver_triples_trusted_dealer_fallback",
+                reason=reason,
+                count=n_mults,
+                participants=len(participant_xs),
+            )
             triples = generate_beaver_triples(
                 count=n_mults,
                 n=len(participant_xs),
                 k=threshold,
                 x_coords=sorted_xs,
-            )
-            log.info(
-                "beaver_triples_generated",
-                method="trusted_dealer",
-                count=n_mults,
-                participants=len(participant_xs),
             )
 
         session = MPCSessionState(

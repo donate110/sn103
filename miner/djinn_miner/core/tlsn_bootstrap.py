@@ -13,6 +13,7 @@ pointing to existing binaries.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
 import shutil
@@ -26,6 +27,13 @@ import structlog
 log = structlog.get_logger()
 
 GITHUB_REPO = "Djinn-Inc/djinn"
+
+# Pinned SHA256 hashes for release tarballs.
+# Key: (release_tag, platform_suffix) -> expected SHA256 hex digest.
+# If a (tag, platform) pair is not listed, the download proceeds with a warning.
+PINNED_HASHES: dict[tuple[str, str], str] = {
+    ("v790", "linux-x86_64"): "9ecb0725e4c150b8a20c381e02531abe08e63ef727bab784667c20a99e000659",
+}
 INSTALL_DIR = os.path.expanduser("~/.local/bin")
 BINARIES = ("djinn-tlsn-prover", "djinn-tlsn-verifier", "djinn-tlsn-notary")
 VERSION_FILE = os.path.join(INSTALL_DIR, ".djinn-tlsn-version")
@@ -78,6 +86,49 @@ def _write_version(tag: str) -> None:
         log.debug("tlsn_bootstrap_version_write_failed", error=str(e))
 
 
+def _sha256_file(path: str) -> str:
+    """Compute the SHA256 hex digest of a file."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 16), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _verify_hash(archive_path: str, tag: str, plat: str) -> bool:
+    """Verify the SHA256 hash of a downloaded archive.
+
+    Returns True if verification passes (hash matches or no pinned hash exists).
+    Returns False if the hash does not match the pinned value.
+    """
+    actual = _sha256_file(archive_path)
+    expected = PINNED_HASHES.get((tag, plat))
+
+    if expected is None:
+        log.warning(
+            "tlsn_bootstrap_unverified_binary",
+            tag=tag,
+            platform=plat,
+            sha256=actual,
+            msg="No pinned hash for this version/platform; proceeding without verification",
+        )
+        return True
+
+    if actual != expected:
+        log.error(
+            "tlsn_bootstrap_hash_mismatch",
+            tag=tag,
+            platform=plat,
+            expected=expected,
+            actual=actual,
+            msg="SHA256 hash mismatch, refusing to extract. The binary may be corrupted or tampered with.",
+        )
+        return False
+
+    log.info("tlsn_bootstrap_hash_verified", tag=tag, platform=plat, sha256=actual)
+    return True
+
+
 def _download_and_install(tag: str, plat: str) -> bool:
     """Download the release tarball and extract binaries to INSTALL_DIR."""
     asset_name = f"djinn-tlsn-tools-{plat}.tar.gz"
@@ -90,6 +141,10 @@ def _download_and_install(tag: str, plat: str) -> bool:
         with tempfile.TemporaryDirectory() as tmpdir:
             archive_path = os.path.join(tmpdir, asset_name)
             urllib.request.urlretrieve(url, archive_path)
+
+            if not _verify_hash(archive_path, tag, plat):
+                os.remove(archive_path)
+                return False
 
             with tarfile.open(archive_path, "r:gz") as tar:
                 # Security: only extract known binary names

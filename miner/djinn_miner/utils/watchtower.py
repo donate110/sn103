@@ -114,6 +114,46 @@ def _pull(repo: Path, branch: str) -> bool:
         return False
 
 
+def _verify_commit_signature(repo: Path) -> None:
+    """Check GPG signature status of HEAD and log accordingly.
+
+    This is a soft check: warnings are emitted for unsigned or bad signatures,
+    but the update is never blocked. Operators can monitor logs for
+    ``watchtower_unsigned_commit`` events and act on them.
+    """
+    try:
+        r = _run(["git", "log", "-1", "--format=%G?|%H|%an", "HEAD"], repo)
+        if r.returncode != 0:
+            log.warning(
+                "watchtower_sig_check_failed",
+                msg="Could not check commit signature",
+                stderr=r.stderr[:200],
+            )
+            return
+        parts = r.stdout.strip().split("|", 2)
+        if len(parts) < 3:
+            log.warning("watchtower_sig_parse_error", raw=r.stdout.strip()[:100])
+            return
+        status, commit_hash, author = parts
+        if status in ("G", "U"):
+            log.info(
+                "watchtower_signature_verified",
+                status=status,
+                commit=commit_hash[:8],
+                author=author,
+            )
+        else:
+            log.warning(
+                "watchtower_unsigned_commit",
+                status=status,
+                commit=commit_hash[:8],
+                author=author,
+                msg="Commit is not GPG-signed; proceeding anyway",
+            )
+    except Exception as e:
+        log.warning("watchtower_sig_check_error", error=str(e))
+
+
 def _install_deps(package_dir: Path) -> bool:
     """Run ``uv sync`` in the package directory. Returns True on success."""
     try:
@@ -187,6 +227,8 @@ async def watch_loop(package_dir: Path | None = None) -> None:
 
             if not _pull(repo, _BRANCH):
                 continue
+
+            _verify_commit_signature(repo)
 
             if not _install_deps(package_dir):
                 continue
