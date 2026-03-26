@@ -415,6 +415,11 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
     ///      SignalCommitment holds no USDC — no balance guard needed.
     function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
 
+    /// @dev Disabled to prevent accidental permanent bricking of upgradeable proxy.
+    function renounceOwnership() public pure override {
+        revert("disabled");
+    }
+
     /// @dev Reserved storage gap for future upgrades.
     uint256[45] private __gap;
 }

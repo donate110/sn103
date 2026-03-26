@@ -577,6 +577,11 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     ///      pausing prevents vote state changes during upgrade.
     function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
 
+    /// @dev Disabled to prevent accidental permanent bricking of upgradeable proxy.
+    function renounceOwnership() public pure override {
+        revert("disabled");
+    }
+
     /// @dev Reserved storage gap for future upgrades.
     uint256[33] private __gap;
 }

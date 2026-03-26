@@ -431,7 +431,7 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     /// @param idiot The Idiot address
     /// @param cycle The settlement cycle
     /// @param amount Amount to reduce (capped at current pool balance)
-    function reduceFeePool(address genius, address idiot, uint256 cycle, uint256 amount) external whenNotPaused {
+    function reduceFeePool(address genius, address idiot, uint256 cycle, uint256 amount) external whenNotPaused nonReentrant {
         if (msg.sender != auditContract) revert Unauthorized();
         uint256 pool = feePool[genius][idiot][cycle];
         if (amount >= pool) {
@@ -570,6 +570,11 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
 
     /// @dev Owner can authorize upgrades only when paused (active USDC may be held)
     function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
+
+    /// @dev Disabled to prevent accidental permanent bricking of upgradeable proxy.
+    function renounceOwnership() public pure override {
+        revert("disabled");
+    }
 
     /// @dev Reserved storage gap for future upgrades.
     uint256[35] private __gap;

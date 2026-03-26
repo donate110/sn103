@@ -750,6 +750,11 @@ contract Audit is Initializable, OwnableUpgradeable, PausableUpgradeable, Reentr
     /// @dev Owner can authorize upgrades only when paused
     function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
 
+    /// @dev Disabled to prevent accidental permanent bricking of upgradeable proxy.
+    function renounceOwnership() public pure override {
+        revert("disabled");
+    }
+
     /// @dev Reserved storage gap for future upgrades.
     uint256[41] private __gap;
 }

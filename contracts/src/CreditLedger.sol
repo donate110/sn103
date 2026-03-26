@@ -96,7 +96,7 @@ contract CreditLedger is Initializable, OwnableUpgradeable, PausableUpgradeable,
     /// @dev Only callable by authorized contracts (e.g. Audit during negative settlement).
     /// @param to The address receiving credits
     /// @param amount The number of credits to mint
-    function mint(address to, uint256 amount) external onlyAuthorized {
+    function mint(address to, uint256 amount) external onlyAuthorized whenNotPaused {
         if (to == address(0)) revert MintToZeroAddress();
         if (amount == 0) revert MintAmountZero();
         if (_totalSupply + amount > MAX_SUPPLY) revert MaxSupplyExceeded(_totalSupply, amount, MAX_SUPPLY);
@@ -111,7 +111,7 @@ contract CreditLedger is Initializable, OwnableUpgradeable, PausableUpgradeable,
     /// @dev Only callable by authorized contracts (e.g. Escrow when credits offset a purchase fee).
     /// @param from The address whose credits are being burned
     /// @param amount The number of credits to burn
-    function burn(address from, uint256 amount) external onlyAuthorized {
+    function burn(address from, uint256 amount) external onlyAuthorized whenNotPaused {
         if (amount == 0) revert BurnAmountZero();
 
         uint256 balance = _balances[from];
@@ -189,6 +189,11 @@ contract CreditLedger is Initializable, OwnableUpgradeable, PausableUpgradeable,
     ///      CreditLedger tracks virtual balances; pausing prevents state
     ///      changes during upgrade.
     function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
+
+    /// @dev Disabled to prevent accidental permanent bricking of upgradeable proxy.
+    function renounceOwnership() public pure override {
+        revert("disabled");
+    }
 
     /// @dev Reserved storage gap for future upgrades.
     uint256[46] private __gap;

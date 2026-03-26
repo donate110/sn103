@@ -267,6 +267,11 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
     /// @dev Owner can authorize upgrades only when paused (active USDC may be locked)
     function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
 
+    /// @dev Disabled to prevent accidental permanent bricking of upgradeable proxy.
+    function renounceOwnership() public pure override {
+        revert("disabled");
+    }
+
     /// @dev Reserved storage gap for future upgrades.
     uint256[43] private __gap;
 }
