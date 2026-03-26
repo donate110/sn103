@@ -45,11 +45,6 @@ docs/short-desc      # Documentation only
 - Error boundaries on all route segments
 - All API calls wrapped in try/catch with user-facing error messages
 
-### circom (circuits/)
-
-- Constraint tests for valid and invalid inputs
-- Proof generation/verification roundtrip tests
-
 ## Testing
 
 Every PR must have passing tests. Run the full suite before submitting:
@@ -66,9 +61,6 @@ cd miner && python -m pytest
 
 # Web
 cd web && pnpm vitest run
-
-# Circuits
-cd circuits && npm test
 ```
 
 ## Pull Requests

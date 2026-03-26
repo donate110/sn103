@@ -59,7 +59,7 @@ DEPLOY_OUTPUT=$(forge script script/Deploy.s.sol:Deploy \
   exit 1
 }
 
-echo "$DEPLOY_OUTPUT" | grep -E "^  (MockUSDC|Account|CreditLedger|SignalCommitment|ZKVerifier|KeyRecovery|Collateral|Escrow|Audit|Groth16|TrackRecord|NEXT_PUBLIC|AUDIT_|ZK_|KEY_|All contract|Minted|Deployer|Chain)" || true
+echo "$DEPLOY_OUTPUT" | grep -E "^  (MockUSDC|Account|CreditLedger|SignalCommitment|KeyRecovery|Collateral|Escrow|Audit|OutcomeVoting|NEXT_PUBLIC|AUDIT_|KEY_|All contract|Minted|Deployer|Chain)" || true
 
 echo ""
 echo "=== Extracting addresses ==="
@@ -75,7 +75,6 @@ ESCROW_ADDR=$(extract "Escrow")
 COLLATERAL_ADDR=$(extract "Collateral")
 CREDIT_ADDR=$(extract "CreditLedger")
 ACCOUNT_ADDR=$(extract "Account")
-TRACK_RECORD_ADDR=$(extract "TrackRecord")
 
 # Verify we got all addresses
 MISSING=""
@@ -85,7 +84,6 @@ MISSING=""
 [ -z "$COLLATERAL_ADDR" ] && MISSING="$MISSING Collateral"
 [ -z "$CREDIT_ADDR" ] && MISSING="$MISSING CreditLedger"
 [ -z "$ACCOUNT_ADDR" ] && MISSING="$MISSING Account"
-[ -z "$TRACK_RECORD_ADDR" ] && MISSING="$MISSING TrackRecord"
 
 if [ -n "$MISSING" ]; then
   echo "WARNING: Could not extract addresses for:$MISSING"
@@ -102,7 +100,6 @@ echo "  Escrow:           $ESCROW_ADDR"
 echo "  Collateral:       $COLLATERAL_ADDR"
 echo "  CreditLedger:     $CREDIT_ADDR"
 echo "  Account:          $ACCOUNT_ADDR"
-echo "  TrackRecord:      $TRACK_RECORD_ADDR"
 
 # ─── Update web/.env ─────────────────────────────────────────────────
 echo ""
@@ -120,13 +117,6 @@ sed -i "s|^NEXT_PUBLIC_ESCROW_ADDRESS=.*|NEXT_PUBLIC_ESCROW_ADDRESS=$ESCROW_ADDR
 sed -i "s|^NEXT_PUBLIC_COLLATERAL_ADDRESS=.*|NEXT_PUBLIC_COLLATERAL_ADDRESS=$COLLATERAL_ADDR|" "$WEB_DIR/.env"
 sed -i "s|^NEXT_PUBLIC_CREDIT_LEDGER_ADDRESS=.*|NEXT_PUBLIC_CREDIT_LEDGER_ADDRESS=$CREDIT_ADDR|" "$WEB_DIR/.env"
 sed -i "s|^NEXT_PUBLIC_ACCOUNT_ADDRESS=.*|NEXT_PUBLIC_ACCOUNT_ADDRESS=$ACCOUNT_ADDR|" "$WEB_DIR/.env"
-
-# Add TrackRecord if not present
-if grep -q "NEXT_PUBLIC_TRACK_RECORD_ADDRESS" "$WEB_DIR/.env"; then
-  sed -i "s|^NEXT_PUBLIC_TRACK_RECORD_ADDRESS=.*|NEXT_PUBLIC_TRACK_RECORD_ADDRESS=$TRACK_RECORD_ADDR|" "$WEB_DIR/.env"
-else
-  echo "NEXT_PUBLIC_TRACK_RECORD_ADDRESS=$TRACK_RECORD_ADDR" >> "$WEB_DIR/.env"
-fi
 
 # Update RPC to Base Sepolia (not localhost)
 sed -i "s|^NEXT_PUBLIC_BASE_RPC_URL=.*|NEXT_PUBLIC_BASE_RPC_URL=https://sepolia.base.org|" "$WEB_DIR/.env"

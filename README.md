@@ -55,7 +55,7 @@ Read the full [Whitepaper](docs/whitepaper.md) for complete protocol details.
 - **Idiots** purchase signals based on verifiable track records
 - **Miners** verify real-time betting line availability via TLSNotary proofs
 - **Validators** hold Shamir key shares, coordinate MPC, and attest game outcomes
-- **Smart contracts** on Base handle escrow, collateral, and ZK-verified audit settlement
+- **Smart contracts** on Base handle escrow, collateral, and audit settlement
 
 ---
 
@@ -63,14 +63,13 @@ Read the full [Whitepaper](docs/whitepaper.md) for complete protocol details.
 
 | Component | Location |
 |-----------|----------|
-| Smart contracts | Base chain (Escrow, Collateral, Audit, Account, CreditLedger, TrackRecord, ZK Verification) |
+| Smart contracts | Base chain (Escrow, Collateral, Audit, Account, CreditLedger, OutcomeVoting, KeyRecovery) |
 | Signal commitments | Base chain (immutable, timestamped, encrypted) |
 | Data indexing | The Graph (open-source subgraph) |
 | Key shares | Bittensor validators (Shamir + SPDZ MPC) |
 | Line verification | Bittensor miners (TLSNotary-attested) |
 | Web attestation | Bittensor validators + miners (TLSNotary, alpha burn gate) |
 | Outcome attestation | Bittensor validators (2/3+ consensus) |
-| ZK proof generation | Client-side only (snarkjs, Groth16) |
 | Frontend | Next.js 14 (app router) |
 | Admin dashboard | Grafana (4 dashboards: validator, miner, protocol, system) |
 
@@ -101,9 +100,6 @@ djinn/
 │   ├── src/             # Contract source (Escrow, Collateral, Audit, etc.)
 │   ├── test/            # Foundry tests (unit, fuzz, integration)
 │   └── script/          # Deployment scripts (Deploy.s.sol)
-├── circuits/            # circom 2 ZK circuits + snarkjs
-│   ├── src/             # Circuit source (audit_proof, track_record)
-│   └── test/            # Proof generation/verification tests
 ├── web/                 # Next.js 14 client application
 │   ├── app/             # App router pages (browse, create, attest, admin)
 │   ├── components/      # React components + tests
@@ -132,8 +128,6 @@ djinn/
 - [Foundry](https://book.getfoundry.sh/getting-started/installation) (forge, cast, anvil)
 - [Node.js](https://nodejs.org/) 20+ with [pnpm](https://pnpm.io/)
 - [Python](https://www.python.org/) 3.11+ with [uv](https://docs.astral.sh/uv/)
-- [circom](https://docs.circom.io/getting-started/installation/) 2 (for ZK circuits)
-
 ### Local Development
 
 ```bash
@@ -162,9 +156,6 @@ cd miner && uv sync && uv run pytest
 
 # Web client
 cd web && pnpm install && pnpm dev
-
-# ZK circuits
-cd circuits && npm install && npm test
 ```
 
 ---
@@ -265,9 +256,6 @@ cd web && pnpm vitest run
 
 # Web E2E tests
 cd web && pnpm test:e2e
-
-# ZK circuit tests
-cd circuits && npm test
 ```
 
 ### Docker
@@ -303,7 +291,6 @@ Base Sepolia (testnet):
 | Collateral | `0x06AAfF8643e99042f86f1EC93ED8A8BD36d6D9E7` |
 | Account | `0x7f5700896051f4af0F597135A39a6D9D24F8B2af` |
 | CreditLedger | `0x09de6d7B81ED73707364ee772eAdA7c191c8a4FC` |
-| TrackRecord | `0xd3FA108474eb4EfC79649a17472c5F7d729Ac08b` |
 | Audit | `0x4ca56d7e1D10Ec78C26C98a39b17f83Ca85b68c3` |
 | KeyRecovery | `0xbc88df681d3d40b3977e3693385f643166b7f54a` |
 | USDC (Test) | `0x99b566222EED94530dF3E8bdbd8Da1BBe8cC7a69` |

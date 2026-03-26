@@ -44,10 +44,8 @@ ESCROW_ADDR=$(get_addr "NEXT_PUBLIC_ESCROW_ADDRESS")
 COLLATERAL_ADDR=$(get_addr "NEXT_PUBLIC_COLLATERAL_ADDRESS")
 CREDIT_ADDR=$(get_addr "NEXT_PUBLIC_CREDIT_LEDGER_ADDRESS")
 ACCOUNT_ADDR=$(get_addr "NEXT_PUBLIC_ACCOUNT_ADDRESS")
-TRACK_RECORD_ADDR=$(get_addr "NEXT_PUBLIC_TRACK_RECORD_ADDRESS")
-
-# Get Audit and ZKVerifier from deploy log or hardcode
-# These aren't in web/.env since the frontend doesn't call them directly
+# Get Audit address from deploy log or hardcode
+# It isn't in web/.env since the frontend doesn't call it directly
 echo "=== Djinn Protocol — Ownership Transfer ==="
 echo "New owner: $NEW_OWNER"
 echo "RPC: $RPC_URL"
@@ -68,7 +66,6 @@ CONTRACTS=(
   "$COLLATERAL_ADDR:Collateral"
   "$CREDIT_ADDR:CreditLedger"
   "$ACCOUNT_ADDR:Account"
-  "$TRACK_RECORD_ADDR:TrackRecord"
 )
 
 for entry in "${CONTRACTS[@]}"; do
@@ -89,7 +86,6 @@ echo ""
 echo "Done! Verify new owner:"
 cast call "$SIGNAL_ADDR" "owner()(address)" --rpc-url "$RPC_URL"
 echo ""
-echo "NOTE: Audit and ZKVerifier contracts also need ownership transfer."
-echo "If you have their addresses, run:"
+echo "NOTE: Audit contract also needs ownership transfer."
+echo "If you have its address, run:"
 echo "  cast send <AUDIT_ADDR> 'transferOwnership(address)' $NEW_OWNER --private-key \$DEPLOYER_KEY --rpc-url $RPC_URL"
-echo "  cast send <ZKVERIFIER_ADDR> 'transferOwnership(address)' $NEW_OWNER --private-key \$DEPLOYER_KEY --rpc-url $RPC_URL"
