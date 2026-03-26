@@ -10,12 +10,6 @@ import { test, expect, type Page } from "@playwright/test";
  * flows are tested separately with mock providers in standard E2E.
  */
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 // ─────────────────────────────────────────────
 // Genius flow (no wallet)
 // ─────────────────────────────────────────────

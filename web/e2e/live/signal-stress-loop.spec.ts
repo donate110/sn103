@@ -30,7 +30,6 @@ import { appendFileSync, mkdirSync } from "fs";
 
 const BASE_URL = process.env.BASE_URL ?? "https://www.djinn.gg";
 const RPC_URL = "https://sepolia.base.org";
-const BETA_PASSWORD = process.env.E2E_BETA_PASSWORD || "djinnybaby";
 
 const DEPLOYER_KEY = (process.env.E2E_DEPLOYER_KEY ||
   "0x81e19d7374ca5143a1fc37a49622cd71b82a5bd206991a2d0d787d0c554a804f") as Hex; // Anvil test deployer
@@ -167,27 +166,6 @@ function deriveIdiotKey(geniusIdx: number, pass: number): Hex {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-async function bypassBetaGate(page: Page) {
-  // Beta gate uses httpOnly cookie set via /api/beta/verify POST.
-  // We call the API from the page context so the cookie gets set.
-  const result = await page.evaluate(async (pw) => {
-    try {
-      const res = await fetch("/api/beta/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: pw }),
-        credentials: "same-origin",
-      });
-      return { ok: res.ok, status: res.status };
-    } catch (e) {
-      return { ok: false, status: 0, error: String(e) };
-    }
-  }, BETA_PASSWORD);
-  if (!result.ok) {
-    logLine("WARN", `  Beta gate bypass failed: status=${result.status}`);
-  }
-}
 
 async function connectWallet(page: Page) {
   // Wait for the "Get Started" button to appear. isVisible() returns instantly
@@ -560,9 +538,6 @@ async function purchaseSignalById(
       await page.waitForTimeout(5_000);
     }
     await page.goto(`${BASE_URL}/idiot/signal/${signalId}`);
-    if (loadAttempt === 0) {
-      await bypassBetaGate(page);
-    }
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
 
@@ -772,8 +747,6 @@ async function purchaseFirstAvailableSignal(
   signalIndex = 0,
 ): Promise<boolean> {
   await page.goto(`${BASE_URL}/idiot/browse`);
-  await bypassBetaGate(page);
-  await page.reload();
   await page.waitForLoadState("domcontentloaded");
   await connectWallet(page);
 
@@ -783,20 +756,6 @@ async function purchaseFirstAvailableSignal(
   try {
     await heading.waitFor({ state: "visible", timeout: 15_000 });
   } catch {
-    // Heading didn't appear. Check if beta gate is blocking.
-    const hasBetaForm = await page.locator("input[aria-label='Beta password']").isVisible().catch(() => false);
-    if (hasBetaForm) {
-      logLine("INFO", "  Beta gate showing, submitting password via form...");
-      await page.locator("input[aria-label='Beta password']").fill(BETA_PASSWORD);
-      await page.locator("button[type='submit']").click();
-      try {
-        await heading.waitFor({ state: "visible", timeout: 10_000 });
-        logLine("OK", "  Beta gate bypassed via form");
-      } catch {
-        logLine("WARN", "  Browse page failed to load after beta form");
-        return false;
-      }
-    } else {
       const h1 = await page.locator("h1").first().textContent().catch(() => "none");
       logLine("WARN", `  Could not load browse signals page (h1="${h1}")`);
       return false;
@@ -1161,8 +1120,6 @@ async function ensureGeniusCollateral(
 
   // Try UI deposit first
   await page.goto(`${BASE_URL}/genius`);
-  await bypassBetaGate(page);
-  await page.reload();
   await page.waitForLoadState("domcontentloaded");
   await connectWallet(page);
 
@@ -1302,8 +1259,6 @@ async function ensureIdiotEscrow(
 
   // Try UI deposit
   await page.goto(`${BASE_URL}/idiot`);
-  await bypassBetaGate(page);
-  await page.reload();
   await page.waitForLoadState("domcontentloaded");
   await connectWallet(page);
 

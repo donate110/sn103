@@ -28,7 +28,6 @@ import { createHash } from "crypto";
 
 const BASE_URL = process.env.BASE_URL ?? "https://www.djinn.gg";
 const RPC_URL = "https://sepolia.base.org";
-const BETA_PASSWORD = process.env.E2E_BETA_PASSWORD || "djinnybaby";
 
 // Deployer key (can mint USDC, fund wallets) // Anvil test deployer
 const DEPLOYER_KEY = (process.env.E2E_DEPLOYER_KEY ||
@@ -58,13 +57,6 @@ const idiotAccount = privateKeyToAccount(IDIOT_KEY);
 const deployerAccount = privateKeyToAccount(DEPLOYER_KEY);
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-
-async function bypassBetaGate(page: Page) {
-  await page.evaluate((pw) => {
-    localStorage.setItem("djinn-beta-access", "true");
-    localStorage.setItem("djinn-beta-password", pw);
-  }, BETA_PASSWORD);
-}
 
 async function connectWallet(page: Page) {
   const connectBtn = page.getByRole("button", { name: /get started/i });
@@ -222,7 +214,7 @@ test.describe("Genius creates a signal through UI", () => {
   test("genius deposits collateral via UI", async ({ page }) => {
     test.setTimeout(90_000);
     await page.goto(`${BASE_URL}/genius`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -274,7 +266,7 @@ test.describe("Genius creates a signal through UI", () => {
     });
 
     await page.goto(`${BASE_URL}/genius/signal/new`);
-    await bypassBetaGate(page);
+
     // Pre-inject master seed (wallet-mock doesn't support signTypedData)
     await injectMasterSeed(page, geniusAccount);
     await page.reload();
@@ -544,7 +536,7 @@ test.describe("Idiot purchases a signal through UI", () => {
   test("idiot deposits escrow via UI", async ({ page }) => {
     test.setTimeout(90_000);
     await page.goto(`${BASE_URL}/idiot`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -577,7 +569,7 @@ test.describe("Idiot purchases a signal through UI", () => {
   test("idiot browses and purchases a signal", async ({ page }) => {
     test.setTimeout(180_000);
     await page.goto(`${BASE_URL}/idiot/browse`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -650,7 +642,7 @@ test.describe("Verify dashboards show activity", () => {
     });
 
     await page.goto(`${BASE_URL}/genius`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -675,7 +667,7 @@ test.describe("Verify dashboards show activity", () => {
     });
 
     await page.goto(`${BASE_URL}/idiot`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -692,11 +684,6 @@ test.describe("Verify dashboards show activity", () => {
     test.setTimeout(30_000);
 
     await page.goto(`${BASE_URL}/leaderboard`);
-    await page.evaluate((pw) => {
-      localStorage.setItem("djinn-beta-access", "true");
-      localStorage.setItem("djinn-beta-password", pw);
-    }, BETA_PASSWORD);
-    await page.reload();
     await page.waitForLoadState("domcontentloaded");
 
     await expect(page.getByRole("heading", { name: /leaderboard/i })).toBeVisible({ timeout: 15_000 });

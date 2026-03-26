@@ -5,12 +5,6 @@ import { test, expect } from "@playwright/test";
  * Monitors CSP reports to catch blocked resources.
  */
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 test.describe("CSP violation monitoring", () => {
   const pages = [
     { name: "Home", url: "/" },

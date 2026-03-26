@@ -1,11 +1,5 @@
 import { test, expect } from "@playwright/test";
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 // ─────────────────────────────────────────────
 // Idiot Dashboard — structure and content
 // ─────────────────────────────────────────────

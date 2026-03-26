@@ -1,12 +1,5 @@
 import { test, expect } from "@playwright/test";
 
-// Bypass beta gate by setting localStorage before each page load
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 test.describe("Home page", () => {
   test("renders DJINN branding and CTAs", async ({ page }) => {
     await page.goto("/");

@@ -1,11 +1,5 @@
 import { test, expect } from "@playwright/test";
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 test.describe("Live site smoke tests", () => {
   test("home page loads with branding", async ({ page }) => {
     await page.goto("/");

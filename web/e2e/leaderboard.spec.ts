@@ -1,11 +1,5 @@
 import { test, expect } from "@playwright/test";
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 test.describe("Leaderboard page", () => {
   test("renders leaderboard heading", async ({ page }) => {
     await page.goto("/leaderboard");

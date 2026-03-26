@@ -1,12 +1,5 @@
 import { test, expect } from "@playwright/test";
 
-// Bypass beta gate
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 test.describe("Signal creation page", () => {
   test("loads with Create Signal heading", async ({ page }) => {
     await page.goto("/genius/signal/new");

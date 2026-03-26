@@ -1,11 +1,5 @@
 import { test, expect } from "@playwright/test";
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 test.describe("Leaderboard sorting", () => {
   test("clicking column header toggles sort direction", async ({ page }) => {
     await page.goto("/leaderboard");

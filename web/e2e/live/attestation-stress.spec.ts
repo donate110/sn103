@@ -15,12 +15,6 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 // Attestation can take 30s-3min; give each test generous time
 test.describe.configure({ timeout: 330_000 });
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────

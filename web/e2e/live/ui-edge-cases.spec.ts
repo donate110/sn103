@@ -5,12 +5,6 @@ import { test, expect } from "@playwright/test";
  * responsive layouts, console errors, and navigation robustness.
  */
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 // ─────────────────────────────────────────────
 // Console error monitoring
 // ─────────────────────────────────────────────
@@ -45,34 +39,6 @@ test.describe("No console errors on page load", () => {
       expect(realErrors).toHaveLength(0);
     });
   }
-});
-
-// ─────────────────────────────────────────────
-// Beta gate enforcement
-// ─────────────────────────────────────────────
-
-test.describe("Beta gate", () => {
-  test("page loads with or without beta password", async ({ page }) => {
-    // Without beta access set, page should either show beta gate or content
-    // (depends on whether BETA_PASSWORD is set server-side)
-    await page.goto("/genius");
-    await page.waitForLoadState("networkidle");
-    const body = await page.locator("body").textContent();
-    // Should have some content — not a blank page
-    expect(body!.length).toBeGreaterThan(50);
-  });
-
-  test("with beta access flag, genius dashboard renders", async ({
-    page,
-  }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem("djinn-beta-access", "true");
-    });
-    await page.goto("/genius");
-    await expect(
-      page.getByRole("heading", { name: "Genius Dashboard" }),
-    ).toBeVisible({ timeout: 15_000 });
-  });
 });
 
 // ─────────────────────────────────────────────

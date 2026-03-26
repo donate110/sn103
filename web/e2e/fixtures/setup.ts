@@ -15,16 +15,10 @@ const TEST_PRIVATE_KEY =
 
 /**
  * Set up common page interceptors for authenticated E2E tests.
- * - Bypasses beta gate
  * - Mocks /api/odds to return deterministic events
  * - Mocks RPC calls for balance reads (so pages render without chain access)
  */
 export async function setupAuthenticatedPage(page: Page) {
-  // Bypass beta gate
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-
   // Mock the odds API
   await page.route("**/api/odds**", async (route) => {
     const url = new URL(route.request().url());

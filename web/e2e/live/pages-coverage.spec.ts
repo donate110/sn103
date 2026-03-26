@@ -6,12 +6,6 @@ import { test, expect } from "@playwright/test";
  * Also tests SEO meta tags, security headers, and footer links.
  */
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 // ─────────────────────────────────────────────
 // Press page
 // ─────────────────────────────────────────────

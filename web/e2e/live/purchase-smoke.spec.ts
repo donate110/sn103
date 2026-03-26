@@ -1,11 +1,5 @@
 import { test, expect } from "@playwright/test";
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 test.describe("Miner & Purchase Flow Smoke Tests", () => {
   test("miner health proxy returns ok", async ({ request }) => {
     const res = await request.get("/api/miner/health");

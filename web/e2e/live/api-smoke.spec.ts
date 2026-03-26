@@ -5,12 +5,6 @@ import { test, expect } from "@playwright/test";
  * edge cases, error handling, and rate limiting.
  */
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 // ─────────────────────────────────────────────
 // Health endpoints
 // ─────────────────────────────────────────────

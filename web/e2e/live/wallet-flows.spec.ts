@@ -21,8 +21,6 @@ import { baseSepolia } from "viem/chains";
 
 const BASE_URL = process.env.BASE_URL ?? "https://www.djinn.gg";
 const RPC_URL = "https://sepolia.base.org";
-const BETA_PASSWORD = process.env.E2E_BETA_PASSWORD || "";
-
 // Deployer key — same one that deployed contracts, has USDC minting rights
 const DEPLOYER_KEY = (process.env.E2E_DEPLOYER_KEY || "") as `0x${string}`;
 
@@ -58,13 +56,6 @@ const ERC20_ABI = [
 ] as const;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-async function bypassBetaGate(page: Page) {
-  await page.evaluate((pw) => {
-    localStorage.setItem("djinn-beta-access", "true");
-    localStorage.setItem("djinn-beta-password", pw);
-  }, BETA_PASSWORD);
-}
 
 async function connectWallet(page: Page) {
   // Click "Get Started" to open RainbowKit modal
@@ -196,7 +187,7 @@ test.describe("Genius connected flow", () => {
   test("genius can connect wallet and see dashboard", async ({ page }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/genius`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
 
@@ -225,7 +216,7 @@ test.describe("Genius connected flow", () => {
   test("genius can deposit collateral through UI", async ({ page }) => {
     test.setTimeout(60_000);
     await page.goto(`${BASE_URL}/genius`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -263,7 +254,7 @@ test.describe("Genius connected flow", () => {
   test("genius can navigate to create signal page", async ({ page }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/genius`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -296,7 +287,7 @@ test.describe("Genius connected flow", () => {
   }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/genius`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -317,7 +308,7 @@ test.describe("Genius connected flow", () => {
   test("genius dashboard shows history section", async ({ page }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/genius`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -332,7 +323,7 @@ test.describe("Genius connected flow", () => {
   test("genius dashboard shows settlement history section", async ({ page }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/genius`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -348,7 +339,7 @@ test.describe("Genius connected flow", () => {
   }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/genius`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -375,7 +366,7 @@ test.describe("Idiot connected flow", () => {
   test("idiot can connect wallet and see dashboard", async ({ page }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/idiot`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -396,7 +387,7 @@ test.describe("Idiot connected flow", () => {
   test("idiot can deposit USDC to escrow through UI", async ({ page }) => {
     test.setTimeout(60_000);
     await page.goto(`${BASE_URL}/idiot`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -431,7 +422,7 @@ test.describe("Idiot connected flow", () => {
   test("idiot can browse available signals", async ({ page }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/idiot`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -452,7 +443,7 @@ test.describe("Idiot connected flow", () => {
   test("idiot can see purchase history", async ({ page }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/idiot`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -470,7 +461,7 @@ test.describe("Idiot connected flow", () => {
   }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/idiot`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -490,7 +481,7 @@ test.describe("Idiot connected flow", () => {
   test("idiot dashboard shows settlement history", async ({ page }) => {
     test.setTimeout(30_000);
     await page.goto(`${BASE_URL}/idiot`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -519,7 +510,7 @@ test.describe("Cross-role signal visibility", () => {
     });
 
     await page.goto(`${BASE_URL}/genius/signal/new`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -557,7 +548,7 @@ test.describe("Cross-role signal visibility", () => {
     // Navigate to a signal detail with a dummy ID
     // The page should handle this gracefully (show not found or error)
     await page.goto(`${BASE_URL}/idiot/signal/999999`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await connectWallet(page);
@@ -586,7 +577,7 @@ test.describe("Leaderboard with connected wallet", () => {
     });
 
     await page.goto(`${BASE_URL}/leaderboard`);
-    await bypassBetaGate(page);
+
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
 
@@ -662,7 +653,7 @@ test.describe("No JS errors on connected pages", () => {
       });
 
       await page.goto(`${BASE_URL}${p.path}`);
-      await bypassBetaGate(page);
+  
       await page.reload();
       await page.waitForLoadState("domcontentloaded");
       await connectWallet(page);

@@ -523,10 +523,6 @@ test("cancel signal: cancel on-chain", async () => {
 test("verify: leaderboard page loads on djinn.gg", async ({ page }) => {
   test.skip(!hasFunds, "No ETH — fund E2E wallet first");
 
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-
   await page.goto("https://djinn.gg/leaderboard");
   await expect(
     page.getByRole("heading", { name: /leaderboard/i }),
@@ -550,10 +546,6 @@ test("verify: leaderboard page loads on djinn.gg", async ({ page }) => {
 test("verify: genius dashboard loads on djinn.gg", async ({ page }) => {
   test.skip(!hasFunds, "No ETH — fund E2E wallet first");
 
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-
   await page.goto("https://djinn.gg/genius");
   await expect(
     page.getByRole("heading", { name: "Genius Dashboard" }),
@@ -563,10 +555,6 @@ test("verify: genius dashboard loads on djinn.gg", async ({ page }) => {
 test("verify: idiot browse page loads on djinn.gg", async ({ page }) => {
   test.skip(!hasFunds, "No ETH — fund E2E wallet first");
 
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-
   await page.goto("https://djinn.gg/idiot");
   await expect(
     page.getByRole("heading", { name: "Idiot Dashboard" }),
@@ -575,10 +563,6 @@ test("verify: idiot browse page loads on djinn.gg", async ({ page }) => {
 
 test("verify: admin dashboard shows protocol activity", async ({ page }) => {
   test.skip(!hasFunds, "No ETH — fund E2E wallet first");
-
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
 
   await page.goto("https://djinn.gg/admin");
 

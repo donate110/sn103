@@ -6,12 +6,6 @@ import { test, expect } from "@playwright/test";
  * image loading, link validity, and edge cases.
  */
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem("djinn-beta-access", "true");
-  });
-});
-
 // ─────────────────────────────────────────────
 // Keyboard navigation and focus management
 // ─────────────────────────────────────────────

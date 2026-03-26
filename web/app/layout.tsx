@@ -3,7 +3,7 @@ import { Inter, Cinzel } from "next/font/google";
 import { Analytics } from "@vercel/analytics/react";
 import Providers from "./providers";
 import Layout from "@/components/Layout";
-import BetaGate from "@/components/BetaGate";
+
 import ServiceWorker from "@/components/ServiceWorker";
 import "./globals.css";
 
@@ -67,11 +67,9 @@ export default function RootLayout({
       <body className={`${inter.className} ${cinzel.variable}`}>
         <Analytics />
         <ServiceWorker />
-        <BetaGate>
-          <Providers>
-            <Layout>{children}</Layout>
-          </Providers>
-        </BetaGate>
+        <Providers>
+          <Layout>{children}</Layout>
+        </Providers>
       </body>
     </html>
   );
