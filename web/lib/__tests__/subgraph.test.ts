@@ -23,14 +23,6 @@ describe("subgraph", () => {
     });
   });
 
-  describe("fetchTrackRecordProofs", () => {
-    it("returns empty array when subgraph is not configured", async () => {
-      const { fetchTrackRecordProofs } = await import("../subgraph");
-      const result = await fetchTrackRecordProofs("0xBEEF");
-      expect(result).toEqual([]);
-    });
-  });
-
   describe("fetchProtocolStats", () => {
     it("returns null when subgraph is not configured", async () => {
       const { fetchProtocolStats } = await import("../subgraph");

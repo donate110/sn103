@@ -30,7 +30,6 @@ export const ADDRESSES = {
   ),
   account: safeAddress(process.env.NEXT_PUBLIC_ACCOUNT_ADDRESS, ZERO_ADDRESS),
   audit: safeAddress(process.env.NEXT_PUBLIC_AUDIT_ADDRESS, ZERO_ADDRESS),
-  trackRecord: safeAddress(process.env.NEXT_PUBLIC_TRACK_RECORD_ADDRESS, ZERO_ADDRESS),
   keyRecovery: safeAddress(process.env.NEXT_PUBLIC_KEY_RECOVERY_ADDRESS, ZERO_ADDRESS),
   usdc: safeAddress(
     process.env.NEXT_PUBLIC_USDC_ADDRESS,
@@ -122,17 +121,6 @@ export const AUDIT_ABI = [
   "event EarlyExitSettled(address indexed genius, address indexed idiot, uint256 cycle, int256 qualityScore, uint256 creditsAwarded)",
 ] as const;
 
-export const TRACK_RECORD_ABI = [
-  "function commitProof(bytes32 commitHash) external",
-  "function submit(uint256[2] _pA, uint256[2][2] _pB, uint256[2] _pC, uint256[106] _pubSignals) external returns (uint256 recordId)",
-  "function getRecord(uint256 recordId) external view returns (tuple(address genius, uint256 signalCount, uint256 totalGain, uint256 totalLoss, uint256 favCount, uint256 unfavCount, uint256 voidCount, bytes32 proofHash, uint256 submittedAt, uint256 blockNumber))",
-  "function getRecordCount(address genius) external view returns (uint256)",
-  "function getRecordIds(address genius) external view returns (uint256[])",
-  "function COMMIT_EXPIRY_BLOCKS() external view returns (uint256)",
-  "event ProofCommitted(address indexed genius, bytes32 commitHash, uint256 blockNumber)",
-  "event TrackRecordSubmitted(uint256 indexed recordId, address indexed genius, uint256 signalCount, uint256 totalGain, uint256 totalLoss, uint256 favCount, uint256 unfavCount, uint256 voidCount, bytes32 proofHash)",
-] as const;
-
 export const KEY_RECOVERY_ABI = [
   "function storeRecoveryBlob(bytes blob) external",
   "function getRecoveryBlob(address user) external view returns (bytes)",
@@ -204,16 +192,6 @@ export function getAuditContract(
   return new ethers.Contract(
     ADDRESSES.audit,
     AUDIT_ABI,
-    signerOrProvider
-  );
-}
-
-export function getTrackRecordContract(
-  signerOrProvider: ethers.Signer | ethers.Provider
-) {
-  return new ethers.Contract(
-    ADDRESSES.trackRecord,
-    TRACK_RECORD_ABI,
     signerOrProvider
   );
 }

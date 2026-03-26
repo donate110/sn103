@@ -170,6 +170,8 @@ class TestProofGeneratorWithSession:
         capture = SessionCapture()
         capture.record(self._make_session("q1"))
         gen = ProofGenerator(session_capture=capture)
+        # Force HTTP attestation path (skip TLSNotary binary even if installed)
+        gen._tlsn_available = False
 
         result = await gen.generate("q1")
 

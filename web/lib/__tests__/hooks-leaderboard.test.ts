@@ -29,7 +29,6 @@ describe("useLeaderboard", () => {
       totalAudits: "20",
       collateralDeposited: "1000000000",
       totalSlashed: "0",
-      totalTrackRecordProofs: "2",
     },
     {
       id: "0xGenius2",
@@ -42,7 +41,6 @@ describe("useLeaderboard", () => {
       totalAudits: "10",
       collateralDeposited: "500000000",
       totalSlashed: "50000000",
-      totalTrackRecordProofs: "1",
     },
   ];
 

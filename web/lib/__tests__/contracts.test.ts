@@ -6,14 +6,12 @@ import {
   COLLATERAL_ABI,
   CREDIT_LEDGER_ABI,
   ACCOUNT_ABI,
-  TRACK_RECORD_ABI,
   ERC20_ABI,
   getSignalCommitmentContract,
   getEscrowContract,
   getCollateralContract,
   getCreditLedgerContract,
   getAccountContract,
-  getTrackRecordContract,
   getUsdcContract,
   safeAddress,
 } from "../contracts";
@@ -26,7 +24,6 @@ describe("ADDRESSES", () => {
     expect(typeof ADDRESSES.creditLedger).toBe("string");
     expect(typeof ADDRESSES.account).toBe("string");
     expect(typeof ADDRESSES.usdc).toBe("string");
-    expect(typeof ADDRESSES.trackRecord).toBe("string");
     expect(typeof ADDRESSES.audit).toBe("string");
   });
 
@@ -66,19 +63,6 @@ describe("ABI definitions", () => {
   it("ACCOUNT_ABI is a non-empty array", () => {
     expect(Array.isArray(ACCOUNT_ABI)).toBe(true);
     expect(ACCOUNT_ABI.length).toBeGreaterThan(0);
-  });
-
-  it("TRACK_RECORD_ABI is a non-empty array", () => {
-    expect(Array.isArray(TRACK_RECORD_ABI)).toBe(true);
-    expect(TRACK_RECORD_ABI.length).toBeGreaterThan(0);
-  });
-
-  it("TRACK_RECORD_ABI contains expected function signatures", () => {
-    const abiStr = TRACK_RECORD_ABI.join("\n");
-    expect(abiStr).toContain("submit");
-    expect(abiStr).toContain("getRecord");
-    expect(abiStr).toContain("getRecordCount");
-    expect(abiStr).toContain("TrackRecordSubmitted");
   });
 
   it("ERC20_ABI is a non-empty array", () => {
@@ -172,10 +156,6 @@ describe("Contract factory functions", () => {
 
   it("getAccountContract is a function", () => {
     expect(typeof getAccountContract).toBe("function");
-  });
-
-  it("getTrackRecordContract is a function", () => {
-    expect(typeof getTrackRecordContract).toBe("function");
   });
 
   it("getUsdcContract is a function", () => {

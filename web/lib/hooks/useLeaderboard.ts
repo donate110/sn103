@@ -19,7 +19,7 @@ function toLeaderboardEntry(g: SubgraphGeniusEntry): GeniusLeaderboardEntry {
     totalSignals: Number(g.totalSignals),
     auditCount: Number(g.totalAudits),
     roi,
-    proofCount: Number(g.totalTrackRecordProofs || 0),
+    proofCount: 0, // ZK track record contract removed; placeholder for UI
     favCount: Number(g.totalFavorable || 0),
     unfavCount: Number(g.totalUnfavorable || 0),
     voidCount: Number(g.totalVoid || 0),

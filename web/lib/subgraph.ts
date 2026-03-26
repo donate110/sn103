@@ -21,22 +21,9 @@ export interface SubgraphGeniusEntry {
   totalAudits: string;
   collateralDeposited: string;
   totalSlashed: string;
-  totalTrackRecordProofs: string;
   totalFavorable?: string;
   totalUnfavorable?: string;
   totalVoid?: string;
-}
-
-export interface SubgraphTrackRecordProof {
-  id: string;
-  signalCount: string;
-  totalGain: string;
-  totalLoss: string;
-  favCount: string;
-  unfavCount: string;
-  voidCount: string;
-  proofHash: string;
-  submittedAt: string;
 }
 
 export interface SubgraphProtocolStats {
@@ -46,7 +33,6 @@ export interface SubgraphProtocolStats {
   totalAudits: string;
   uniqueGeniuses: string;
   uniqueIdiots: string;
-  totalTrackRecordProofs: string;
 }
 
 interface GraphQLResponse<T> {
@@ -109,7 +95,6 @@ export async function fetchLeaderboard(
       totalAudits
       collateralDeposited
       totalSlashed
-      totalTrackRecordProofs
       totalFavorable
       totalUnfavorable
       totalVoid
@@ -119,41 +104,8 @@ export async function fetchLeaderboard(
   return result?.geniuses ?? [];
 }
 
-/** Fetch track record proofs for a specific genius */
-export async function fetchTrackRecordProofs(
-  geniusAddress: string,
-): Promise<SubgraphTrackRecordProof[]> {
-  if (!ETH_ADDRESS_RE.test(geniusAddress)) return [];
-
-  const result = await querySubgraph<{
-    trackRecordProofs: SubgraphTrackRecordProof[];
-  }>(
-    `query($genius: String!) {
-      trackRecordProofs(
-        where: { genius: $genius }
-        orderBy: submittedAt
-        orderDirection: desc
-        first: 50
-      ) {
-        id
-        signalCount
-        totalGain
-        totalLoss
-        favCount
-        unfavCount
-        voidCount
-        proofHash
-        submittedAt
-      }
-    }`,
-    { genius: geniusAddress.toLowerCase() },
-  );
-
-  return result?.trackRecordProofs ?? [];
-}
-
 // ---------------------------------------------------------------------------
-// Genius signal queries (for track record proof auto-population)
+// Genius signal queries
 // ---------------------------------------------------------------------------
 
 export interface SubgraphSignalPurchase {
@@ -225,7 +177,6 @@ export async function fetchProtocolStats(): Promise<SubgraphProtocolStats | null
       totalAudits
       uniqueGeniuses
       uniqueIdiots
-      totalTrackRecordProofs
     }
   }`);
 
@@ -270,19 +221,6 @@ export interface SubgraphRecentAudit {
   isEarlyExit: boolean;
   settledAt: string;
   settledAtTx: string;
-}
-
-export interface SubgraphRecentTrackRecord {
-  id: string;
-  genius: { id: string };
-  signalCount: string;
-  totalGain: string;
-  totalLoss: string;
-  favCount: string;
-  unfavCount: string;
-  voidCount: string;
-  submittedAt: string;
-  submittedAtTx: string;
 }
 
 /** Fetch recent signals across all geniuses (newest first) */
@@ -348,26 +286,3 @@ export async function fetchRecentAudits(
   return result?.auditResults ?? [];
 }
 
-/** Fetch recent track record proof submissions (newest first) */
-export async function fetchRecentTrackRecordProofs(
-  limit = 50,
-): Promise<SubgraphRecentTrackRecord[]> {
-  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
-  const result = await querySubgraph<{
-    trackRecordProofs: SubgraphRecentTrackRecord[];
-  }>(`{
-    trackRecordProofs(first: ${safeLimit}, orderBy: submittedAt, orderDirection: desc) {
-      id
-      genius { id }
-      signalCount
-      totalGain
-      totalLoss
-      favCount
-      unfavCount
-      voidCount
-      submittedAt
-      submittedAtTx
-    }
-  }`);
-  return result?.trackRecordProofs ?? [];
-}
