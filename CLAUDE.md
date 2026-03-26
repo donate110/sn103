@@ -1,7 +1,7 @@
 # Djinn Protocol
 
 ## What This Is
-Djinn unbundles information from execution in sports betting. Analysts (Geniuses) sell encrypted predictions. Buyers (Idiots) purchase access. Signals stay secret forever. Track records are cryptographically verifiable. Built on Bittensor Subnet 103 and Base chain, settled in USDC.
+Djinn unbundles information from execution in sports betting. Analysts (Geniuses) sell encrypted predictions. Buyers (Idiots) purchase access. Signals stay secret via Shamir sharing and MPC. Track records are publicly verifiable on-chain from finalized audit settlements. Built on Bittensor Subnet 103 and Base chain, settled in USDC.
 
 ## Source of Truth
 - `djinn/docs/whitepaper.md` is the DESIGN INTENT
@@ -14,23 +14,21 @@ Djinn unbundles information from execution in sports betting. Analysts (Geniuses
 - Internal architecture, data flow, crypto implementation details: make the right call and document it
 
 ## Tech Stack
-- **Smart Contracts:** Solidity, Foundry (forge) for testing/deployment, Base chain
-- **ZK Circuits:** circom 2 + snarkjs, Groth16 over BN254 (switch to PLONK if proving time exceeds 10s on consumer hardware — log in DEVIATIONS.md)
-- **Web Client:** Next.js 14 (app router), TypeScript, Tailwind, ethers.js v6, snarkjs
-- **Bittensor Validators:** Python 3.11+, bittensor SDK
-- **Bittensor Miners:** Python 3.11+, tlsn for TLSNotary
+- **Smart Contracts:** Solidity, Foundry (forge) for testing/deployment, Base chain (UUPS proxies, TimelockController governance)
+- **Web Client:** Next.js 14 (app router), TypeScript, Tailwind, ethers.js v6
+- **Bittensor Validators:** Python 3.11+, bittensor SDK, MPC (Beaver triples, OT-based triple generation)
+- **Bittensor Miners:** Python 3.11+, TLSNotary for web attestations
 - **Indexing:** The Graph (subgraph in AssemblyScript)
 - **Package managers:** pnpm for JS/TS, uv for Python
 
 ## Project Structure
 ```
 djinn/
-├── contracts/          # Foundry project — all Solidity
-├── circuits/           # circom circuits + snarkjs scripts
+├── contracts/          # Foundry project -- Solidity (UUPS proxies)
 ├── web/                # Next.js client application
-├── validator/          # Bittensor validator (Python)
-├── miner/              # Bittensor miner (Python)
-├── subgraph/           # The Graph subgraph
+├── validator/          # Bittensor validator (Python, MPC orchestrator)
+├── miner/              # Bittensor miner (Python, TLSNotary prover)
+├── subgraph/           # The Graph subgraph (AssemblyScript)
 ├── docs/               # Whitepaper and specs
 ├── scripts/            # Deployment, setup, utilities
 ├── DEVIATIONS.md       # Append-only log of whitepaper deviations
@@ -49,15 +47,14 @@ djinn/
 
 ## Testing Requirements
 - **Contracts:** Foundry unit tests + integration tests + fuzz tests on all financial math
-- **ZK:** Circuit constraint tests + proof generation/verification roundtrips
 - **Validator/Miner:** pytest with mocked network layer
 - **Web client:** Vitest unit tests + Playwright E2E for critical flows
 - **Every component must have passing tests before moving to the next phase**
 
 ## Git Workflow
 - **Repo:** `djinn-inc/djinn` on GitHub. Building in public.
-- **Branching:** Feature branch per phase (`phase-1/contracts`, `phase-2/circuits`, etc.). Merge to `main` when the phase passes all tests.
-- **Commit cadence:** Commit after each meaningful unit of work (one contract + its tests, one circuit, one major client flow). Descriptive messages.
+- **Branching:** Feature branch per phase. Merge to `main` when the phase passes all tests.
+- **Commit cadence:** Commit after each meaningful unit of work (one contract + its tests, one major client flow). Descriptive messages.
 - **Push cadence:** Push at the end of every session and after completing each major component within a phase. Never let unpushed work accumulate across sessions.
 - **Do NOT push secrets.** Use `.env` files (gitignored) for API keys, private keys, RPC URLs. A `.env.example` with placeholder values goes in the repo.
 
