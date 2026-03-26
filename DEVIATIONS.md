@@ -29,20 +29,13 @@ See the whitepaper for design intent.
 **Production TODO:** Replace with SPDZ-style MPC or garbled circuit evaluation to prevent the aggregator from learning the secret. The protocol interface (compute_local_contribution → check_availability) is designed to be swappable.
 **Impact:** Security — in production, the aggregator validator would learn which line is real. Functionally correct (single-bit output is correct). Privacy guarantee weakened until production MPC is implemented.
 
-## DEV-004: Groth16 Instead of PLONK
+## DEV-004: Groth16 Instead of PLONK [SUPERSEDED]
 
-**Whitepaper Section:** ZK Circuits
-**CLAUDE.md Says:** "Switch to PLONK if proving time exceeds 10s on consumer hardware"
-**What we did:** Groth16 proving time for both circuits is well under 10s. Keeping Groth16 for smaller proof size (128 bytes vs ~1KB) and faster on-chain verification.
-**Impact:** None — Groth16 is strictly better for our circuit sizes.
+**Status:** Superseded by DEV-015. ZK circuits and on-chain verifiers removed (2026-03-25). Track records are computed from public on-chain audit settlements. No ZK proofs needed.
 
-## DEV-005: TrackRecord Circuit MAX_SIGNALS Reduced 64 → 20
+## DEV-005: TrackRecord Circuit MAX_SIGNALS Reduced 64 → 20 [SUPERSEDED]
 
-**Whitepaper Section:** ZK Circuits — Track Record Proof
-**Whitepaper Implies:** Large aggregate track records (hundreds of signals)
-**What we did:** Reduced MAX_SIGNALS from 64 to 20 to fit the Groth16 verifier under the EVM 24KB contract size limit. At 64 signals the verifier had 326 public inputs → 32KB bytecode (exceeds limit). At 20 signals: 106 public inputs → 11KB bytecode.
-**Why:** Groth16 verifier size scales linearly with public inputs. Each public input adds two EC point constants (~100 bytes bytecode). 64 signals is 5.5x over the EVM limit with no way to optimize the generated verifier code.
-**Impact:** Geniuses generating track record proofs for >20 signals must batch into multiple proofs. 20 signals covers ~3 weeks of daily activity. Proofs are composable — aggregate two sub-proofs' statistics off-chain. Non-breaking for users.
+**Status:** Superseded by DEV-015. TrackRecord.sol, ZKVerifier.sol, and Groth16 verifiers removed (2026-03-25). Track records are computed from public on-chain audit settlements.
 
 ## DEV-006: Secure MPC Implemented with Beaver Triples [UPDATES DEV-003]
 
@@ -163,7 +156,7 @@ See the whitepaper for design intent.
 **Whitepaper Section:** Section 5 (Purchase step 6), Section 9 (Wallet-Based Key Recovery)
 **Whitepaper Says:** "Bob's browser re-encrypts the signal key to Bob's wallet public key and posts it on-chain for recovery from any device."
 **What we did:** Only genius-side recovery is implemented. After purchase, the idiot's reconstructed AES key is used to decrypt but is not persisted for recovery.
-**Why:** Focused on genius recovery first (higher stakes — genius needs preimages for ZK proofs). Idiot recovery is lower priority since the decrypted pick is ephemeral information.
+**Why:** Focused on genius recovery first (higher stakes -- genius needs preimages to reconstruct signal details). Idiot recovery is lower priority since the decrypted pick is ephemeral information.
 **Impact:** If an idiot clears browser cache, they cannot re-decrypt a previously purchased signal from another device. The purchase itself is recorded on-chain, so settlement/audit is unaffected.
 
 ## DEV-016: Index Shares Not Distributed for MPC [RESOLVED]
