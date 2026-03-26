@@ -18,6 +18,8 @@ const IncentiveChart = dynamic(() => import("@/components/network/IncentiveChart
 
 interface ValidatorData {
   uid: number;
+  ip: string;
+  port: number;
   stake: string;
   validatorTrust: number;
   health: {
@@ -34,6 +36,14 @@ interface MinerData {
   ip: string;
   incentive: number;
   emission: string;
+  weight?: number;
+  attestations_total?: number;
+  attestations_valid?: number;
+  lifetime_attestations?: number;
+  lifetime_attestations_valid?: number;
+  proactive_proof_verified?: boolean;
+  uptime?: number;
+  accuracy?: number;
 }
 
 interface Summary {
@@ -113,8 +123,12 @@ function ValidatorTable({ validators }: { validators: ValidatorData[] }) {
         </thead>
         <tbody>
           {sorted.map((v) => (
-            <tr key={v.uid} className="border-b border-slate-100 hover:bg-slate-50">
-              <td className="px-3 py-2 font-mono font-medium">{v.uid}</td>
+            <tr key={v.uid} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => window.location.href = `/network/validator/${v.uid}`}>
+              <td className="px-3 py-2 font-mono font-medium">
+                <Link href={`/network/validator/${v.uid}`} className="text-blue-600 hover:text-blue-800 hover:underline" onClick={(e) => e.stopPropagation()}>
+                  {v.uid}
+                </Link>
+              </td>
               <td className="px-3 py-2"><StatusBadge status={v.health?.status || "unreachable"} /></td>
               <td className="px-3 py-2 text-right font-mono text-slate-600">{v.health?.version || "-"}</td>
               <td className="px-3 py-2 text-right">{formatStake(v.stake)}</td>
@@ -130,6 +144,27 @@ function ValidatorTable({ validators }: { validators: ValidatorData[] }) {
   );
 }
 
+function AttestBadge({ valid, total, proactive }: { valid: number; total: number; proactive?: boolean }) {
+  if (total === 0 && !proactive) return <span className="text-slate-300">-</span>;
+  const rate = total > 0 ? valid / total : 0;
+  const color =
+    proactive && valid === 0
+      ? "text-amber-600" // proactive proof only, no challenge results yet
+      : rate >= 0.8
+        ? "text-emerald-600"
+        : rate >= 0.5
+          ? "text-amber-600"
+          : total > 0
+            ? "text-red-500"
+            : "text-slate-400";
+  return (
+    <span className={`font-mono ${color}`}>
+      {valid}/{total}
+      {proactive && valid === 0 && <span className="text-[10px] ml-1" title="Proactive proof verified">P</span>}
+    </span>
+  );
+}
+
 function MinerTable({ miners }: { miners: MinerData[] }) {
   const getVal = useCallback((m: MinerData, key: string): number | string => {
     switch (key) {
@@ -137,11 +172,19 @@ function MinerTable({ miners }: { miners: MinerData[] }) {
       case "ip": return m.ip;
       case "incentive": return m.incentive;
       case "emission": return parseFloat(m.emission);
+      case "weight": return m.weight ?? 0;
+      case "attest": {
+        const t = m.lifetime_attestations ?? m.attestations_total ?? 0;
+        const v = m.lifetime_attestations_valid ?? m.attestations_valid ?? 0;
+        return t > 0 ? v / t : -1;
+      }
+      case "uptime": return m.uptime ?? 0;
       default: return 0;
     }
   }, []);
   const { sorted, sortKey, sortDir, toggle } = useSortable(miners, "incentive", "desc", getVal);
   if (!miners.length) return <p className="text-sm text-slate-400 py-4 px-3">No miners discovered.</p>;
+  const hasScoring = miners.some((m) => m.weight !== undefined);
   const Th = ({ k, children, align }: { k: string; children: React.ReactNode; align?: string }) => (
     <th className={`px-3 py-2 cursor-pointer select-none hover:text-slate-600 ${align || ""}`} onClick={() => toggle(k)}>
       {children}<SortArrow active={sortKey === k} dir={sortDir} />
@@ -156,52 +199,45 @@ function MinerTable({ miners }: { miners: MinerData[] }) {
             <Th k="ip">IP</Th>
             <Th k="incentive" align="text-right">Incentive</Th>
             <Th k="emission" align="text-right">Emission</Th>
-            <th className="px-3 py-2 text-right">Details</th>
+            {hasScoring && <Th k="weight" align="text-right">Weight</Th>}
+            {hasScoring && <Th k="uptime" align="text-right">Uptime</Th>}
+            {hasScoring && <Th k="attest" align="text-right">Attest</Th>}
           </tr>
         </thead>
         <tbody>
-          {sorted.map((m) => (
-            <tr key={m.uid} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => window.location.href = `/network/miner/${m.uid}`}>
-              <td className="px-3 py-2 font-mono font-medium">
-                <Link href={`/network/miner/${m.uid}`} className="text-blue-600 hover:text-blue-800 hover:underline" onClick={(e) => e.stopPropagation()}>
-                  {m.uid}
-                </Link>
-              </td>
-              <td className="px-3 py-2 font-mono text-xs text-slate-500">{m.ip !== "0.0.0.0" ? m.ip : "-"}</td>
-              <td className="px-3 py-2 text-right">{u16ToPercent(m.incentive)}</td>
-              <td className="px-3 py-2 text-right font-mono">{formatStake(m.emission)}</td>
-              <td className="px-3 py-2 text-right">
-                <Link href={`/network/miner/${m.uid}`} className="text-xs text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()}>
-                  View
-                </Link>
-              </td>
-            </tr>
-          ))}
+          {sorted.map((m) => {
+            const aTotal = m.lifetime_attestations ?? m.attestations_total ?? 0;
+            const aValid = m.lifetime_attestations_valid ?? m.attestations_valid ?? 0;
+            return (
+              <tr key={m.uid} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => window.location.href = `/network/miner/${m.uid}`}>
+                <td className="px-3 py-2 font-mono font-medium">
+                  <Link href={`/network/miner/${m.uid}`} className="text-blue-600 hover:text-blue-800 hover:underline" onClick={(e) => e.stopPropagation()}>
+                    {m.uid}
+                  </Link>
+                </td>
+                <td className="px-3 py-2 font-mono text-xs text-slate-500">{m.ip !== "0.0.0.0" ? m.ip : "-"}</td>
+                <td className="px-3 py-2 text-right">{u16ToPercent(m.incentive)}</td>
+                <td className="px-3 py-2 text-right font-mono">{formatStake(m.emission)}</td>
+                {hasScoring && (
+                  <td className="px-3 py-2 text-right font-mono">
+                    {m.weight !== undefined ? m.weight.toFixed(4) : "-"}
+                  </td>
+                )}
+                {hasScoring && (
+                  <td className="px-3 py-2 text-right">
+                    {m.uptime !== undefined ? `${(m.uptime * 100).toFixed(0)}%` : "-"}
+                  </td>
+                )}
+                {hasScoring && (
+                  <td className="px-3 py-2 text-right">
+                    <AttestBadge valid={aValid} total={aTotal} proactive={m.proactive_proof_verified} />
+                  </td>
+                )}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-function MinerSearch() {
-  const [uid, setUid] = useState("");
-  const go = () => { if (uid.trim()) window.location.href = `/network/miner/${uid.trim()}`; };
-  return (
-    <div className="card">
-      <h2 className="text-lg font-semibold text-slate-900 mb-1">Miner Lookup</h2>
-      <p className="text-sm text-slate-500 mb-4">Enter a miner UID or click any UID in the table above.</p>
-      <div className="flex gap-2">
-        <input
-          type="number" value={uid} onChange={(e) => setUid(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && go()}
-          placeholder="Enter miner UID"
-          className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-        />
-        <button onClick={go} disabled={!uid.trim()}
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
-          View Miner
-        </button>
-      </div>
     </div>
   );
 }
@@ -334,10 +370,6 @@ export default function NetworkPage() {
         </div>
       </section>
 
-      {/* Miner search */}
-      <section className="mb-8">
-        <MinerSearch />
-      </section>
     </div>
   );
 }

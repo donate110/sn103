@@ -45,6 +45,66 @@ function computeGini(values: number[]): number {
   return (2 * weightedSum) / (n * total) - (n + 1) / n;
 }
 
+// In-memory scoring cache (120s TTL). Scoring data changes slowly
+// (epoch-level) so caching avoids re-fetching on every page load.
+interface ScoringEntry {
+  weight: number;
+  attestations_total: number;
+  attestations_valid: number;
+  lifetime_attestations: number;
+  lifetime_attestations_valid: number;
+  proactive_proof_verified: boolean;
+  uptime: number;
+  accuracy: number;
+  queries_total: number;
+  queries_correct: number;
+  notary_duties_assigned: number;
+  notary_duties_completed: number;
+}
+let scoringCache: { data: Record<number, ScoringEntry>; fetchedAt: number } | null = null;
+const SCORING_CACHE_TTL = 120_000;
+
+async function fetchScoringData(
+  ip: string,
+  port: number,
+): Promise<Record<number, ScoringEntry>> {
+  const now = Date.now();
+  if (scoringCache && now - scoringCache.fetchedAt < SCORING_CACHE_TTL) {
+    return scoringCache.data;
+  }
+  const result: Record<number, ScoringEntry> = {};
+  try {
+    const res = await fetch(
+      `http://${ip}:${port}/v1/network/miners`,
+      { signal: AbortSignal.timeout(5000), cache: "no-store" },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      for (const m of data.miners || []) {
+        result[m.uid] = {
+          weight: m.weight ?? 0,
+          attestations_total: m.attestations_total ?? 0,
+          attestations_valid: m.attestations_valid ?? 0,
+          lifetime_attestations: m.lifetime_attestations ?? 0,
+          lifetime_attestations_valid: m.lifetime_attestations_valid ?? 0,
+          proactive_proof_verified: m.proactive_proof_verified ?? false,
+          uptime: m.uptime ?? 0,
+          accuracy: m.accuracy ?? 0,
+          queries_total: m.queries_total ?? 0,
+          queries_correct: m.queries_correct ?? 0,
+          notary_duties_assigned: m.notary_duties_assigned ?? 0,
+          notary_duties_completed: m.notary_duties_completed ?? 0,
+        };
+      }
+      scoringCache = { data: result, fetchedAt: now };
+    }
+  } catch {
+    // Best-effort; return stale cache or empty
+    if (scoringCache) return scoringCache.data;
+  }
+  return result;
+}
+
 export async function GET() {
   try {
     const { nodes } = await discoverMetagraph();
@@ -64,10 +124,22 @@ export async function GET() {
     // Also include miners with 0.0.0.0 (ghost nodes) for completeness
     const allMiners = nodes.filter((n) => !n.isValidator);
 
-    // Probe validators
-    const valHealthResults = await Promise.allSettled(
-      validators.map((v) => probeHealth(v.ip, v.port, v.uid)),
-    );
+    // Pick top-stake validator for scoring data (by metagraph stake,
+    // before health probes finish). If it's down, fetch fails gracefully.
+    const topStakeVal = [...validators].sort(
+      (a, b) => (b.totalStake > a.totalStake ? 1 : -1),
+    )[0];
+
+    // Fire health probes and scoring fetch in parallel
+    const [valHealthResults, scoringData] = await Promise.all([
+      Promise.allSettled(
+        validators.map((v) => probeHealth(v.ip, v.port, v.uid)),
+      ),
+      topStakeVal
+        ? fetchScoringData(topStakeVal.ip, topStakeVal.port)
+        : Promise.resolve({} as Record<number, ScoringEntry>),
+    ]);
+
     const healthMap: Record<number, HealthResult> = {};
     for (const r of valHealthResults) {
       if (r.status === "fulfilled") healthMap[r.value.uid] = r.value;
@@ -141,6 +213,7 @@ export async function GET() {
         stake: n.totalStake.toString(),
         incentive: n.incentive,
         emission: n.emission.toString(),
+        ...(scoringData[n.uid] || {}),
       }));
 
     return NextResponse.json(
