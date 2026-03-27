@@ -15,6 +15,8 @@ const GLOSSARY: Record<string, string> = {
   "UUPS proxy": "Universal Upgradeable Proxy Standard: a smart contract pattern where users interact with a permanent proxy address, while the underlying logic can be upgraded through a governance process (in Djinn's case, a 72-hour timelock).",
   "decoy lines": "Nine fake betting lines bundled with the real pick inside a signal. They make it impossible for anyone (including validators) to determine which line is the actual prediction without reconstructing the Shamir secret.",
   SLA: "Service-Level Agreement: the terms a Genius commits to when creating a signal. The SLA multiplier determines how much collateral is slashed if predictions underperform.",
+  "blind resolution": "Validators resolve ALL 10 lines (real + 9 decoys) against game results, producing 10 outcomes. No single validator knows which outcome corresponds to the real pick. The correct outcome is selected later during MPC settlement.",
+  ESPN: "ESPN's public scoreboard API provides free, real-time game scores. Djinn validators use ESPN to determine game outcomes without requiring paid API keys.",
 };
 
 interface TooltipProps {

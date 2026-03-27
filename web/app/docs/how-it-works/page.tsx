@@ -68,8 +68,9 @@ export default function HowItWorks() {
 
         <Step number="3" title="The game happens" color="slate">
           The sporting event plays out. Validators independently query official sports data sources
-          to determine the outcome. No human judgment is involved. The protocol waits for the game
-          to finish before proceeding.
+          (ESPN) to determine final scores. They resolve ALL 10 lines (real + decoys) against the
+          game result, producing 10 outcomes. No single validator knows which outcome is real. The
+          real outcome is selected later during MPC settlement.
         </Step>
 
         <Step number="4" title="MPC settlement" color="slate">
