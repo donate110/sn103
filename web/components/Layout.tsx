@@ -15,9 +15,8 @@ const NAV_LINKS = [
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/network", label: "Network" },
   { href: "/attest", label: "Attest" },
+  { href: "/docs", label: "Docs" },
   { href: "/about", label: "About" },
-  { href: "/education", label: "Education" },
-  { href: "/press", label: "Press" },
 ] as const;
 
 const IS_TESTNET = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "84532") !== 8453;
