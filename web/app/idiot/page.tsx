@@ -214,18 +214,45 @@ export default function IdiotDashboard() {
 
   if (!isConnected) {
     return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <div className="w-16 h-16 rounded-full bg-idiot-100 flex items-center justify-center mb-6">
-          <svg className="w-8 h-8 text-idiot-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
-          </svg>
+      <div className="max-w-lg mx-auto py-12">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-12 h-12 rounded-full bg-idiot-100 flex items-center justify-center">
+            <svg className="w-6 h-6 text-idiot-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
+            </svg>
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Idiot Dashboard</h1>
+            <p className="text-sm text-slate-500">Browse signals, buy picks from verified analysts</p>
+          </div>
         </div>
-        <h1 className="text-3xl font-bold text-slate-900 mb-2">Idiot Dashboard</h1>
-        <p className="text-slate-500 mb-6">
-          Connect your wallet to browse signals, make purchases, and track settlements.
-        </p>
-        <p className="text-xs text-slate-400">
-          Use the Connect button in the top right corner.
+
+        <div className="rounded-xl border border-slate-200 bg-white p-5 mb-6">
+          <h3 className="font-semibold text-slate-900 text-sm mb-4">Getting started</h3>
+          <div className="space-y-3">
+            {[
+              { step: "1", label: "Connect your wallet", hint: "Click \"Get Started\" in the top right. We recommend Coinbase Smart Wallet: free to create, no gas fees, works with just an email.", active: true },
+              { step: "2", label: "Switch to Base network", hint: "Your wallet will prompt you. Base is Coinbase's fast, cheap blockchain." },
+              { step: "3", label: "Get USDC on Base", hint: "USDC is a stablecoin worth $1. Start small ($10-50) while you learn." },
+              { step: "4", label: "Deposit to escrow", hint: "Your escrow balance is what you use to buy signals from Geniuses." },
+              { step: "5", label: "Browse and buy signals", hint: "Check track records, buy picks, and track your results." },
+            ].map(({ step, label, hint, active }) => (
+              <div key={step} className="flex items-start gap-3">
+                <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${active ? "bg-idiot-100 text-idiot-700" : "bg-slate-100 text-slate-400"}`}>
+                  {step}
+                </div>
+                <div>
+                  <p className={`text-sm font-medium ${active ? "text-slate-900" : "text-slate-400"}`}>{label}</p>
+                  {active && <p className="text-xs text-slate-500 mt-0.5">{hint}</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <p className="text-xs text-slate-400 text-center">
+          New to crypto?{" "}
+          <a href="/docs/how-it-works" className="text-slate-600 underline">Learn how Djinn works</a>
         </p>
       </div>
     );
