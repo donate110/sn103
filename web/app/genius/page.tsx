@@ -180,10 +180,10 @@ export default function GeniusDashboard() {
           <h3 className="font-semibold text-slate-900 text-sm mb-4">Getting started</h3>
           <div className="space-y-3">
             {[
-              { step: "1", label: "Connect your wallet", hint: "Use the \"Get Started\" button in the top right. We recommend Coinbase Smart Wallet (free gas on Base).", active: true },
-              { step: "2", label: "Switch to Base network", hint: "Your wallet will prompt you to switch." },
-              { step: "3", label: "Get USDC on Base", hint: "Buy USDC in Coinbase Wallet, or bridge from Ethereum." },
-              { step: "4", label: "Deposit collateral", hint: "Collateral backs your signals and builds trust." },
+              { step: "1", label: "Connect your wallet", hint: "Click \"Get Started\" in the top right. We recommend Coinbase Smart Wallet: free to create, no gas fees, works with just an email.", active: true },
+              { step: "2", label: "Switch to Base network", hint: "Your wallet will prompt you. Base is Coinbase's fast, cheap blockchain." },
+              { step: "3", label: "Get USDC on Base", hint: "USDC is a stablecoin worth $1. Start small ($10-50) while you learn." },
+              { step: "4", label: "Deposit collateral", hint: "Your \"skin in the game.\" Backs your predictions; slashed if you underperform." },
               { step: "5", label: "Create your first signal", hint: "Pick a game, set your price, and start selling." },
             ].map(({ step, label, hint, active }) => (
               <div key={step} className="flex items-start gap-3">

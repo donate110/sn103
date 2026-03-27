@@ -191,22 +191,31 @@ export default function OnboardingChecklist({ role }: OnboardingChecklistProps) 
       {/* Collapsible body */}
       {!collapsed && (
         <div className="px-5 pb-4 border-t border-slate-100">
+          {/* Safety tip */}
+          <div className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 my-3">
+            <p className="text-xs text-amber-800">
+              <strong>Safety tip:</strong> Only deposit what you can afford to lose.
+              Smart contracts carry inherent risk. Start small to learn how everything
+              works before committing larger amounts.
+            </p>
+          </div>
+
           <div className="divide-y divide-slate-100">
             <CheckItem
               done={isConnected}
               label="Connect wallet"
-              hint="Use Coinbase Smart Wallet (recommended, free gas) or any WalletConnect wallet."
+              hint="Your wallet is how you sign transactions and prove your identity. We recommend Coinbase Smart Wallet: it's free to create, has no gas fees on Base, and works with just an email. You can also use MetaMask or any WalletConnect wallet."
             />
             <CheckItem
               done={onCorrectChain}
               label="Switch to Base network"
-              hint="Djinn runs on Base (Coinbase L2). Your wallet should prompt you to switch."
+              hint="Djinn's smart contracts live on Base, a fast and cheap Ethereum Layer 2 built by Coinbase. Your wallet should prompt you to switch automatically. If not, you can add Base manually (Chain ID: 8453)."
             />
             <CheckItem
               done={hasUsdc}
               loading={usdcLoading}
               label={`Get USDC on Base${hasUsdc ? "" : ` (you have $${usdcAmount.toFixed(2)})`}`}
-              hint="Buy USDC directly in Coinbase Wallet, or bridge from Ethereum. Gas fees on Base are under $0.01."
+              hint="USDC is a stablecoin worth $1. Djinn uses it for all payments and deposits so your balance doesn't fluctuate with crypto prices. Buy USDC directly in Coinbase Wallet with a debit card, or bridge USDC from another chain. Start with a small amount ($10-50) while you learn."
               action={{
                 label: "Get USDC on Coinbase",
                 href: "https://www.coinbase.com/how-to-buy/usd-coin",
@@ -216,7 +225,11 @@ export default function OnboardingChecklist({ role }: OnboardingChecklistProps) 
               done={hasDeposit}
               loading={depositLoading}
               label={`Deposit USDC to ${depositLabel}${hasDeposit ? "" : ` ($${depositAmount.toFixed(2)} deposited)`}`}
-              hint={depositHint}
+              hint={
+                role === "genius"
+                  ? "Collateral is your \"skin in the game.\" It backs your predictions: if you underperform, your collateral is slashed to compensate buyers. Use the deposit form below. The first time, your wallet will ask you to approve USDC spending (a one-time permission), then confirm the deposit."
+                  : "Your escrow balance is what you use to buy signals. When you purchase a signal, the fee comes from this balance. Use the deposit form below. The first time, your wallet will ask you to approve USDC spending (a one-time permission), then confirm the deposit."
+              }
             />
           </div>
         </div>
