@@ -16,7 +16,7 @@ import { getSavedSignals, saveSavedSignalsEncrypted } from "@/lib/hooks/useSettl
 import { getCachedMasterSeed } from "@/lib/crypto";
 import { readRecoveryBlobFromChain, loadRecovery } from "@/lib/recovery";
 import SignalPlot from "@/components/SignalPlot";
-import OnboardingChecklist from "@/components/OnboardingChecklist";
+import OnboardingChecklist, { triggerOnboardingRefresh } from "@/components/OnboardingChecklist";
 
 export default function IdiotDashboard() {
   const { isConnected, address } = useAccount();
@@ -190,6 +190,7 @@ export default function IdiotDashboard() {
       setDepositAmount("");
       refreshEscrow();
       refreshWalletUsdc();
+      triggerOnboardingRefresh();
     } catch (err) {
       setTxError(humanizeError(err, "Deposit failed"));
     }
@@ -202,6 +203,7 @@ export default function IdiotDashboard() {
     try {
       await withdrawEscrow(parseUsdc(withdrawAmount));
       setTxSuccess(`Withdrew ${withdrawAmount} USDC from escrow`);
+      triggerOnboardingRefresh();
       setWithdrawAmount("");
       refreshEscrow();
       refreshWalletUsdc();
@@ -231,7 +233,7 @@ export default function IdiotDashboard() {
 
   return (
     <div>
-      <OnboardingChecklist role="idiot" />
+      <OnboardingChecklist role="idiot" position="top" />
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Idiot Dashboard</h1>
@@ -954,6 +956,7 @@ export default function IdiotDashboard() {
           </>
         )}
       </section>
+      <OnboardingChecklist role="idiot" position="bottom" />
     </div>
   );
 }

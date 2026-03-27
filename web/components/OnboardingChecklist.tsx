@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAccount, useChainId, useBalance, useReadContract } from "wagmi";
 import { parseAbi, formatUnits } from "viem";
 import Link from "next/link";
@@ -23,6 +23,16 @@ const COLLATERAL_ABI = parseAbi([
 const EXPECTED_CHAINS = [8453, 84532];
 
 const COLLAPSED_KEY = "djinn_onboarding_collapsed";
+
+// Custom event name for triggering onboarding refresh from anywhere
+export const ONBOARDING_REFRESH_EVENT = "djinn:onboarding-refresh";
+
+/** Call this after any successful transaction to refresh the onboarding checklist */
+export function triggerOnboardingRefresh() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(ONBOARDING_REFRESH_EVENT));
+  }
+}
 
 interface CheckItemProps {
   done: boolean;
@@ -49,8 +59,8 @@ function CheckItem({ done, loading, label, hint, action }: CheckItemProps) {
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium ${done ? "text-slate-400 line-through" : "text-slate-900"}`}>
-          {label}
+        <p className={`text-sm font-medium ${done ? "text-green-600" : "text-slate-900"}`}>
+          {done ? `\u2713 ${label}` : label}
         </p>
         {!done && hint && (
           <p className="text-xs text-slate-500 mt-0.5">{hint}</p>
@@ -81,17 +91,37 @@ function CheckItem({ done, loading, label, hint, action }: CheckItemProps) {
 
 interface OnboardingChecklistProps {
   role: "genius" | "idiot";
+  /** Where to render: "top" shows in-progress only, "bottom" shows complete only */
+  position?: "top" | "bottom";
 }
 
-export default function OnboardingChecklist({ role }: OnboardingChecklistProps) {
+export default function OnboardingChecklist({ role, position = "top" }: OnboardingChecklistProps) {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const [collapsed, setCollapsed] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Persist collapsed state
   useEffect(() => {
     const stored = localStorage.getItem(COLLAPSED_KEY);
     if (stored === "true") setCollapsed(true);
+  }, []);
+
+  // Listen for refresh events from transaction success handlers
+  useEffect(() => {
+    function handleRefresh() {
+      setRefreshKey((k) => k + 1);
+    }
+    window.addEventListener(ONBOARDING_REFRESH_EVENT, handleRefresh);
+    return () => window.removeEventListener(ONBOARDING_REFRESH_EVENT, handleRefresh);
+  }, []);
+
+  // Also auto-refresh every 10 seconds while incomplete
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRefreshKey((k) => k + 1);
+    }, 10_000);
+    return () => clearInterval(timer);
   }, []);
 
   function toggleCollapsed() {
@@ -103,7 +133,7 @@ export default function OnboardingChecklist({ role }: OnboardingChecklistProps) 
   const onCorrectChain = EXPECTED_CHAINS.includes(chainId);
 
   // ETH balance for gas
-  const { data: ethBalance, isLoading: ethLoading } = useBalance({
+  const { data: ethBalance, isLoading: ethLoading, refetch: refetchEth } = useBalance({
     address,
     query: { enabled: isConnected },
   });
@@ -111,7 +141,7 @@ export default function OnboardingChecklist({ role }: OnboardingChecklistProps) 
 
   // USDC balance
   const usdcAddress = ADDRESSES.usdc as `0x${string}`;
-  const { data: usdcBalance, isLoading: usdcLoading } = useReadContract({
+  const { data: usdcBalance, isLoading: usdcLoading, refetch: refetchUsdc } = useReadContract({
     address: usdcAddress,
     abi: USDC_ABI,
     functionName: "balanceOf",
@@ -121,12 +151,11 @@ export default function OnboardingChecklist({ role }: OnboardingChecklistProps) 
   const usdcAmount = usdcBalance ? Number(formatUnits(usdcBalance, 6)) : 0;
   const hasUsdc = usdcAmount >= 1;
 
-  // Combined: check both approval AND deposit together
-  // The deposit UI handles approval automatically, so we just check the deposit balance
+  // Deposit check
   const depositAddress = (role === "genius" ? ADDRESSES.collateral : ADDRESSES.escrow) as `0x${string}`;
   const depositAbi = role === "genius" ? COLLATERAL_ABI : ESCROW_ABI;
   const depositFn = role === "genius" ? "deposits" : "balances";
-  const { data: depositBalance, isLoading: depositLoading } = useReadContract({
+  const { data: depositBalance, isLoading: depositLoading, refetch: refetchDeposit } = useReadContract({
     address: depositAddress,
     abi: depositAbi,
     functionName: depositFn,
@@ -136,24 +165,66 @@ export default function OnboardingChecklist({ role }: OnboardingChecklistProps) 
   const depositAmount = depositBalance ? Number(formatUnits(depositBalance as bigint, 6)) : 0;
   const hasDeposit = depositAmount >= 1;
 
-  // 4 steps (merged approve+deposit into one)
-  const checks = [isConnected, onCorrectChain, hasGasEth || true, hasUsdc, hasDeposit];
-  // Note: hasGasEth is always true for now since Coinbase Smart Wallet has free gas.
-  // We still show the step but mark it done with a note.
-  const gasStepDone = hasGasEth;
+  // Refetch all on refreshKey change
+  useEffect(() => {
+    if (refreshKey > 0 && isConnected) {
+      refetchEth();
+      refetchUsdc();
+      refetchDeposit();
+    }
+  }, [refreshKey, isConnected, refetchEth, refetchUsdc, refetchDeposit]);
+
   const checksReal = [isConnected, onCorrectChain, hasUsdc, hasDeposit];
   const completed = checksReal.filter(Boolean).length;
   const total = checksReal.length;
+  const allDone = completed === total;
 
-  // Don't show if all done
-  if (completed === total) return null;
   // Don't show if wallet not connected
   if (!isConnected) return null;
 
   const depositLabel = role === "genius" ? "collateral" : "escrow";
-  const depositHint = role === "genius"
-    ? "Use the deposit form below. Collateral backs your signals. The first deposit will prompt a USDC approval, then the deposit."
-    : "Use the deposit form below. Your escrow balance is used to purchase signals. The first deposit will prompt a USDC approval, then the deposit.";
+
+  // Position logic: top shows in-progress, bottom shows complete
+  if (position === "top" && allDone) return null;
+  if (position === "bottom" && !allDone) return null;
+
+  // All done: show compact celebration
+  if (allDone) {
+    return (
+      <div className="rounded-xl border border-green-200 bg-green-50 mb-6 overflow-hidden">
+        <button
+          onClick={toggleCollapsed}
+          className="w-full flex items-center justify-between px-5 py-3 hover:bg-green-100/50 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h3 className="font-semibold text-green-800 text-sm">Onboarding complete!</h3>
+          </div>
+          <svg
+            className={`w-4 h-4 text-green-400 transition-transform ${collapsed ? "" : "rotate-180"}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {!collapsed && (
+          <div className="px-5 pb-4 border-t border-green-200">
+            <div className="divide-y divide-green-100">
+              <CheckItem done label="Connect wallet" />
+              <CheckItem done label="Base network" />
+              <CheckItem done label="USDC on Base" />
+              <CheckItem done label={`Deposited to ${depositLabel}`} />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white mb-6 overflow-hidden">

@@ -13,7 +13,7 @@ import { saveSavedSignalsEncrypted } from "@/lib/hooks/useSettledSignals";
 import { readRecoveryBlobFromChain, loadRecovery } from "@/lib/recovery";
 import { useActiveRelationships, type ActiveRelationship } from "@/lib/hooks/useActiveRelationships";
 import { formatUsdc, parseUsdc, formatBps, truncateAddress } from "@/lib/types";
-import OnboardingChecklist from "@/components/OnboardingChecklist";
+import OnboardingChecklist, { triggerOnboardingRefresh } from "@/components/OnboardingChecklist";
 
 export default function GeniusDashboard() {
   const { isConnected, address } = useAccount();
@@ -104,6 +104,7 @@ export default function GeniusDashboard() {
       setTxSuccess(`Deposited ${depositAmount} USDC collateral`);
       refreshCollateral();
       refreshWalletUsdc();
+      triggerOnboardingRefresh();
     } catch (err) {
       setTxError(humanizeError(err, "Deposit failed"));
     }
@@ -154,6 +155,7 @@ export default function GeniusDashboard() {
       await withdrawCollateral(parseUsdc(withdrawAmount));
       setWithdrawAmount("");
       setTxSuccess(`Withdrew ${withdrawAmount} USDC collateral`);
+      triggerOnboardingRefresh();
       refreshCollateral();
       refreshWalletUsdc();
     } catch (err) {
@@ -209,7 +211,7 @@ export default function GeniusDashboard() {
 
   return (
     <div>
-      <OnboardingChecklist role="genius" />
+      <OnboardingChecklist role="genius" position="top" />
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Genius Dashboard</h1>
@@ -628,6 +630,7 @@ export default function GeniusDashboard() {
           </div>
         )}
       </section>
+      <OnboardingChecklist role="genius" position="bottom" />
     </div>
   );
 }

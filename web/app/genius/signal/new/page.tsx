@@ -7,6 +7,7 @@ import { useCommitSignal, useCollateral, useDepositCollateral, useWalletUsdcBala
 import { saveSavedSignalsEncrypted, getSavedSignalsEncrypted } from "@/lib/hooks/useSettledSignals";
 import { ADDRESSES } from "@/lib/contracts";
 import SecretModal from "@/components/SecretModal";
+import { triggerOnboardingRefresh } from "@/components/OnboardingChecklist";
 import PrivateWorkspace from "@/components/PrivateWorkspace";
 import {
   encrypt,
@@ -632,6 +633,7 @@ export default function CreateSignal() {
       }
 
       setStep("success");
+      triggerOnboardingRefresh();
       setTimeout(() => router.push("/genius"), 8000);
     } catch (err) {
       const { humanizeError } = await import("@/lib/hooks");

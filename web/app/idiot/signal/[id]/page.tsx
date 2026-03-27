@@ -11,6 +11,7 @@ import type { ShamirShare } from "@/lib/crypto";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
 import { useAuditHistory } from "@/lib/hooks/useAuditHistory";
 import QualityScore from "@/components/QualityScore";
+import { triggerOnboardingRefresh } from "@/components/OnboardingChecklist";
 import {
   SignalStatus,
   signalStatusLabel,
@@ -512,6 +513,7 @@ export default function PurchaseSignal() {
       }
 
       setStep("complete");
+      triggerOnboardingRefresh();
     } catch (err) {
       setStepError(err instanceof Error ? err.message : "Purchase failed");
       setStep("idle");
