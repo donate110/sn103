@@ -243,6 +243,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <li><a href="https://github.com/djinn-inc/djinn" target="_blank" rel="noopener noreferrer" className="hover:text-slate-700 transition-colors">GitHub</a></li>
                 <li><a href="/whitepaper.pdf" target="_blank" rel="noopener noreferrer" className="hover:text-slate-700 transition-colors">Whitepaper</a></li>
                 <li><Link href="/education" className="hover:text-slate-700 transition-colors">Education &amp; Research</Link></li>
+                <li><Link href="/docs" className="hover:text-slate-700 transition-colors">Documentation</Link></li>
                 <li><Link href="/about" className="hover:text-slate-700 transition-colors">About</Link></li>
               </ul>
             </div>
