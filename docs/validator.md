@@ -18,7 +18,7 @@ See `min_compute.yml` in the repository root for full hardware specs.
 - Python 3.11+
 - A registered Bittensor wallet with stake on Subnet 103
 - Base chain RPC endpoint (e.g., `https://mainnet.base.org`)
-- Sports data API key from [The Odds API](https://the-odds-api.com)
+- No paid API keys required (scores come from ESPN's free public API)
 
 ## Installation
 
@@ -45,7 +45,7 @@ All configuration is via environment variables. Copy `.env.example` and set:
 | `SIGNAL_COMMITMENT_ADDRESS` | Yes | Deployed SignalCommitment contract address |
 | `ACCOUNT_ADDRESS` | Yes | Deployed Account contract address |
 | `COLLATERAL_ADDRESS` | Yes | Deployed Collateral contract address |
-| `SPORTS_API_KEY` | Yes | API key for odds/outcome data |
+| `SPORTS_API_KEY` | No | Deprecated. Scores now come from ESPN (free). Kept for backward compatibility but ignored. |
 | `API_HOST` | No | Bind address (default: `0.0.0.0`) |
 | `API_PORT` | No | API port (default: `8421`) |
 | `LOG_FORMAT` | No | `console` or `json` (default: `console`) |
@@ -70,7 +70,7 @@ The validator exposes:
 
 1. **Key Share Management:** Holds Shamir secret shares for signal encryption. When a buyer purchases a signal, validators participate in MPC to reconstruct the decryption key without any single party seeing the full key.
 
-2. **Outcome Attestation:** Queries sports data APIs to verify game outcomes. When 2/3+ of validators agree on an outcome, the result is submitted on-chain to trigger audit settlement.
+2. **Outcome Attestation:** Queries ESPN's free public scoreboard API to determine game results. Resolves ALL 10 lines (real + decoys) per signal blindly; no individual outcome is revealed. When 2/3+ of validators agree on the aggregate quality score, settlement is triggered on-chain.
 
 3. **Miner Scoring:** Evaluates miner performance (response latency, TLSNotary proof quality, uptime) and sets weights on the Bittensor network.
 
