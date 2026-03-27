@@ -16,9 +16,9 @@ const MAX_BODY_SIZE = 10_000; // 10KB max
 const GITHUB_REPO = process.env.ERROR_REPORT_REPO || "djinn-inc/error-reports";
 const GITHUB_TOKEN = process.env.GITHUB_ERROR_TOKEN || "";
 
-// Simple in-memory rate limiter: max 5 reports per IP per 10 minutes
+// Simple in-memory rate limiter: max 5 reports per IP per minute
 const rateLimitMap = new Map<string, number[]>();
-const RATE_LIMIT_WINDOW = 10 * 60 * 1000; // 10 min
+const RATE_LIMIT_WINDOW = 60 * 1000; // 1 min
 const RATE_LIMIT_MAX = 5;
 
 function isRateLimited(ip: string): boolean {

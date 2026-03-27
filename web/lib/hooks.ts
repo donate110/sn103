@@ -811,6 +811,7 @@ export function useWithdrawEscrow() {
           account: address,
           chain: expectedChain,
           args: [amount],
+          gas: 200_000n,
         });
         debug("[escrow-withdraw] tx:", hash);
         await waitForTx(hash);
@@ -851,6 +852,7 @@ export function useWithdrawCollateral() {
           account: address,
           chain: expectedChain,
           args: [amount],
+          gas: 200_000n,
         });
         debug("[collateral-withdraw] tx:", hash);
         await waitForTx(hash);

@@ -51,35 +51,33 @@ export function useActiveRelationships(
       const counterparties = new Set<string>();
 
       // Source 1: PurchaseRecorded events for unique counterparties
-      try {
-        const contract = new ethers.Contract(ADDRESSES.account, ACCOUNT_ABI, provider);
-        const fromBlock = await resolveDeployBlock(provider);
-        const filter = role === "genius"
-          ? contract.filters.PurchaseRecorded(address)
-          : contract.filters.PurchaseRecorded(null, address);
-        const events = await queryFilterChunked(contract, filter, fromBlock);
-        for (const event of events) {
-          const log = event as ethers.EventLog;
-          if (!log.args) continue;
-          const other = role === "genius" ? log.args[1] : log.args[0];
-          if (other && typeof other === "string") counterparties.add(other.toLowerCase());
-        }
-      } catch {
-        // PurchaseRecorded scanning failed — fall through to audit history
-      }
-
-      // Source 2: Audit history for past counterparties (may have new cycles)
-      try {
-        const audits = role === "genius"
-          ? await getAuditsByGenius(provider, address)
-          : await getAuditsByIdiot(provider, address);
-        for (const a of audits) {
-          const other = role === "genius" ? a.idiot : a.genius;
-          counterparties.add(other.toLowerCase());
-        }
-      } catch {
-        // Audit history scanning failed
-      }
+      // Source 2: Audit history for past counterparties
+      // Run both in parallel
+      const [, ] = await Promise.allSettled([
+        (async () => {
+          const contract = new ethers.Contract(ADDRESSES.account, ACCOUNT_ABI, provider);
+          const fromBlock = await resolveDeployBlock(provider);
+          const filter = role === "genius"
+            ? contract.filters.PurchaseRecorded(address)
+            : contract.filters.PurchaseRecorded(null, address);
+          const events = await queryFilterChunked(contract, filter, fromBlock);
+          for (const event of events) {
+            const log = event as ethers.EventLog;
+            if (!log.args) continue;
+            const other = role === "genius" ? log.args[1] : log.args[0];
+            if (other && typeof other === "string") counterparties.add(other.toLowerCase());
+          }
+        })(),
+        (async () => {
+          const audits = role === "genius"
+            ? await getAuditsByGenius(provider, address)
+            : await getAuditsByIdiot(provider, address);
+          for (const a of audits) {
+            const other = role === "genius" ? a.idiot : a.genius;
+            counterparties.add(other.toLowerCase());
+          }
+        })(),
+      ]);
 
       if (cancelledRef.current) return;
 
@@ -89,35 +87,35 @@ export function useActiveRelationships(
         return;
       }
 
-      // Query current state for each counterparty
+      // Query current state for ALL counterparties in parallel (not sequential)
       const accountContract = getAccountContract(provider);
-      const active: ActiveRelationship[] = [];
-
-      for (const cp of counterparties) {
-        if (cancelledRef.current) return;
-        try {
+      const cpArray = Array.from(counterparties);
+      const results = await Promise.allSettled(
+        cpArray.map(async (cp) => {
           const genius = role === "genius" ? address : cp;
           const idiot = role === "genius" ? cp : address;
           const state = await accountContract.getAccountState(genius, idiot);
           const signalCount = Number(state.signalCount);
           if (signalCount > 0) {
-            active.push({
+            return {
               genius,
               idiot,
               signalCount,
               qualityScore: Number(state.outcomeBalance),
               currentCycle: Number(state.currentCycle),
               isAuditReady: signalCount >= 10,
-            });
+            } as ActiveRelationship;
           }
-        } catch {
-          // Skip this pair if query fails
-        }
-      }
+          return null;
+        }),
+      );
 
       if (!cancelledRef.current) {
-        // Sort by signal count descending (closest to audit first)
-        active.sort((a, b) => b.signalCount - a.signalCount);
+        const active = results
+          .filter((r): r is PromiseFulfilledResult<ActiveRelationship | null> => r.status === "fulfilled")
+          .map((r) => r.value)
+          .filter((r): r is ActiveRelationship => r !== null)
+          .sort((a, b) => b.signalCount - a.signalCount);
         setRelationships(active);
       }
     } catch (err) {

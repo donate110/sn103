@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getReadProvider } from "../hooks";
 import { getAuditsByGenius, getAuditsByIdiot } from "../events";
 import type { AuditEvent } from "../events";
@@ -14,12 +14,12 @@ export function useAuditHistory(geniusAddress?: string) {
   const [error, setError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (silent = false) => {
     if (!geniusAddress) {
       setAudits([]);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const provider = getReadProvider();
@@ -38,12 +38,12 @@ export function useAuditHistory(geniusAddress?: string) {
     }
   }, [geniusAddress]);
 
-  // Initial fetch + polling
+  // Initial fetch + silent polling
   useEffect(() => {
     cancelledRef.current = false;
     refresh();
     const interval = setInterval(() => {
-      if (!cancelledRef.current) refresh();
+      if (!cancelledRef.current) refresh(true);
     }, AUDIT_POLL_MS);
     return () => {
       cancelledRef.current = true;
@@ -51,21 +51,12 @@ export function useAuditHistory(geniusAddress?: string) {
     };
   }, [refresh]);
 
-  // Refresh on window focus
-  useEffect(() => {
-    const onFocus = () => {
-      if (!cancelledRef.current) refresh();
-    };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [refresh]);
-
-  const aggregateQualityScore = audits.reduce(
-    (sum, a) => sum + a.qualityScore,
-    0n,
+  const aggregateQualityScore = useMemo(
+    () => audits.reduce((sum, a) => sum + a.qualityScore, 0n),
+    [audits],
   );
 
-  return { audits, loading, error, refresh, aggregateQualityScore };
+  return { audits, loading, error, refresh: () => refresh(), aggregateQualityScore };
 }
 
 export function useIdiotAuditHistory(idiotAddress?: string) {
@@ -74,12 +65,12 @@ export function useIdiotAuditHistory(idiotAddress?: string) {
   const [error, setError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (silent = false) => {
     if (!idiotAddress) {
       setAudits([]);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const provider = getReadProvider();
@@ -98,12 +89,12 @@ export function useIdiotAuditHistory(idiotAddress?: string) {
     }
   }, [idiotAddress]);
 
-  // Initial fetch + polling
+  // Initial fetch + silent polling
   useEffect(() => {
     cancelledRef.current = false;
     refresh();
     const interval = setInterval(() => {
-      if (!cancelledRef.current) refresh();
+      if (!cancelledRef.current) refresh(true);
     }, AUDIT_POLL_MS);
     return () => {
       cancelledRef.current = true;
@@ -111,14 +102,5 @@ export function useIdiotAuditHistory(idiotAddress?: string) {
     };
   }, [refresh]);
 
-  // Refresh on window focus
-  useEffect(() => {
-    const onFocus = () => {
-      if (!cancelledRef.current) refresh();
-    };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [refresh]);
-
-  return { audits, loading, error, refresh };
+  return { audits, loading, error, refresh: () => refresh() };
 }

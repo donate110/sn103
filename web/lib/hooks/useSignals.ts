@@ -13,9 +13,10 @@ export function useActiveSignals(sport?: string, geniusAddress?: string, include
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
+  const hasFetchedRef = useRef(false);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const provider = getReadProvider();
@@ -50,12 +51,13 @@ export function useActiveSignals(sport?: string, geniusAddress?: string, include
     return refresh();
   }, [geniusAddress, refresh]);
 
-  // Initial fetch + polling
+  // Initial fetch + polling (polls are silent - no loading skeleton flash)
   useEffect(() => {
     cancelledRef.current = false;
+    hasFetchedRef.current = false;
     refresh();
     const interval = setInterval(() => {
-      if (!cancelledRef.current) refresh();
+      if (!cancelledRef.current) refresh(true);
     }, POLL_INTERVAL_MS);
     return () => {
       cancelledRef.current = true;
@@ -63,14 +65,5 @@ export function useActiveSignals(sport?: string, geniusAddress?: string, include
     };
   }, [refresh]);
 
-  // Refresh on window focus (tab switch back)
-  useEffect(() => {
-    const onFocus = () => {
-      if (!cancelledRef.current) refresh();
-    };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [refresh]);
-
-  return { signals, loading, error, refresh, forceRefresh };
+  return { signals, loading, error, refresh: () => refresh(), forceRefresh };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useAccount, useWalletClient } from "wagmi";
 import QualityScore from "@/components/QualityScore";
@@ -45,14 +45,17 @@ export default function GeniusDashboard() {
     "idle" | "checking" | "prompting" | "loading" | "recovered" | "none" | "failed"
   >("idle");
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const recoveryCheckedRef = useRef(false);
 
   useEffect(() => {
-    if (!address || savedLoading || savedSignals.length > 0 || savedLocked || recoveryState !== "idle") return;
+    if (recoveryCheckedRef.current) return;
+    if (!address || savedLoading || savedSignals.length > 0 || savedLocked) return;
+    recoveryCheckedRef.current = true;
     setRecoveryState("checking");
     readRecoveryBlobFromChain(address)
       .then((blob) => setRecoveryState(blob ? "prompting" : "none"))
       .catch(() => setRecoveryState("none"));
-  }, [address, savedLoading, savedSignals.length, savedLocked, recoveryState]);
+  }, [address, savedLoading, savedSignals.length, savedLocked]);
 
   const handleRecover = useCallback(async () => {
     if (!address || !walletClient) return;
@@ -110,28 +113,32 @@ export default function GeniusDashboard() {
     }
   };
 
+  const cancelProgressRef = useRef("");
   const handleCancelAll = async () => {
     const now = BigInt(Math.floor(Date.now() / 1000));
     const active = mySignals.filter((s) => s.expiresAt > now && !s.cancelled);
     if (active.length === 0) return;
     setCancellingAll(true);
+    setCancelProgress(`Cancelling 1 of ${active.length}...`);
     setTxError(null);
     setTxSuccess(null);
     let cancelled = 0;
     let skipped = 0;
     for (let i = 0; i < active.length; i++) {
       const signal = active[i];
-      setCancelProgress(`Cancelling ${i + 1} of ${active.length}...`);
+      cancelProgressRef.current = `Cancelling ${i + 1} of ${active.length}...`;
       try {
         await cancelSignal(BigInt(signal.signalId));
         cancelled++;
-        // Brief delay between txs — Coinbase Smart Wallet (ERC-4337)
-        // needs time to update its internal nonce after each UserOperation
+        // Brief delay between txs; Coinbase Smart Wallet (ERC-4337)
+        // needs time to update its internal nonce after each UserOperation.
+        // Update displayed progress only between txs (not every iteration).
         if (i < active.length - 1) {
+          setCancelProgress(cancelProgressRef.current);
           await new Promise((r) => setTimeout(r, 2000));
         }
       } catch {
-        // Signal may already be cancelled — skip and continue
+        // Signal may already be cancelled; skip and continue
         skipped++;
       }
     }

@@ -33,7 +33,7 @@ interface ReportErrorModalProps {
  */
 export default function ReportErrorModal({ open, onClose, error, source = "report-button" }: ReportErrorModalProps) {
   const [message, setMessage] = useState("");
-  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error" | "rate-limited">("idle");
   const pathname = usePathname();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -72,6 +72,7 @@ export default function ReportErrorModal({ open, onClose, error, source = "repor
         body: JSON.stringify(report),
       });
 
+      if (resp.status === 429) throw new Error("rate-limited");
       if (!resp.ok) throw new Error(`${resp.status}`);
       setStatus("sent");
       setTimeout(() => {
@@ -79,8 +80,8 @@ export default function ReportErrorModal({ open, onClose, error, source = "repor
         setStatus("idle");
         setMessage("");
       }, 2000);
-    } catch {
-      setStatus("error");
+    } catch (e) {
+      setStatus(e instanceof Error && e.message === "rate-limited" ? "rate-limited" : "error");
     }
   }, [message, error, pathname, source, onClose]);
 
@@ -157,6 +158,9 @@ export default function ReportErrorModal({ open, onClose, error, source = "repor
                 </button>
               </div>
 
+              {status === "rate-limited" && (
+                <p className="text-xs text-amber-600 mt-2">Too many reports. Please wait a minute and try again.</p>
+              )}
               {status === "error" && (
                 <p className="text-xs text-red-500 mt-2">Failed to send. Please try again.</p>
               )}
