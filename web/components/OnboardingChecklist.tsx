@@ -116,13 +116,6 @@ export default function OnboardingChecklist({ role, position = "top" }: Onboardi
     return () => window.removeEventListener(ONBOARDING_REFRESH_EVENT, handleRefresh);
   }, []);
 
-  // Also auto-refresh every 10 seconds while incomplete
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setRefreshKey((k) => k + 1);
-    }, 10_000);
-    return () => clearInterval(timer);
-  }, []);
 
   function toggleCollapsed() {
     const next = !collapsed;
