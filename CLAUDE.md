@@ -25,12 +25,13 @@ Djinn unbundles information from execution in sports betting. Analysts (Geniuses
 ```
 djinn/
 ├── contracts/          # Foundry project -- Solidity (UUPS proxies)
-├── web/                # Next.js client application
+├── web/                # Next.js client application (+ /docs, /api endpoints)
+├── sdk/                # @djinn/sdk -- client-side encryption, Shamir, decoys
 ├── validator/          # Bittensor validator (Python, MPC orchestrator)
 ├── miner/              # Bittensor miner (Python, TLSNotary prover)
 ├── subgraph/           # The Graph subgraph (AssemblyScript)
-├── docs/               # Whitepaper and specs
-├── scripts/            # Deployment, setup, utilities
+├── docs/               # Whitepaper, specs, agent API spec
+├── scripts/            # Deployment, setup, settlement monitor
 ├── DEVIATIONS.md       # Append-only log of whitepaper deviations
 └── KICKOFF.md          # Build kick-off prompt (reference only)
 ```
