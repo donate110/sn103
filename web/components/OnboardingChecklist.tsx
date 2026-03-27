@@ -100,11 +100,13 @@ export default function OnboardingChecklist({ role, position = "top" }: Onboardi
   const chainId = useChainId();
   const [collapsed, setCollapsed] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [justCompleted, setJustCompleted] = useState(false);
+  const [wasIncomplete, setWasIncomplete] = useState(true);
 
   // Persist collapsed state
   useEffect(() => {
     const stored = localStorage.getItem(COLLAPSED_KEY);
-    if (stored === "true") setCollapsed(true);
+    if (stored !== null) setCollapsed(stored === "true");
   }, []);
 
   // Listen for refresh events from transaction success handlers
@@ -172,6 +174,25 @@ export default function OnboardingChecklist({ role, position = "top" }: Onboardi
   const total = checksReal.length;
   const allDone = completed === total;
 
+  // Track "just completed" transition for brief highlight
+  useEffect(() => {
+    if (!allDone) {
+      setWasIncomplete(true);
+    } else if (wasIncomplete && allDone) {
+      setJustCompleted(true);
+      setWasIncomplete(false);
+      // Clear the highlight after 5 seconds, then collapse
+      const timer = setTimeout(() => {
+        setJustCompleted(false);
+        setCollapsed(true);
+      }, 5000);
+      return () => clearTimeout(timer);
+    } else if (allDone && !wasIncomplete) {
+      // Already complete on page load: stay collapsed
+      setCollapsed(true);
+    }
+  }, [allDone, wasIncomplete]);
+
   // Don't show if wallet not connected
   if (!isConnected) return null;
 
@@ -181,22 +202,33 @@ export default function OnboardingChecklist({ role, position = "top" }: Onboardi
   if (position === "top" && allDone) return null;
   if (position === "bottom" && !allDone) return null;
 
-  // All done: show compact celebration
+  // All done: show expanded only if user manually opened or just completed
+  const completedExpanded = !collapsed;
   if (allDone) {
+    const borderColor = justCompleted ? "border-green-200" : "border-slate-200";
+    const bgColor = justCompleted ? "bg-green-50" : "bg-white";
+    const textColor = justCompleted ? "text-green-800" : "text-slate-500";
+    const iconColor = justCompleted ? "text-green-600" : "text-slate-400";
+    const chevronColor = justCompleted ? "text-green-400" : "text-slate-300";
+    const dividerColor = justCompleted ? "divide-green-100" : "divide-slate-100";
+    const borderTopColor = justCompleted ? "border-green-200" : "border-slate-100";
+
     return (
-      <div className="rounded-xl border border-green-200 bg-green-50 mb-6 overflow-hidden">
+      <div className={`rounded-xl border ${borderColor} ${bgColor} mb-6 overflow-hidden transition-colors duration-1000`}>
         <button
           onClick={toggleCollapsed}
-          className="w-full flex items-center justify-between px-5 py-3 hover:bg-green-100/50 transition-colors"
+          className="w-full flex items-center justify-between px-5 py-2.5 hover:bg-slate-50 transition-colors"
         >
           <div className="flex items-center gap-2">
-            <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className={`w-4 h-4 ${iconColor}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <h3 className="font-semibold text-green-800 text-sm">Onboarding complete!</h3>
+            <span className={`text-sm ${textColor}`}>
+              {justCompleted ? "Onboarding complete!" : "Setup complete"}
+            </span>
           </div>
           <svg
-            className={`w-4 h-4 text-green-400 transition-transform ${collapsed ? "" : "rotate-180"}`}
+            className={`w-4 h-4 ${chevronColor} transition-transform ${collapsed ? "" : "rotate-180"}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -205,9 +237,9 @@ export default function OnboardingChecklist({ role, position = "top" }: Onboardi
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
         </button>
-        {!collapsed && (
-          <div className="px-5 pb-4 border-t border-green-200">
-            <div className="divide-y divide-green-100">
+        {completedExpanded && (
+          <div className={`px-5 pb-4 border-t ${borderTopColor}`}>
+            <div className={`${dividerColor}`}>
               <CheckItem done label="Connect wallet" />
               <CheckItem done label="Base network" />
               <CheckItem done label="USDC on Base" />
