@@ -23,9 +23,6 @@
     "typescript": "^5.3.0",
     "vitest": "^2.0.0"
   },
-  "peerDependencies": {
-    "ethers": "^6.0.0"
-  },
   "keywords": ["djinn", "sports", "predictions", "encryption", "shamir", "bittensor"],
   "license": "MIT",
   "repository": {
