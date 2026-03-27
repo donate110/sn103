@@ -85,10 +85,9 @@ test.describe("SDK page", () => {
 
   test("shows code example", async ({ page }) => {
     await page.goto("/docs/sdk");
-    // Code block should have SDK import
-    await expect(page.getByText("DjinnSDK")).toBeVisible();
-    await expect(page.getByText("prepareSignal")).toBeVisible();
-    await expect(page.getByText("encryptSignal")).toBeVisible();
+    // Code block should have real SDK imports
+    await expect(page.locator("pre").filter({ hasText: "encryptSignal" })).toBeVisible();
+    await expect(page.locator("pre").filter({ hasText: "generateDecoys" })).toBeVisible();
   });
 
   test("shows security properties", async ({ page }) => {

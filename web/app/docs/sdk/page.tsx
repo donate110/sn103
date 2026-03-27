@@ -95,42 +95,51 @@ export default function SdkDocs() {
       <h2 className="text-xl font-semibold text-slate-900 mb-4">Signal creation flow</h2>
 
       <pre className="text-xs font-mono bg-slate-900 text-green-400 rounded-lg p-4 overflow-x-auto mb-8">
-{`import { DjinnSDK } from "@djinn/sdk";  // coming soon
+{`import { encryptSignal, generateDecoys } from "@djinn/sdk";
 
-const sdk = new DjinnSDK({ rpcUrl: "https://mainnet.base.org" });
+// 1. Fetch network config (cached, do once)
+const config = await fetch("https://djinn.gg/api/network/config")
+  .then(r => r.json());
 
-// 1. Prepare: get validator keys and decoy suggestions
-const prep = await sdk.prepareSignal({
-  sport: "basketball_nba",
-  eventId: "abc123",
-  maxNotional: 1000,
-  feeBps: 500,
+// 2. Fetch odds data for decoy generation
+const odds = await fetch("https://djinn.gg/api/odds?sport=basketball_nba")
+  .then(r => r.json());
+
+// 3. Generate decoys locally (NEVER use server suggestions)
+const realPick = {
+  event_id: "abc123",
+  market: "spreads",
+  pick: "Celtics -4.5",
+  odds: -110,
+  bookmaker: "DraftKings",
+};
+const decoys = generateDecoys({
+  realPick,
+  availableLines: odds,  // from The Odds API
 });
 
-// 2. Encrypt: pick + decoys, locally
-const encrypted = sdk.encryptSignal({
-  pick: "Celtics -4.5 (-110)",  // never leaves this device
-  decoys: prep.suggestedDecoys,
-  validatorPubkeys: prep.validatorPubkeys,
-  shamirN: prep.shamirN,
-  shamirK: prep.shamirK,
+// 4. Encrypt signal locally (plaintext never leaves this device)
+const encrypted = await encryptSignal({
+  pick: realPick,
+  decoys,
+  validators: config.validators,
+  shamirK: config.shamir.k,
 });
 
-// 3. Commit on-chain
-const commitTx = await sdk.commitSignal({
-  encryptedBlob: encrypted.blob,
-  commitHash: encrypted.hash,
-  sport: "basketball_nba",
-  feeBps: 500,
-  slaBps: 15000,
-  maxNotional: 1000,
-  expiresAt: prep.expiresAt,
-});
+// 5. Commit on-chain (your wallet signs this)
+// const tx = await signalCommitment.commit(...)
 
-// 4. Distribute shares to validators
-await sdk.distributeShares({
-  signalId: commitTx.signalId,
-  encryptedShares: encrypted.shares,
+// 6. Distribute shares via API (only ciphertext sent)
+await fetch("https://djinn.gg/api/genius/signal/commit", {
+  method: "POST",
+  headers: { "Authorization": "Bearer ...", "Content-Type": "application/json" },
+  body: JSON.stringify({
+    encrypted_blob: encrypted.blob,
+    commit_hash: encrypted.hash,
+    shares: encrypted.shares,
+    commit_tx_hash: "0x...",
+    event_id: realPick.event_id,
+  }),
 });`}
       </pre>
 
