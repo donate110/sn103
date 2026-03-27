@@ -374,3 +374,21 @@ See the whitepaper for design intent.
 **Why:** The validator voting model (DEV-015) replaced ZK-based settlement, making ZK re-computation for score disputes inapplicable. The staked challenge mechanism adds significant contract complexity (new staking contract, challenge/response state machine, timeout handling) that is premature for the current network size (3 active validators). The existing admin controls via the 72h timelock provide sufficient dispute resolution for the bootstrap phase.
 **Future:** Implement on-chain dispute resolution when the validator set grows beyond 10 and the protocol has mainnet USDC volume. The staked challenge model from the whitepaper remains the target design.
 **Impact:** Users cannot permissionlessly dispute outcomes on-chain. Disputes must be raised off-chain and resolved via timelock governance. Acceptable during bootstrap but must be implemented before removing timelock admin powers.
+
+## DEV-030: Blind Outcome Resolution (All 10 Lines)
+
+**Date:** 2026-03-27
+**Whitepaper Section:** Section 6 -- Outcome Attestation
+**Whitepaper Says:** Validators determine the outcome of the real pick for each signal.
+**What we did:** Validators now resolve ALL 10 lines (1 real + 9 decoys) against game results, producing 10 outcomes per signal. The real outcome is selected later during batch MPC at the audit-set level, so no individual signal's real outcome is ever revealed to any single validator.
+**Why:** The previous approach required validators to know which line was real (or reconstruct it) to determine the outcome. This leaked information about the Shamir secret at the individual signal level. By resolving all 10 lines blindly, the validator produces outcomes for every line without needing to know which is real. The MPC settlement selects the correct outcome using the Shamir-shared index.
+**Impact:** Stronger privacy guarantee. No individual validator learns which line is the real pick during outcome resolution. The decoy lines (already public on-chain) serve double duty: they hide the real pick at purchase time AND at resolution time.
+
+## DEV-031: ESPN for Game Scores (Replacing The Odds API)
+
+**Date:** 2026-03-27
+**Whitepaper Section:** Section 6 -- Outcome Attestation
+**Whitepaper Says:** Validators query sports data sources for outcome verification.
+**What we did:** Replaced The Odds API scores endpoint with ESPN's free public scoreboard API. Games are matched by team names + date using a static normalization table. ESPN client has its own circuit breaker and supports 8 sports (NBA, NCAAB, NFL, NCAAF, MLB, NHL, EPL, MLS). Signal registrations are persisted in SQLite for crash recovery.
+**Why:** Validators should not need a paid API key ($59/month) to perform their core function. ESPN provides free, reliable, real-time game scores without rate limits or API keys. The validator only needs final scores, not odds data.
+**Impact:** Validators no longer need SPORTS_API_KEY. The supported sports list is reduced to those with ESPN mappings (8 sports vs. the previous 17). SQLite persistence ensures signal registrations survive validator restarts.
