@@ -16,6 +16,7 @@ import { getSavedSignals, saveSavedSignalsEncrypted } from "@/lib/hooks/useSettl
 import { getCachedMasterSeed } from "@/lib/crypto";
 import { readRecoveryBlobFromChain, loadRecovery } from "@/lib/recovery";
 import SignalPlot from "@/components/SignalPlot";
+import OnboardingChecklist from "@/components/OnboardingChecklist";
 
 export default function IdiotDashboard() {
   const { isConnected, address } = useAccount();
@@ -230,6 +231,7 @@ export default function IdiotDashboard() {
 
   return (
     <div>
+      <OnboardingChecklist role="idiot" />
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Idiot Dashboard</h1>

@@ -13,6 +13,7 @@ import { saveSavedSignalsEncrypted } from "@/lib/hooks/useSettledSignals";
 import { readRecoveryBlobFromChain, loadRecovery } from "@/lib/recovery";
 import { useActiveRelationships, type ActiveRelationship } from "@/lib/hooks/useActiveRelationships";
 import { formatUsdc, parseUsdc, formatBps, truncateAddress } from "@/lib/types";
+import OnboardingChecklist from "@/components/OnboardingChecklist";
 
 export default function GeniusDashboard() {
   const { isConnected, address } = useAccount();
@@ -179,6 +180,7 @@ export default function GeniusDashboard() {
 
   return (
     <div>
+      <OnboardingChecklist role="genius" />
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Genius Dashboard</h1>
