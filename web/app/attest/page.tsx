@@ -286,9 +286,9 @@ export default function AttestPage() {
               Debust
             </h3>
             <p className="text-xs text-slate-500 mb-1">
-              Storage, accounts, and email notifications for web attestation.
+              Trustless cryptographic receipts for the internet. Paste a URL, get a
+              tamper-proof proof. Decentralized, shareable, and independently verified.
             </p>
-            <span className="text-xs text-slate-400">Experimental</span>
           </a>
           <a
             href="https://firmrecord.com"
@@ -300,9 +300,10 @@ export default function AttestPage() {
               FirmRecord
             </h3>
             <p className="text-xs text-slate-500 mb-1">
-              Business-focused attestation for compliance and audit trails.
+              Cryptographic web evidence for legal and enterprise. Chrome extension
+              captures verified screenshots, HTML, and timestamps. Case tracking
+              and Arweave storage.
             </p>
-            <span className="text-xs text-slate-400">Experimental</span>
           </a>
           <a
             href="https://proveaudit.com"
@@ -314,16 +315,20 @@ export default function AttestPage() {
               ProveAudit
             </h3>
             <p className="text-xs text-slate-500 mb-1">
-              Custom requests, LLM prompts, and complex attestation flows.
+              AI-powered code audits with cryptographic proof of every finding. Three
+              independent analyses, results in under an hour, verifiable forever.
             </p>
-            <span className="text-xs text-slate-400">Experimental</span>
           </a>
         </div>
 
         <p className="text-xs text-slate-400">
-          The difference is in access constraints, not content. This tool attests any URL but doesn&apos;t store results.
-          Debust adds storage and accounts. ProveAudit handles arbitrary request construction. All use the same
-          decentralized TLSNotary infrastructure powered by Bittensor Subnet 103 miners.
+          The difference is in access constraints, not content. This free tool attests any URL
+          but doesn&apos;t store results. Debust adds persistent storage, accounts, and shareable
+          proof links. FirmRecord adds a Chrome extension, case tracking, and enterprise features
+          for legal and compliance teams. ProveAudit applies the same cryptographic verification
+          to AI-generated code audits, with three independent runs and permanent records. All
+          three are built on the same decentralized TLSNotary infrastructure powered by Bittensor
+          Subnet 103 miners.
         </p>
       </div>
 
