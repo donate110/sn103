@@ -17,7 +17,7 @@ See `min_compute.yml` in the repository root for full hardware specs.
 
 - Python 3.11+
 - A registered Bittensor wallet with stake on Subnet 103
-- API key from [The Odds API](https://the-odds-api.com)
+- Sports data source: [The Odds API](https://the-odds-api.com) key (default) or a custom provider via `SPORTS_DATA_PROVIDER`
 
 ## Installation
 
@@ -38,8 +38,9 @@ All configuration is via environment variables. Copy `.env.example` and set:
 | `BT_NETWORK` | Yes | `finney` for mainnet, `test` for testnet, `local` for dev |
 | `BT_WALLET_NAME` | Yes | Bittensor wallet name |
 | `BT_WALLET_HOTKEY` | Yes | Bittensor hotkey name |
-| `ODDS_API_KEY` | Yes | API key from The Odds API |
+| `ODDS_API_KEY` | Conditional | API key from The Odds API (required if using default provider) |
 | `ODDS_API_BASE_URL` | No | Odds API base URL (default: `https://api.the-odds-api.com`) |
+| `SPORTS_DATA_PROVIDER` | No | Custom data provider module path (default: built-in Odds API client) |
 | `ODDS_CACHE_TTL` | No | Cache TTL in seconds (default: `30`) |
 | `LINE_TOLERANCE` | No | Line matching tolerance (default: `0.5`) |
 | `API_HOST` | No | Bind address (default: `0.0.0.0`) |
