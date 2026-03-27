@@ -32,7 +32,6 @@ const EXEMPT_PATHS = [
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
 const RATE_LIMIT_MAX = 200; // 200 requests per minute per IP
-const IS_DEV = process.env.NODE_ENV !== "production";
 
 function isExemptPath(pathname: string): boolean {
   return EXEMPT_PATHS.some((p) => pathname.startsWith(p));
@@ -155,7 +154,7 @@ export function middleware(request: NextRequest) {
           });
         }
       }
-    } // end if (!IS_DEV)
+    } // end if (!isLocalhost)
   }
 
   const response = NextResponse.next();
