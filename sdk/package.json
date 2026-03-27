@@ -1,0 +1,36 @@
+{
+  "name": "@djinn/sdk",
+  "version": "0.1.0",
+  "description": "Client-side SDK for the Djinn Protocol. Handles encryption, decoy generation, Shamir splitting, and signal creation.",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^2.0.0"
+  },
+  "peerDependencies": {
+    "ethers": "^6.0.0"
+  },
+  "keywords": ["djinn", "sports", "predictions", "encryption", "shamir", "bittensor"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/djinn-inc/djinn",
+    "directory": "sdk"
+  }
+}
