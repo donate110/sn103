@@ -181,9 +181,9 @@ export default function IdiotDashboard() {
     try {
       const result = await depositEscrow(parseUsdc(depositAmount));
       if (result === "approved") {
-        // Approval done in one popup. Don't chain a second popup —
-        // Coinbase Smart Wallet can't handle it. Let the user click again.
-        setTxSuccess("USDC approved! Click Deposit again to complete.");
+        // First-time: USDC spending approval completed.
+        // Coinbase Smart Wallet can't handle chained popups, so we need a second click.
+        setTxSuccess("Step 1 of 2 complete: USDC spending approved. Now click Deposit one more time to transfer your USDC.");
         return;
       }
       setTxSuccess(`Deposited ${depositAmount} USDC to escrow`);

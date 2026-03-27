@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useAccount, useChainId, useBalance, useReadContract } from "wagmi";
 import { parseAbi, formatUnits } from "viem";
 import Link from "next/link";
@@ -20,6 +21,8 @@ const COLLATERAL_ABI = parseAbi([
 
 // Base mainnet = 8453, Base Sepolia = 84532
 const EXPECTED_CHAINS = [8453, 84532];
+
+const COLLAPSED_KEY = "djinn_onboarding_collapsed";
 
 interface CheckItemProps {
   done: boolean;
@@ -83,6 +86,19 @@ interface OnboardingChecklistProps {
 export default function OnboardingChecklist({ role }: OnboardingChecklistProps) {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
+  const [collapsed, setCollapsed] = useState(false);
+
+  // Persist collapsed state
+  useEffect(() => {
+    const stored = localStorage.getItem(COLLAPSED_KEY);
+    if (stored === "true") setCollapsed(true);
+  }, []);
+
+  function toggleCollapsed() {
+    const next = !collapsed;
+    setCollapsed(next);
+    localStorage.setItem(COLLAPSED_KEY, String(next));
+  }
 
   const onCorrectChain = EXPECTED_CHAINS.includes(chainId);
 
@@ -103,20 +119,10 @@ export default function OnboardingChecklist({ role }: OnboardingChecklistProps) 
     query: { enabled: isConnected && !!address },
   });
   const usdcAmount = usdcBalance ? Number(formatUnits(usdcBalance, 6)) : 0;
-  const hasUsdc = usdcAmount >= 1; // at least $1
+  const hasUsdc = usdcAmount >= 1;
 
-  // USDC allowance for the relevant contract
-  const spenderAddress = (role === "genius" ? ADDRESSES.collateral : ADDRESSES.escrow) as `0x${string}`;
-  const { data: allowance, isLoading: allowanceLoading } = useReadContract({
-    address: usdcAddress,
-    abi: USDC_ABI,
-    functionName: "allowance",
-    args: address && spenderAddress ? [address, spenderAddress] : undefined,
-    query: { enabled: isConnected && !!address && spenderAddress !== "0x0000000000000000000000000000000000000000" },
-  });
-  const hasApproval = allowance ? allowance > 0n : false;
-
-  // Deposit check
+  // Combined: check both approval AND deposit together
+  // The deposit UI handles approval automatically, so we just check the deposit balance
   const depositAddress = (role === "genius" ? ADDRESSES.collateral : ADDRESSES.escrow) as `0x${string}`;
   const depositAbi = role === "genius" ? COLLATERAL_ABI : ESCROW_ABI;
   const depositFn = role === "genius" ? "deposits" : "balances";
@@ -130,90 +136,91 @@ export default function OnboardingChecklist({ role }: OnboardingChecklistProps) 
   const depositAmount = depositBalance ? Number(formatUnits(depositBalance as bigint, 6)) : 0;
   const hasDeposit = depositAmount >= 1;
 
-  // Count completed steps
-  const checks = [isConnected, onCorrectChain, hasGasEth, hasUsdc, hasApproval, hasDeposit];
-  const completed = checks.filter(Boolean).length;
-  const total = checks.length;
+  // 4 steps (merged approve+deposit into one)
+  const checks = [isConnected, onCorrectChain, hasGasEth || true, hasUsdc, hasDeposit];
+  // Note: hasGasEth is always true for now since Coinbase Smart Wallet has free gas.
+  // We still show the step but mark it done with a note.
+  const gasStepDone = hasGasEth;
+  const checksReal = [isConnected, onCorrectChain, hasUsdc, hasDeposit];
+  const completed = checksReal.filter(Boolean).length;
+  const total = checksReal.length;
 
   // Don't show if all done
   if (completed === total) return null;
-
-  // Don't show if wallet not connected (the connect button handles that)
+  // Don't show if wallet not connected
   if (!isConnected) return null;
 
+  const depositLabel = role === "genius" ? "collateral" : "escrow";
+  const depositHint = role === "genius"
+    ? "Use the deposit form below. Collateral backs your signals. The first deposit will prompt a USDC approval, then the deposit."
+    : "Use the deposit form below. Your escrow balance is used to purchase signals. The first deposit will prompt a USDC approval, then the deposit.";
+
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 mb-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-slate-900 text-sm">Getting started</h3>
-        <span className="text-xs text-slate-400">
-          {completed}/{total} complete
-        </span>
-      </div>
+    <div className="rounded-xl border border-slate-200 bg-white mb-6 overflow-hidden">
+      {/* Header (always visible, clickable to toggle) */}
+      <button
+        onClick={toggleCollapsed}
+        className="w-full flex items-center justify-between px-5 py-3 hover:bg-slate-50 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <h3 className="font-semibold text-slate-900 text-sm">Getting started</h3>
+          <span className="text-xs text-slate-400">
+            {completed}/{total} complete
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Mini progress bar */}
+          <div className="w-16 h-1.5 bg-slate-100 rounded-full">
+            <div
+              className="h-1.5 bg-blue-500 rounded-full transition-all duration-500"
+              style={{ width: `${(completed / total) * 100}%` }}
+            />
+          </div>
+          <svg
+            className={`w-4 h-4 text-slate-400 transition-transform ${collapsed ? "" : "rotate-180"}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </button>
 
-      {/* Progress bar */}
-      <div className="w-full h-1.5 bg-slate-100 rounded-full mb-4">
-        <div
-          className="h-1.5 bg-blue-500 rounded-full transition-all duration-500"
-          style={{ width: `${(completed / total) * 100}%` }}
-        />
-      </div>
-
-      <div className="divide-y divide-slate-100">
-        <CheckItem
-          done={isConnected}
-          label="Connect wallet"
-          hint="Use Coinbase Smart Wallet (recommended) or any WalletConnect wallet."
-        />
-        <CheckItem
-          done={onCorrectChain}
-          label="Switch to Base network"
-          hint="Djinn runs on Base (Coinbase L2). Your wallet should prompt you to switch."
-        />
-        <CheckItem
-          done={hasGasEth}
-          loading={ethLoading}
-          label="Get ETH for gas"
-          hint="You need a tiny amount of ETH on Base for transaction fees (under $0.01 per tx). Coinbase Smart Wallet users: gas is free."
-          action={{
-            label: "Bridge ETH to Base",
-            href: "https://bridge.base.org",
-          }}
-        />
-        <CheckItem
-          done={hasUsdc}
-          loading={usdcLoading}
-          label={`Get USDC on Base (you have $${usdcAmount.toFixed(2)})`}
-          hint="You need USDC on Base to deposit. Buy USDC directly in Coinbase Wallet, or bridge from Ethereum."
-          action={{
-            label: "Get USDC",
-            href: "https://www.coinbase.com/how-to-buy/usd-coin",
-          }}
-        />
-        <CheckItem
-          done={hasApproval}
-          loading={allowanceLoading}
-          label={`Approve USDC for ${role === "genius" ? "Collateral" : "Escrow"}`}
-          hint={`Allow the ${role === "genius" ? "Collateral" : "Escrow"} contract to spend your USDC. This is a one-time approval.`}
-          action={{
-            label: role === "genius" ? "Go to Collateral" : "Go to Dashboard",
-            href: role === "genius" ? "/genius" : "/idiot",
-          }}
-        />
-        <CheckItem
-          done={hasDeposit}
-          loading={depositLoading}
-          label={`Deposit USDC ${role === "genius" ? "as collateral" : "to escrow"} ($${depositAmount.toFixed(2)} deposited)`}
-          hint={
-            role === "genius"
-              ? "Collateral backs your signals. You need enough to cover potential damages."
-              : "Your escrow balance is used to purchase signals."
-          }
-          action={{
-            label: role === "genius" ? "Deposit Collateral" : "Deposit to Escrow",
-            href: role === "genius" ? "/genius" : "/idiot",
-          }}
-        />
-      </div>
+      {/* Collapsible body */}
+      {!collapsed && (
+        <div className="px-5 pb-4 border-t border-slate-100">
+          <div className="divide-y divide-slate-100">
+            <CheckItem
+              done={isConnected}
+              label="Connect wallet"
+              hint="Use Coinbase Smart Wallet (recommended, free gas) or any WalletConnect wallet."
+            />
+            <CheckItem
+              done={onCorrectChain}
+              label="Switch to Base network"
+              hint="Djinn runs on Base (Coinbase L2). Your wallet should prompt you to switch."
+            />
+            <CheckItem
+              done={hasUsdc}
+              loading={usdcLoading}
+              label={`Get USDC on Base${hasUsdc ? "" : ` (you have $${usdcAmount.toFixed(2)})`}`}
+              hint="Buy USDC directly in Coinbase Wallet, or bridge from Ethereum. Gas fees on Base are under $0.01."
+              action={{
+                label: "Get USDC on Coinbase",
+                href: "https://www.coinbase.com/how-to-buy/usd-coin",
+              }}
+            />
+            <CheckItem
+              done={hasDeposit}
+              loading={depositLoading}
+              label={`Deposit USDC to ${depositLabel}${hasDeposit ? "" : ` ($${depositAmount.toFixed(2)} deposited)`}`}
+              hint={depositHint}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

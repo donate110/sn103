@@ -95,7 +95,9 @@ export default function GeniusDashboard() {
     try {
       const result = await depositCollateral(parseUsdc(depositAmount));
       if (result === "approved") {
-        setTxSuccess("USDC approved! Click Deposit again to complete.");
+        // First-time: USDC spending approval completed.
+        // Coinbase Smart Wallet can't handle chained popups, so we need a second click.
+        setTxSuccess("Step 1 of 2 complete: USDC spending approved. Now click Deposit one more time to transfer your USDC.");
         return;
       }
       setDepositAmount("");
@@ -161,18 +163,45 @@ export default function GeniusDashboard() {
 
   if (!isConnected) {
     return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <div className="w-16 h-16 rounded-full bg-genius-100 flex items-center justify-center mb-6">
-          <svg className="w-8 h-8 text-genius-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" />
-          </svg>
+      <div className="max-w-lg mx-auto py-12">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-12 h-12 rounded-full bg-genius-100 flex items-center justify-center">
+            <svg className="w-6 h-6 text-genius-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" />
+            </svg>
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Genius Dashboard</h1>
+            <p className="text-sm text-slate-500">Sell predictions, build your track record</p>
+          </div>
         </div>
-        <h1 className="text-3xl font-bold text-slate-900 mb-2">Genius Dashboard</h1>
-        <p className="text-slate-500 mb-6">
-          Connect your wallet to sell signals and manage your track record.
-        </p>
-        <p className="text-xs text-slate-400">
-          Use the Connect button in the top right corner.
+
+        <div className="rounded-xl border border-slate-200 bg-white p-5 mb-6">
+          <h3 className="font-semibold text-slate-900 text-sm mb-4">Getting started</h3>
+          <div className="space-y-3">
+            {[
+              { step: "1", label: "Connect your wallet", hint: "Use the \"Get Started\" button in the top right. We recommend Coinbase Smart Wallet (free gas on Base).", active: true },
+              { step: "2", label: "Switch to Base network", hint: "Your wallet will prompt you to switch." },
+              { step: "3", label: "Get USDC on Base", hint: "Buy USDC in Coinbase Wallet, or bridge from Ethereum." },
+              { step: "4", label: "Deposit collateral", hint: "Collateral backs your signals and builds trust." },
+              { step: "5", label: "Create your first signal", hint: "Pick a game, set your price, and start selling." },
+            ].map(({ step, label, hint, active }) => (
+              <div key={step} className="flex items-start gap-3">
+                <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${active ? "bg-genius-100 text-genius-700" : "bg-slate-100 text-slate-400"}`}>
+                  {step}
+                </div>
+                <div>
+                  <p className={`text-sm font-medium ${active ? "text-slate-900" : "text-slate-400"}`}>{label}</p>
+                  {active && <p className="text-xs text-slate-500 mt-0.5">{hint}</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <p className="text-xs text-slate-400 text-center">
+          New to crypto?{" "}
+          <a href="/docs/how-it-works" className="text-slate-600 underline">Learn how Djinn works</a>
         </p>
       </div>
     );
