@@ -21,20 +21,19 @@ export default function SdkDocs() {
         leaves your device. The API only ever sees encrypted data.
       </p>
 
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 mb-8">
-        <p className="text-sm text-amber-800">
-          <strong>Coming soon.</strong> The SDK is being extracted from the web client
-          into a standalone package. In the meantime, developers can reference the
-          encryption and Shamir logic in the{" "}
+      <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 mb-8">
+        <p className="text-sm text-green-800">
+          <strong>Available now.</strong> The SDK source is at{" "}
           <a
-            href="https://github.com/djinn-inc/djinn/tree/main/web/lib/crypto.ts"
+            href="https://github.com/djinn-inc/djinn/tree/main/sdk"
             target="_blank"
             rel="noopener noreferrer"
             className="underline"
           >
-            web/lib/crypto.ts
+            sdk/
           </a>{" "}
-          source file.
+          in the repository. Install with <code className="bg-green-100 px-1 rounded text-xs">pnpm add @djinn/sdk</code> or
+          reference the source directly. 35 unit tests cover all cryptographic operations.
         </p>
       </div>
 

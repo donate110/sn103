@@ -77,7 +77,7 @@ test.describe("SDK page", () => {
   test("renders SDK documentation", async ({ page }) => {
     await page.goto("/docs/sdk");
     await expect(page.getByRole("heading", { name: "Client SDK", level: 1 })).toBeVisible();
-    await expect(page.locator("main strong").filter({ hasText: "Coming soon" })).toBeVisible();
+    await expect(page.locator("main strong").filter({ hasText: "Available now" })).toBeVisible();
     // Section headings
     await expect(page.locator("main").getByRole("heading", { name: /1\. Encryption/i })).toBeVisible();
     await expect(page.locator("main").getByRole("heading", { name: /2\. Decoy generation/i })).toBeVisible();
