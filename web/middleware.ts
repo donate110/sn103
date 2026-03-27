@@ -32,6 +32,7 @@ const EXEMPT_PATHS = [
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
 const RATE_LIMIT_MAX = 200; // 200 requests per minute per IP
+const IS_DEV = process.env.NODE_ENV !== "production";
 
 function isExemptPath(pathname: string): boolean {
   return EXEMPT_PATHS.some((p) => pathname.startsWith(p));
@@ -121,35 +122,40 @@ export function middleware(request: NextRequest) {
       request.headers.get("x-real-ip") ||
       "unknown";
 
-    if (ip !== "unknown") {
-      maybeCleanup();
-      const { allowed, remaining } = checkRateLimit(ip);
-      if (!allowed) {
-        const retryAfter = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000);
-        if (pathname.startsWith("/api/")) {
-          return NextResponse.json(
-            {
-              error: "rate_limit_exceeded",
-              message: `Too many requests. Limit: ${RATE_LIMIT_MAX} per minute. Try again in ${retryAfter} seconds.`,
-              retry_after: retryAfter,
-            },
-            {
-              status: 429,
-              headers: {
-                "Retry-After": String(retryAfter),
-                "X-RateLimit-Limit": String(RATE_LIMIT_MAX),
-                "X-RateLimit-Remaining": "0",
+    // Skip rate limiting for localhost (dev/testing)
+    const isLocalhost = ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
+    if (!isLocalhost) {
+
+      if (ip !== "unknown") {
+        maybeCleanup();
+        const { allowed, remaining } = checkRateLimit(ip);
+        if (!allowed) {
+          const retryAfter = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000);
+          if (pathname.startsWith("/api/")) {
+            return NextResponse.json(
+              {
+                error: "rate_limit_exceeded",
+                message: `Too many requests. Limit: ${RATE_LIMIT_MAX} per minute. Try again in ${retryAfter} seconds.`,
+                retry_after: retryAfter,
               },
-            },
-          );
+              {
+                status: 429,
+                headers: {
+                  "Retry-After": String(retryAfter),
+                  "X-RateLimit-Limit": String(RATE_LIMIT_MAX),
+                  "X-RateLimit-Remaining": "0",
+                },
+              },
+            );
+          }
+          // For page requests, return a simple 429
+          return new NextResponse("Too many requests. Please try again shortly.", {
+            status: 429,
+            headers: { "Retry-After": String(retryAfter) },
+          });
         }
-        // For page requests, return a simple 429
-        return new NextResponse("Too many requests. Please try again shortly.", {
-          status: 429,
-          headers: { "Retry-After": String(retryAfter) },
-        });
       }
-    }
+    } // end if (!IS_DEV)
   }
 
   const response = NextResponse.next();

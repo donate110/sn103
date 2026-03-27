@@ -20,11 +20,10 @@ const geniusEndpoints: Endpoint[] = [
     method: "POST",
     path: "/api/genius/signal/prepare",
     description:
-      "Prepare a new signal. Returns validator public keys and parameters needed for client-side encryption and Shamir splitting. The actual pick is never sent to the server.",
+      "Prepare a new signal. Returns validator public keys and Shamir parameters. No pick, event, or line data is sent. The server only learns the signal's commercial terms. Decoys are generated client-side by the SDK.",
     auth: true,
     params: [
       { name: "sport", type: "string", description: "Sport key (e.g., basketball_nba)", required: true },
-      { name: "event_id", type: "string", description: "The Odds API event ID", required: true },
       { name: "max_notional_usdc", type: "number", description: "Maximum total purchase amount", required: true },
       { name: "sla_multiplier_bps", type: "integer", description: "SLA penalty multiplier in basis points (10000 = 1x)" },
       { name: "fee_bps", type: "integer", description: "Fee charged to buyers in basis points (500 = 5%)" },
@@ -33,7 +32,6 @@ const geniusEndpoints: Endpoint[] = [
     response: `{
   "validator_pubkeys": ["0x...", "0x..."],
   "commit_params": { "chain_id": 8453, "contract": "0x4712..." },
-  "suggested_decoys": ["Over 218.5 (-110)", "Under 218.5 (-110)", ...],
   "shamir_n": 10,
   "shamir_k": 3
 }`,
@@ -42,13 +40,14 @@ const geniusEndpoints: Endpoint[] = [
     method: "POST",
     path: "/api/genius/signal/commit",
     description:
-      "Submit the encrypted signal blob and Shamir shares after client-side encryption. Distributes shares to validators.",
+      "Submit the encrypted signal blob and Shamir shares after client-side encryption. The API only sees ciphertext. Distributes shares to validators. The event_id is included here (public on-chain metadata).",
     auth: true,
     params: [
       { name: "encrypted_blob", type: "string", description: "Hex-encoded encrypted signal blob", required: true },
       { name: "commit_hash", type: "string", description: "Keccak256 hash of the blob", required: true },
-      { name: "encrypted_shares", type: "object[]", description: "Per-validator encrypted key and index shares", required: true },
+      { name: "shares", type: "object[]", description: "Per-validator Shamir key and index shares", required: true },
       { name: "commit_tx_hash", type: "string", description: "On-chain commit transaction hash", required: true },
+      { name: "event_id", type: "string", description: "The Odds API event ID (public metadata)", required: true },
     ],
     response: `{
   "signal_id": "0xa3f...",
