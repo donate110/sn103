@@ -16,9 +16,9 @@ Every request includes:
 ## Genius Tools
 
 **IMPORTANT: Client-side encryption required.** The genius's real pick must
-never leave the client unencrypted. Signal creation is a two-step process:
-`prepare` (get validator keys) then `commit` (send encrypted data).
-Use the Djinn SDK or implement the encryption locally.
+never leave the client unencrypted. Use the @djinn/sdk to encrypt locally,
+then call `commit` to distribute the ciphertext. The server never sees
+the plaintext pick, event ID (at prepare time), or which line is real.
 
 ### `GET /api/network/config`
 
