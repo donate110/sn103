@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
  * GET /api/sports
  *
  * Returns the list of supported sports with their display names and keys.
+ * Only includes sports that the validator network can actually settle
+ * (must have an ESPN mapping for score resolution).
  * No authentication required.
  */
 
@@ -16,13 +18,6 @@ const SPORTS = [
   { key: "icehockey_nhl", name: "NHL", category: "Hockey" },
   { key: "soccer_epl", name: "Premier League", category: "Soccer" },
   { key: "soccer_usa_mls", name: "MLS", category: "Soccer" },
-  { key: "soccer_spain_la_liga", name: "La Liga", category: "Soccer" },
-  { key: "soccer_germany_bundesliga", name: "Bundesliga", category: "Soccer" },
-  { key: "soccer_italy_serie_a", name: "Serie A", category: "Soccer" },
-  { key: "soccer_france_ligue_one", name: "Ligue 1", category: "Soccer" },
-  { key: "soccer_uefa_champs_league", name: "Champions League", category: "Soccer" },
-  { key: "mma_mixed_martial_arts", name: "MMA", category: "Combat" },
-  { key: "tennis_atp_french_open", name: "French Open", category: "Tennis" },
 ] as const;
 
 export async function GET() {
