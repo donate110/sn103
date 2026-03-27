@@ -77,7 +77,7 @@ export default function TaoValuation() {
       </h1>
       <div className="w-12 h-0.5 bg-gradient-to-r from-idiot-500 to-genius-500 rounded mb-2" />
       <p className="text-sm text-slate-500 mb-8">
-        Since dTAO Launch (Feb 2025) &mdash; Weekly Snapshots &mdash; Last Updated Feb 23, 2026
+        Since dTAO Launch (Feb 2025). Weekly Snapshots. Last Updated Feb 23, 2026
       </p>
 
       {/* Intro callout */}
@@ -90,7 +90,7 @@ export default function TaoValuation() {
         </p>
         <p className="text-sm text-slate-500 leading-relaxed mb-2">
           <strong className="text-slate-900">Top-down:</strong> Take the total TAO in circulation and
-          multiply by its market price. This is what CoinGecko shows &mdash; the simple &ldquo;market cap.&rdquo;
+          multiply by its market price. This is what CoinGecko shows: the simple &ldquo;market cap.&rdquo;
         </p>
         <p className="text-sm text-slate-500 leading-relaxed mb-2">
           <strong className="text-slate-900">Bottom-up:</strong> Go subnet by subnet, add up what each one
@@ -138,12 +138,12 @@ export default function TaoValuation() {
           the <span className="text-cyan-500">cyan line</span> (dynamic subnets). Almost all of TAO&rsquo;s
           value was in root staking (<span className="text-orange-500">orange</span>), not in actual subnets
           doing AI work. Over the year, dynamic subnets grew from{" "}
-          <span className="text-emerald-700 font-semibold">$70M to $730M</span> &mdash; a 10x increase &mdash;
+          <span className="text-emerald-700 font-semibold">$70M to $730M</span>, a 10x increase,
           while root shrank.
         </p>
         <p className="text-sm text-slate-700 leading-relaxed">
           The <span className="text-violet-500">purple line</span> (TAO locked in pools) is the &ldquo;hard
-          floor&rdquo; &mdash; the actual TAO committed as liquidity backing. It tracks closely to the{" "}
+          floor&rdquo;: the actual TAO committed as liquidity backing. It tracks closely to the{" "}
           <span className="text-emerald-700 font-semibold">green line</span> (total bottom-up), confirming that
           most of the bottom-up value is real liquidity, not just paper valuation.
         </p>
@@ -197,7 +197,7 @@ export default function TaoValuation() {
         </p>
         <p className="text-sm text-slate-700 leading-relaxed mb-2">
           The <span className="text-red-400 font-semibold">red line</span> (circulating supply) is flat at
-          ~9.6M TAO &mdash; new emissions roughly match burns. But underneath, a massive reallocation is
+          ~9.6M TAO; new emissions roughly match burns. But underneath, a massive reallocation is
           underway:
         </p>
         <p className="text-sm text-slate-700 leading-relaxed mb-2">
@@ -211,7 +211,7 @@ export default function TaoValuation() {
           The <span className="text-emerald-700 font-semibold">green line</span> (all subnets
           mark-to-market including root) has been climbing steadily from 6.3M to 10.2M TAO. This is
           remarkable: it now <strong>exceeds circulating supply</strong>. How is that possible? Because AMM
-          pricing creates leverage &mdash; a small amount of TAO in a pool supports a much larger notional
+          pricing creates leverage: a small amount of TAO in a pool supports a much larger notional
           market cap for the alpha tokens. More on this in Chart 3.
         </p>
       </div>
@@ -261,14 +261,14 @@ export default function TaoValuation() {
       {/* ==================== CHART 3: RATIOS ==================== */}
       <div className="mb-4">
         <h3 className="text-lg font-bold text-slate-900 mb-2 border-b border-slate-200 pb-2">
-          Chart 3: The Convergence &mdash; and the Crossover
+          Chart 3: The Convergence and the Crossover
         </h3>
         <p className="text-sm text-slate-700 leading-relaxed mb-2">
           This is the most important chart. It shows three ratios that tell the story of dTAO&rsquo;s first year.
         </p>
         <p className="text-sm text-slate-700 leading-relaxed mb-2">
           The <span className="text-emerald-700 font-semibold">green line</span> is the ratio of bottom-up to
-          top-down valuation &mdash; what fraction of TAO&rsquo;s market cap is explained by the sum of its
+          top-down valuation: what fraction of TAO&rsquo;s market cap is explained by the sum of its
           subnets. At dTAO launch, it was <span className="text-amber-700 font-semibold">75%</span>: a quarter
           of TAO&rsquo;s value was just &ldquo;floating&rdquo; in wallets, not committed anywhere. Over the
           year it climbed steadily to{" "}
@@ -280,11 +280,11 @@ export default function TaoValuation() {
           How is BU/TD &gt; 100% possible? Because the AMM creates leverage. When you stake 1 TAO into a subnet
           pool, the resulting alpha tokens can have a notional value greater than 1 TAO (the mark-to-market price
           times total supply exceeds the actual TAO backing). It&rsquo;s similar to how a stock&rsquo;s market
-          cap can exceed its book value &mdash; the market is pricing in future earnings (emissions).
+          cap can exceed its book value: the market is pricing in future earnings (emissions).
         </p>
         <p className="text-sm text-slate-700 leading-relaxed">
           The <span className="text-cyan-500">cyan line</span> shows dynamic subnets as a percentage of total
-          supply &mdash; growing from <span className="text-amber-700 font-semibold">2.5% to 43%</span>. This
+          supply.growing from <span className="text-amber-700 font-semibold">2.5% to 43%</span>. This
           is the &ldquo;real economy&rdquo; of Bittensor. The{" "}
           <span className="text-orange-500">orange line</span> shows root&rsquo;s declining share of staked
           TAO: from <span className="text-amber-700 font-semibold">98% to 73%</span>. The network has gone
@@ -392,11 +392,11 @@ export default function TaoValuation() {
         </p>
         <p className="mb-1">
           <strong>Dynamic Subnets MCap</strong> = same as above, excluding root. This is the &ldquo;real
-          economy&rdquo; &mdash; actual AI subnet value.
+          economy&rdquo;: actual AI subnet value.
         </p>
         <p className="mb-1">
           <strong>TAO in Pools (Hard Floor)</strong> = &Sigma;(tao_in) across all AMM pools. This is the actual
-          TAO locked as liquidity &mdash; the minimum realizable value.
+          TAO locked as liquidity, the minimum realizable value.
         </p>
         <p className="mb-1">
           <strong>Root Staked</strong> = TAO staked in SN0 (the base-layer &ldquo;savings account&rdquo;).
