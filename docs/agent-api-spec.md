@@ -15,16 +15,20 @@ Every request includes:
 
 ## Genius Tools
 
-### `POST /api/genius/signal`
+**IMPORTANT: Client-side encryption required.** The genius's real pick must
+never leave the client unencrypted. Signal creation is a two-step process:
+`prepare` (get validator keys) then `commit` (send encrypted data).
+Use the Djinn SDK or implement the encryption locally.
 
-Create a new signal end-to-end: encrypt the pick, generate decoys, commit
-on-chain, Shamir-split the real index, distribute shares to validators.
+### `POST /api/genius/signal/prepare`
+
+Get validator public keys and suggested decoys for a new signal.
+No secret data is sent in this request.
 
 ```json
 {
   "sport": "basketball_nba",
   "event_id": "abc123def456",
-  "pick": "Celtics -4.5 (-110)",
   "max_notional_usdc": 1000,
   "sla_multiplier_bps": 15000,
   "fee_bps": 500,
@@ -35,11 +39,49 @@ on-chain, Shamir-split the real index, distribute shares to validators.
 Response:
 ```json
 {
+  "validator_pubkeys": ["0x...", "0x...", "0x...", "0x..."],
+  "commit_params": { "chain_id": 8453, "contract": "0x4712..." },
+  "suggested_decoys": [
+    "Over 218.5 (-110)", "Under 218.5 (-110)",
+    "Lakers -3.5 (-110)", "Lakers +3.5 (-110)",
+    "Celtics ML (-150)", "Lakers ML (+130)",
+    "Over 220.5 (-110)", "Under 216.5 (-110)",
+    "Celtics -6.5 (+120)"
+  ],
+  "shamir_n": 10,
+  "shamir_k": 3
+}
+```
+
+### `POST /api/genius/signal/commit`
+
+Submit encrypted signal blob and Shamir shares after client-side encryption.
+The API only sees ciphertext. Distributes encrypted shares to validators.
+
+```json
+{
+  "encrypted_blob": "0x...",
+  "commit_hash": "0x...",
+  "encrypted_shares": [
+    { "validator_uid": 2, "encrypted_key_share": "0x...", "encrypted_index_share": "0x..." },
+    { "validator_uid": 41, "encrypted_key_share": "0x...", "encrypted_index_share": "0x..." }
+  ],
+  "commit_tx_hash": "0x...",
+  "sport": "basketball_nba",
+  "fee_bps": 500,
+  "sla_multiplier_bps": 15000,
+  "max_notional_usdc": 1000,
+  "expires_at": "2026-03-28T00:00:00Z"
+}
+```
+
+Response:
+```json
+{
   "signal_id": "0xa3f...",
   "status": "active",
-  "decoy_count": 9,
   "validators_received_shares": 4,
-  "commit_tx_hash": "0x...",
+  "validators_total": 4,
   "collateral_required": 1500,
   "collateral_available": 8000
 }
@@ -397,8 +439,8 @@ Each endpoint maps to a tool. Example for Claude/OpenAI function calling:
 
 ```json
 {
-  "name": "create_signal",
-  "description": "Create a new signal as a genius. Encrypts the pick, generates decoys, commits on-chain, and distributes key shares to validators. Requires sufficient collateral.",
+  "name": "prepare_signal",
+  "description": "Prepare a new signal as a genius. Returns validator public keys and suggested decoys for client-side encryption. The actual pick is NEVER sent to the server. After calling this, use the Djinn SDK locally to encrypt the pick, generate Shamir shares, then call commit_signal.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -409,10 +451,6 @@ Each endpoint maps to a tool. Example for Claude/OpenAI function calling:
       "event_id": {
         "type": "string",
         "description": "The Odds API event ID for the game"
-      },
-      "pick": {
-        "type": "string",
-        "description": "The pick in standard format, e.g. 'Celtics -4.5 (-110)', 'Over 218.5 (-110)', 'Lakers ML (-150)'"
       },
       "max_notional_usdc": {
         "type": "number",
@@ -431,7 +469,7 @@ Each endpoint maps to a tool. Example for Claude/OpenAI function calling:
         "description": "ISO 8601 expiry time (must be before game start)"
       }
     },
-    "required": ["sport", "event_id", "pick", "max_notional_usdc"]
+    "required": ["sport", "event_id", "max_notional_usdc"]
   }
 }
 ```
