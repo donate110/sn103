@@ -224,10 +224,12 @@ test.describe("Attestation product suite", () => {
 });
 
 test.describe("Homepage updates", () => {
-  test("has Docs and Network links in quick nav", async ({ page }) => {
+  test("has text links for navigation", async ({ page }) => {
     await page.goto("/");
+    // Simple text links (no icon buttons)
     await expect(page.getByRole("link", { name: "Docs" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Network" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "About" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Leaderboard" })).toBeVisible();
   });
 
   test("no em dashes in visible text", async ({ page }) => {
