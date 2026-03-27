@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import Tooltip from "@/components/Tooltip";
 
 export const metadata: Metadata = {
   title: "About | Djinn",
@@ -80,8 +81,8 @@ export default function About() {
             </div>
             <h3 className="font-semibold text-slate-900 mb-2">Commit Signal</h3>
             <p className="text-sm text-slate-500">
-              Geniuses encrypt their prediction with AES-256-GCM and commit it
-              on-chain alongside 10 decoy lines.
+              Geniuses encrypt their prediction with <Tooltip term="AES-256-GCM" /> and commit it
+              on-chain alongside 10 <Tooltip term="decoy lines" />.
             </p>
           </div>
           <div className="card text-center">
@@ -90,8 +91,8 @@ export default function About() {
             </div>
             <h3 className="font-semibold text-slate-900 mb-2">Purchase Access</h3>
             <p className="text-sm text-slate-500">
-              Idiots deposit USDC and purchase signal access. Miners verify
-              line availability. The key is released via Shamir secret sharing.
+              Idiots deposit <Tooltip term="USDC" /> and purchase signal access. Miners verify
+              line availability via <Tooltip term="TLSNotary" />. The key is released via <Tooltip term="Shamir's Secret Sharing">Shamir secret sharing</Tooltip>.
             </p>
           </div>
           <div className="card text-center">
@@ -100,7 +101,7 @@ export default function About() {
             </div>
             <h3 className="font-semibold text-slate-900 mb-2">Audit & Settle</h3>
             <p className="text-sm text-slate-500">
-              After 10 signals, a validator audit computes the Quality Score. Positive =
+              After 10 signals, validators compute the <Tooltip term="Quality Score" /> using <Tooltip term="MPC" />. Positive =
               Genius keeps fees. Negative = collateral slashed, credits issued.
             </p>
           </div>
@@ -224,8 +225,8 @@ export default function About() {
           <div className="card">
             <h3 className="font-semibold text-slate-900 mb-2">Line availability is attested</h3>
             <p className="text-sm text-slate-500">
-              Before key release, Bittensor miners verify that the signal&apos;s line
-              is actually available at real sportsbooks.
+              Before key release, <Tooltip term="Bittensor" /> miners verify that the signal&apos;s line
+              is actually available at real sportsbooks using <Tooltip term="TLSNotary" />.
             </p>
           </div>
           <div className="card">

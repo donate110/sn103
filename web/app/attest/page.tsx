@@ -514,6 +514,77 @@ function ResultCard({
           )}
         </div>
       )}
+
+      {/* Product Suite */}
+      <div className="mt-16 pt-8 border-t border-slate-200">
+        <h2 className="text-xl font-bold text-slate-900 mb-2">Web Attestation Suite</h2>
+        <p className="text-sm text-slate-500 mb-6">
+          This free tool demonstrates decentralized web attestation. For production use
+          with storage, notifications, and advanced features, see our specialized products.
+          All are built on the same TLSNotary infrastructure.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          <a
+            href="https://debust.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group rounded-xl border border-slate-200 bg-white p-5 hover:border-blue-300 hover:shadow-md transition-all"
+          >
+            <h3 className="font-semibold text-slate-900 group-hover:text-blue-600 mb-1">
+              Debust
+            </h3>
+            <p className="text-xs text-slate-500 mb-2">
+              Adds persistent storage, user accounts, and email notifications to web
+              attestation. Ideal for monitoring websites for changes, archiving content,
+              or proving what a page showed at a specific time.
+            </p>
+            <span className="text-xs text-slate-400">Experimental</span>
+          </a>
+
+          <a
+            href="https://firmrecord.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group rounded-xl border border-slate-200 bg-white p-5 hover:border-blue-300 hover:shadow-md transition-all"
+          >
+            <h3 className="font-semibold text-slate-900 group-hover:text-blue-600 mb-1">
+              FirmRecord
+            </h3>
+            <p className="text-xs text-slate-500 mb-2">
+              Business-focused attestation for compliance, audit trails, and regulatory
+              evidence. Prove what data your systems received from third-party APIs and
+              services.
+            </p>
+            <span className="text-xs text-slate-400">Experimental</span>
+          </a>
+
+          <a
+            href="https://proveaudit.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group rounded-xl border border-slate-200 bg-white p-5 hover:border-blue-300 hover:shadow-md transition-all"
+          >
+            <h3 className="font-semibold text-slate-900 group-hover:text-blue-600 mb-1">
+              ProveAudit
+            </h3>
+            <p className="text-xs text-slate-500 mb-2">
+              Attest large, custom requests including LLM prompts and API responses.
+              Designed for complex attestation scenarios that need custom headers,
+              request bodies, or multi-step flows.
+            </p>
+            <span className="text-xs text-slate-400">Experimental</span>
+          </a>
+        </div>
+
+        <p className="text-xs text-slate-400">
+          The difference between these products is in access constraints, not content.
+          This free tool attests any URL but does not store results. Debust adds storage
+          and accounts but struggles with very large or custom requests. ProveAudit
+          handles arbitrary request construction. All use the same decentralized
+          TLSNotary infrastructure powered by Bittensor Subnet 103 miners.
+        </p>
+      </div>
     </div>
   );
 }
