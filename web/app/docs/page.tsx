@@ -66,7 +66,7 @@ export default function Docs() {
         <h2 className="text-lg font-semibold text-slate-900 mb-4">
           Choose your path
         </h2>
-        <div className="grid grid-cols-3 gap-0 border border-slate-200 rounded-xl overflow-hidden">
+        <div className="grid grid-cols-3 gap-0 border border-slate-200 rounded-xl overflow-hidden text-sm sm:text-base">
           {/* Header row */}
           <div className="bg-slate-50 p-4 border-b border-r border-slate-200" />
           <div className="bg-slate-50 p-4 border-b border-r border-slate-200 text-center">
