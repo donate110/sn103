@@ -20,38 +20,24 @@ never leave the client unencrypted. Signal creation is a two-step process:
 `prepare` (get validator keys) then `commit` (send encrypted data).
 Use the Djinn SDK or implement the encryption locally.
 
-### `POST /api/genius/signal/prepare`
+### `GET /api/network/config`
 
-Get validator public keys and Shamir parameters for a new signal.
-**No event data or pick data is sent in this request.** The server
-learns only the signal's commercial terms (pricing, SLA, expiry).
-The client generates its own decoys locally using the SDK.
-
-```json
-{
-  "sport": "basketball_nba",
-  "max_notional_usdc": 1000,
-  "sla_multiplier_bps": 15000,
-  "fee_bps": 500,
-  "expires_at": "2026-03-28T00:00:00Z"
-}
-```
+Validator configuration needed by the SDK for signal creation.
+Cached; does not change per signal. No authentication required.
 
 Response:
 ```json
 {
-  "validator_pubkeys": ["0x...", "0x...", "0x...", "0x..."],
-  "commit_params": { "chain_id": 8453, "contract": "0x4712..." },
+  "validators": [
+    { "uid": 2, "pubkey": "0x...", "endpoint": "http://34.58.165.14:8421" },
+    { "uid": 41, "pubkey": "0x...", "endpoint": "http://37.60.251.252:8421" }
+  ],
+  "chain_id": 8453,
+  "signal_commitment_address": "0x4712...",
   "shamir_n": 10,
   "shamir_k": 3
 }
 ```
-
-> **Security note:** The `prepare` endpoint does not receive event_id,
-> pick, or any data that could identify the specific game or line. The
-> event_id is only included in the on-chain commit (where it is public
-> metadata). Decoy generation MUST happen client-side using the SDK or
-> local odds data. Never accept server-generated decoys verbatim.
 
 ### `POST /api/genius/signal/commit`
 
@@ -439,33 +425,11 @@ Each endpoint maps to a tool. Example for Claude/OpenAI function calling:
 
 ```json
 {
-  "name": "prepare_signal",
-  "description": "Prepare a new signal as a genius. Returns validator public keys and Shamir parameters for client-side encryption. NO pick, event, or line data is sent. After calling this, use the Djinn SDK locally to encrypt the pick, generate decoys, create Shamir shares, then call commit_signal with the ciphertext.",
+  "name": "get_network_config",
+  "description": "Fetch validator public keys, Shamir parameters, and contract addresses needed by the SDK for signal creation. This data is cached and doesn't change per signal. Call once and reuse.",
   "parameters": {
     "type": "object",
-    "properties": {
-      "sport": {
-        "type": "string",
-        "description": "Sport key from supported sports list"
-      },
-      "max_notional_usdc": {
-        "type": "number",
-        "description": "Maximum total purchase amount in USDC"
-      },
-      "sla_multiplier_bps": {
-        "type": "integer",
-        "description": "SLA penalty multiplier in basis points (10000 = 1x)"
-      },
-      "fee_bps": {
-        "type": "integer",
-        "description": "Fee charged to buyers in basis points (500 = 5%)"
-      },
-      "expires_at": {
-        "type": "string",
-        "description": "ISO 8601 expiry time (must be before game start)"
-      }
-    },
-    "required": ["sport", "max_notional_usdc"]
+    "properties": {}
   }
 }
 ```
