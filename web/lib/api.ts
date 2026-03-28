@@ -321,19 +321,14 @@ export function getMinerClient(): MinerClient {
 }
 
 /**
- * Resilient line check that queries multiple validators in parallel and
- * merges results.
+ * Resilient line check that queries validators in parallel.
  *
- * Each validator proxies to a random miner. ~50% of miners in the network
- * have broken Odds API data, returning 0 available lines for valid games.
- * Even working miners may report different subsets of lines as available.
+ * Each validator fans out to up to 15 miners in parallel and merges
+ * results (union of available_indices). The client queries multiple
+ * validators for redundancy and merges across validators too.
  *
- * Strategy: fire parallel checks through ALL discovered validators
- * (most miners have broken Odds API keys, so we need maximum coverage).
- * Merge the union of all available_indices. For each index, use the
- * richest bookmaker data from any response. This maximizes the chance
- * that the real pick (unknown to the client) is in the available set
- * for the MPC check.
+ * No platform fallback: line verification is done exclusively by the
+ * decentralized miner network.
  */
 export async function resilientCheckLines(
   req: CheckRequest,
@@ -345,85 +340,17 @@ export async function resilientCheckLines(
     validators = [getValidatorClient()];
   }
 
-  // Shuffle to spread load, then check ALL validators in parallel.
-  // Most miners (~7/8) have broken Odds API keys, so checking only 4
-  // has a ~50% chance of missing the one working miner.
-  for (let i = validators.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [validators[i], validators[j]] = [validators[j], validators[i]];
-  }
-
-  // Fire parallel checks through ALL validators (lightweight endpoint)
+  // Query all validators in parallel. Each validator queries up to 15
+  // miners internally, so even a single validator provides broad coverage.
   const settled = await Promise.allSettled(
     validators.map((v) => v.checkLines(req)),
   );
 
-  // Collect all successful responses
+  // Collect successful responses (skip those with api_error)
   const responses: CheckResponse[] = [];
   for (const r of settled) {
     if (r.status === "fulfilled" && !r.value.api_error) {
       responses.push(r.value);
-    }
-  }
-
-  // If all parallel checks failed, try sequential retries on each
-  if (responses.length === 0) {
-    for (let attempt = 0; attempt < validators.length; attempt++) {
-      const v = validators[attempt];
-      try {
-        const result = await v.checkLines(req);
-        if (!result.api_error) responses.push(result);
-        if (result.available_indices.length > 0) break;
-      } catch {
-        // Try next
-      }
-    }
-  }
-
-  // Merge: for each line index, take the union of availability.
-  // If ANY miner says a line is available, it's available.
-  const mergedResults: Map<number, LineResult> = new Map();
-  for (const resp of responses) {
-    for (const lr of resp.results) {
-      const existing = mergedResults.get(lr.index);
-      if (!existing) {
-        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
-      } else if (lr.available && !existing.available) {
-        // Upgrade: this miner says available, use its data
-        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
-      } else if (lr.available && existing.available && lr.bookmakers.length > existing.bookmakers.length) {
-        // Both available, but this one has richer bookmaker data
-        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
-      }
-    }
-  }
-
-  const mergedArray = req.lines.map((l) =>
-    mergedResults.get(l.index) ?? { index: l.index, available: false, bookmakers: [] },
-  );
-  let mergedIndices = mergedArray.filter((r) => r.available).map((r) => r.index);
-
-  // Fallback: when all miners report 0 available lines OR all miners are
-  // unreachable (broken API keys, quota exhausted), check against the
-  // platform's own API key via the server-side /api/check-lines endpoint.
-  if (mergedIndices.length === 0) {
-    const reason = responses.length === 0 ? "all miners unreachable" : "all miners returned 0 available";
-    console.log(`[resilientCheckLines] ${reason}, trying platform fallback`);
-    try {
-      const fallbackResp = await fetch("/api/check-lines", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lines: req.lines }),
-      });
-      if (fallbackResp.ok) {
-        const fallback: CheckResponse = await fallbackResp.json();
-        if (fallback.available_indices.length > 0) {
-          console.log("[resilientCheckLines] platform fallback found", fallback.available_indices.length, "available lines");
-          return fallback;
-        }
-      }
-    } catch (e) {
-      console.log("[resilientCheckLines] platform fallback failed:", String(e).slice(0, 200));
     }
   }
 
@@ -436,9 +363,29 @@ export async function resilientCheckLines(
       })),
       available_indices: [],
       response_time_ms: 0,
-      api_error: "All validators/miners unreachable",
+      api_error: "No miners could verify line availability. The miner network may be temporarily down.",
     };
   }
+
+  // Merge across validators: union of available_indices, richest data wins
+  const mergedResults: Map<number, LineResult> = new Map();
+  for (const resp of responses) {
+    for (const lr of resp.results) {
+      const existing = mergedResults.get(lr.index);
+      if (!existing) {
+        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
+      } else if (lr.available && !existing.available) {
+        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
+      } else if (lr.available && existing.available && lr.bookmakers.length > existing.bookmakers.length) {
+        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
+      }
+    }
+  }
+
+  const mergedArray = req.lines.map((l) =>
+    mergedResults.get(l.index) ?? { index: l.index, available: false, bookmakers: [] },
+  );
+  const mergedIndices = mergedArray.filter((r) => r.available).map((r) => r.index);
 
   return {
     results: mergedArray,

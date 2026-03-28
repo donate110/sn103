@@ -1523,16 +1523,20 @@ def create_app(
 
     @app.post("/v1/check")
     async def check_lines(request: Request) -> dict:
-        """Proxy a line-check request to a miner with signed auth.
+        """Fan-out line-check to multiple miners in parallel, merge results.
 
-        The web client cannot call miners directly because miner auth
-        requires the caller IP to be a registered subnet neuron or
-        a signed request from a validator hotkey.  This endpoint lets
-        buyers verify lines by routing through the validator.
+        Queries up to MAX_CHECK_MINERS miners concurrently and takes the
+        union of available_indices.  If ANY miner says a line is available,
+        it counts as available.  This compensates for miners with broken
+        or exhausted Odds API keys.  Faster, more accurate miners naturally
+        contribute more to the merged result.
         """
         import json as _json
         import random as _random
+        import time as _time
         from djinn_validator.api.middleware import create_signed_headers
+
+        MAX_CHECK_MINERS = 15
 
         body = await request.body()
 
@@ -1546,7 +1550,6 @@ def create_app(
         except _json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid JSON")
 
-        # Find a reachable miner
         if not neuron:
             raise HTTPException(status_code=503, detail="Validator not connected to network")
 
@@ -1554,46 +1557,116 @@ def create_app(
         if not miner_uids:
             raise HTTPException(status_code=503, detail="No miners available")
 
+        # Build list of reachable miner endpoints
         _random.shuffle(miner_uids)
-        last_error = ""
-        for uid in miner_uids[:5]:  # try up to 5 miners
+        targets: list[tuple[int, str]] = []  # (uid, url)
+        for uid in miner_uids:
             axon = neuron.get_axon_info(uid)
             ip = axon.get("ip", "")
             port = axon.get("port", 0)
             if not ip or not port or ip in ("0.0.0.0", "127.0.0.1"):
                 continue
+            targets.append((uid, f"http://{ip}:{port}/v1/check"))
+            if len(targets) >= MAX_CHECK_MINERS:
+                break
 
-            check_url = f"http://{ip}:{port}/v1/check"
-            auth_headers: dict[str, str] = {}
-            if neuron.wallet:
-                auth_headers = create_signed_headers("/v1/check", body, neuron.wallet)
+        if not targets:
+            raise HTTPException(status_code=503, detail="No reachable miners")
 
+        auth_headers: dict[str, str] = {}
+        if neuron.wallet:
+            auth_headers = create_signed_headers("/v1/check", body, neuron.wallet)
+
+        start = _time.monotonic()
+
+        # Fire all miner checks in parallel
+        async def _query_miner(uid: int, url: str) -> tuple[int, dict | None, float]:
+            t0 = _time.monotonic()
             try:
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
-                        check_url,
+                        url,
                         content=body,
                         headers={"Content-Type": "application/json", **auth_headers},
                         timeout=10.0,
                     )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        # If the miner's Odds API key is broken/exhausted, it returns
-                        # 200 with api_error set and 0 available lines. Try next miner
-                        # instead of returning a useless response.
-                        if data.get("api_error") and not data.get("available_indices"):
-                            last_error = f"Miner {uid} API error: {data['api_error']}"
-                            log.warning("check_proxy_api_error", miner_uid=uid, api_error=data["api_error"])
-                            continue
-                        log.info("check_proxy_ok", miner_uid=uid)
-                        return data
-                    last_error = f"Miner {uid} returned HTTP {resp.status_code}"
-                    log.warning("check_proxy_error", miner_uid=uid, status=resp.status_code)
+                elapsed = _time.monotonic() - t0
+                if resp.status_code != 200:
+                    log.warning("check_miner_error", miner_uid=uid, status=resp.status_code, elapsed_ms=round(elapsed * 1000))
+                    return (uid, None, elapsed)
+                data = resp.json()
+                if data.get("api_error") and not data.get("available_indices"):
+                    log.warning("check_miner_api_error", miner_uid=uid, api_error=data["api_error"], elapsed_ms=round(elapsed * 1000))
+                    return (uid, None, elapsed)
+                return (uid, data, elapsed)
             except Exception as e:
-                last_error = f"Miner {uid}: {e}"
-                log.warning("check_proxy_failed", miner_uid=uid, error=str(e))
+                elapsed = _time.monotonic() - t0
+                log.warning("check_miner_failed", miner_uid=uid, error=str(e)[:100], elapsed_ms=round(elapsed * 1000))
+                return (uid, None, elapsed)
 
-        raise HTTPException(status_code=502, detail=f"All miners unreachable: {last_error}")
+        results = await asyncio.gather(*[_query_miner(uid, url) for uid, url in targets])
+
+        # Merge: union of available_indices, richest bookmaker data per line
+        merged_results: dict[int, dict] = {}
+        successful_miners = 0
+        fastest_uid: int | None = None
+        fastest_time: float = float("inf")
+
+        for uid, data, elapsed in results:
+            if data is None:
+                continue
+            successful_miners += 1
+            if elapsed < fastest_time:
+                fastest_time = elapsed
+                fastest_uid = uid
+
+            for lr in data.get("results", []):
+                idx = lr.get("index")
+                if idx is None:
+                    continue
+                existing = merged_results.get(idx)
+                if not existing:
+                    merged_results[idx] = {**lr, "bookmakers": list(lr.get("bookmakers", []))}
+                elif lr.get("available") and not existing.get("available"):
+                    merged_results[idx] = {**lr, "bookmakers": list(lr.get("bookmakers", []))}
+                elif lr.get("available") and existing.get("available"):
+                    if len(lr.get("bookmakers", [])) > len(existing.get("bookmakers", [])):
+                        merged_results[idx] = {**lr, "bookmakers": list(lr.get("bookmakers", []))}
+
+        total_elapsed = _time.monotonic() - start
+
+        if successful_miners == 0:
+            raise HTTPException(status_code=502, detail="All miners unreachable or have broken API keys")
+
+        # Build response
+        all_results = []
+        for line in payload["lines"]:
+            idx = line.get("index")
+            if idx in merged_results:
+                all_results.append(merged_results[idx])
+            else:
+                all_results.append({"index": idx, "available": False, "bookmakers": []})
+
+        available_indices = [r["index"] for r in all_results if r.get("available")]
+
+        log.info(
+            "check_merged",
+            miners_queried=len(targets),
+            miners_ok=successful_miners,
+            available=len(available_indices),
+            total_lines=len(payload["lines"]),
+            fastest_miner=fastest_uid,
+            fastest_ms=round(fastest_time * 1000) if fastest_uid else None,
+            total_ms=round(total_elapsed * 1000),
+        )
+
+        return {
+            "results": all_results,
+            "available_indices": available_indices,
+            "response_time_ms": round(total_elapsed * 1000),
+            "miners_queried": len(targets),
+            "miners_ok": successful_miners,
+        }
 
     @app.post("/v1/analytics/attempt")
     async def analytics(req: AnalyticsRequest) -> dict:
