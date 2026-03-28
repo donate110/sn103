@@ -40,6 +40,43 @@ export function setSportsbookPrefs(address: string, prefs: string[]): void {
 }
 
 // ---------------------------------------------------------------------------
+// Genius signal creation defaults
+// ---------------------------------------------------------------------------
+
+export interface GeniusDefaults {
+  maxPriceBps?: string;
+  slaMultiplier?: string;
+  maxNotional?: string;
+  minNotional?: string;
+  expiresIn?: string;
+  isExclusive?: boolean;
+}
+
+function geniusDefaultsKey(address: string): string {
+  return `djinn-genius-defaults:${address.toLowerCase()}`;
+}
+
+export function getGeniusDefaults(address?: string): GeniusDefaults {
+  if (!address || typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(geniusDefaultsKey(address));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setGeniusDefaults(address: string, defaults: GeniusDefaults): void {
+  try {
+    localStorage.setItem(geniusDefaultsKey(address), JSON.stringify(defaults));
+  } catch {
+    // localStorage may be unavailable
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Purchased signal data (idiot side)
 // ---------------------------------------------------------------------------
 

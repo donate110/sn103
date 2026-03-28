@@ -6,6 +6,7 @@ import { useAccount, useWalletClient } from "wagmi";
 import { useCommitSignal, useCollateral, useDepositCollateral, useWalletUsdcBalance } from "@/lib/hooks";
 import { saveSavedSignalsEncrypted, getSavedSignalsEncrypted } from "@/lib/hooks/useSettledSignals";
 import { ADDRESSES } from "@/lib/contracts";
+import { getGeniusDefaults, setGeniusDefaults } from "@/lib/preferences";
 import SecretModal from "@/components/SecretModal";
 import { triggerOnboardingRefresh } from "@/components/OnboardingChecklist";
 import PrivateWorkspace from "@/components/PrivateWorkspace";
@@ -140,6 +141,19 @@ export default function CreateSignal() {
       })
       .finally(() => setSeedDeriving(false));
   }, [walletClient]);
+
+  // Load saved genius defaults on mount
+  const [defaultsSaved, setDefaultsSaved] = useState(false);
+  useEffect(() => {
+    if (!address) return;
+    const d = getGeniusDefaults(address);
+    if (d.maxPriceBps) setMaxPriceBps(d.maxPriceBps);
+    if (d.slaMultiplier) setSlaMultiplier(d.slaMultiplier);
+    if (d.maxNotional) setMaxNotional(d.maxNotional);
+    if (d.minNotional !== undefined) setMinNotional(d.minNotional);
+    if (d.expiresIn) setExpiresIn(d.expiresIn);
+    if (d.isExclusive !== undefined) setIsExclusive(d.isExclusive);
+  }, [address]);
 
   // Platform liquidity (from subgraph)
   const [totalVolume, setTotalVolume] = useState<string | null>(null);
@@ -1616,6 +1630,23 @@ export default function CreateSignal() {
           }
           return null;
         })()}
+
+        {/* Save defaults */}
+        <div className="flex items-center gap-2 mb-2">
+          <button
+            type="button"
+            className="text-xs text-slate-400 hover:text-slate-600 underline underline-offset-2 transition-colors"
+            onClick={() => {
+              if (!address) return;
+              setGeniusDefaults(address, { maxPriceBps, slaMultiplier, maxNotional, minNotional, expiresIn, isExclusive });
+              setDefaultsSaved(true);
+              setTimeout(() => setDefaultsSaved(false), 2000);
+            }}
+          >
+            Save as my defaults
+          </button>
+          {defaultsSaved && <span className="text-xs text-green-600">Saved!</span>}
+        </div>
 
         {/* Sticky CTA bar */}
         <div className="sticky bottom-0 -mx-5 px-5 py-3 sm:-mx-8 sm:px-8 bg-white/95 backdrop-blur-sm border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] mt-6 -mb-6">

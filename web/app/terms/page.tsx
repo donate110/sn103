@@ -118,7 +118,9 @@ export default function Terms() {
       <p>
         Djinn does not custody user funds. Funds are held in auditable, open-source smart
         contracts on the Base blockchain. A 0.5% protocol fee is collected on each
-        purchase and transferred to the protocol treasury.
+        purchase and transferred to the protocol treasury. During active settlement
+        periods, collateral withdrawals may be temporarily frozen to ensure accurate
+        accounting. This freeze typically resolves within one transaction cycle.
       </p>
 
       <h2 className="text-xl font-semibold text-slate-900 mt-10 mb-3">
@@ -170,6 +172,9 @@ export default function Terms() {
         <li>
           <strong>Smart contract risk:</strong> While audited, smart contracts may contain
           vulnerabilities. Funds deposited into smart contracts are subject to this risk.
+          All platform contracts use upgradeable proxy patterns. Contract logic may be
+          updated through a governance timelock process. While this enables bug fixes and
+          improvements, it means contract behavior can change after you deposit funds.
         </li>
         <li>
           <strong>Blockchain risk:</strong> Transactions on the Base blockchain are
@@ -188,7 +193,9 @@ export default function Terms() {
           <strong>Protocol risk:</strong> The Djinn protocol depends on a decentralized
           validator network for MPC computation and outcome verification. Validator
           downtime, consensus failures, or network partitions may delay or affect
-          settlement.
+          settlement. Signal purchases and decryption depend on validators performing
+          secure multi-party computation. If insufficient validators are online, signal
+          purchases may temporarily fail or take longer than usual.
         </li>
         <li>
           <strong>Stablecoin risk:</strong> USDC is issued by Circle. Its value, liquidity,
