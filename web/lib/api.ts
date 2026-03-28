@@ -380,19 +380,6 @@ export async function resilientCheckLines(
     }
   }
 
-  if (responses.length === 0) {
-    return {
-      results: req.lines.map((l) => ({
-        index: l.index,
-        available: false,
-        bookmakers: [],
-      })),
-      available_indices: [],
-      response_time_ms: 0,
-      api_error: "All validators/miners unreachable",
-    };
-  }
-
   // Merge: for each line index, take the union of availability.
   // If ANY miner says a line is available, it's available.
   const mergedResults: Map<number, LineResult> = new Map();
@@ -416,11 +403,12 @@ export async function resilientCheckLines(
   );
   let mergedIndices = mergedArray.filter((r) => r.available).map((r) => r.index);
 
-  // Fallback: when all miners report 0 available lines (common when miners
-  // have exhausted their Odds API quotas), check against the platform's own
-  // API key via the server-side /api/check-lines endpoint.
-  if (mergedIndices.length === 0 && responses.length > 0) {
-    console.log("[resilientCheckLines] all miners returned 0 available, trying platform fallback");
+  // Fallback: when all miners report 0 available lines OR all miners are
+  // unreachable (broken API keys, quota exhausted), check against the
+  // platform's own API key via the server-side /api/check-lines endpoint.
+  if (mergedIndices.length === 0) {
+    const reason = responses.length === 0 ? "all miners unreachable" : "all miners returned 0 available";
+    console.log(`[resilientCheckLines] ${reason}, trying platform fallback`);
     try {
       const fallbackResp = await fetch("/api/check-lines", {
         method: "POST",
@@ -437,6 +425,19 @@ export async function resilientCheckLines(
     } catch (e) {
       console.log("[resilientCheckLines] platform fallback failed:", String(e).slice(0, 200));
     }
+  }
+
+  if (responses.length === 0) {
+    return {
+      results: req.lines.map((l) => ({
+        index: l.index,
+        available: false,
+        bookmakers: [],
+      })),
+      available_indices: [],
+      response_time_ms: 0,
+      api_error: "All validators/miners unreachable",
+    };
   }
 
   return {

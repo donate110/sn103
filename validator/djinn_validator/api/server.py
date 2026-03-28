@@ -1577,8 +1577,16 @@ def create_app(
                         timeout=10.0,
                     )
                     if resp.status_code == 200:
+                        data = resp.json()
+                        # If the miner's Odds API key is broken/exhausted, it returns
+                        # 200 with api_error set and 0 available lines. Try next miner
+                        # instead of returning a useless response.
+                        if data.get("api_error") and not data.get("available_indices"):
+                            last_error = f"Miner {uid} API error: {data['api_error']}"
+                            log.warning("check_proxy_api_error", miner_uid=uid, api_error=data["api_error"])
+                            continue
                         log.info("check_proxy_ok", miner_uid=uid)
-                        return resp.json()
+                        return data
                     last_error = f"Miner {uid} returned HTTP {resp.status_code}"
                     log.warning("check_proxy_error", miner_uid=uid, status=resp.status_code)
             except Exception as e:
