@@ -253,7 +253,7 @@ class LineChecker:
                 return False
             if not math.isfinite(line.line) or not math.isfinite(odds.point):
                 return False
-            if line.line != odds.point:
+            if abs(line.line - odds.point) > self._tolerance:
                 return False
 
         return True
@@ -276,5 +276,16 @@ class LineChecker:
 
     @staticmethod
     def _side_matches(candidate_side: str, odds_name: str) -> bool:
-        """Case-insensitive comparison of the side/name."""
-        return candidate_side.lower() == odds_name.lower()
+        """Case-insensitive comparison with substring fallback.
+
+        Exact match first, then check if either contains the other.
+        This handles variations like "NY Rangers" vs "New York Rangers".
+        """
+        import re
+        norm_side = re.sub(r"[^a-z0-9]", "", candidate_side.lower())
+        norm_name = re.sub(r"[^a-z0-9]", "", odds_name.lower())
+        if norm_side == norm_name:
+            return True
+        if norm_side in norm_name or norm_name in norm_side:
+            return True
+        return False

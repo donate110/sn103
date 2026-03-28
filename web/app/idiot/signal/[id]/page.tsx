@@ -206,20 +206,39 @@ export default function PurchaseSignal() {
       // most miners have broken Odds API keys and return 0 available lines.
       console.log("[purchase] starting line check for signal", params.id, "with", candidateLines.length, "lines");
       let checkResult: CheckResponse | null = null;
+      let checkError: string | null = null;
       try {
         const result = await resilientCheckLines({ lines: candidateLines });
         console.log("[purchase] line check complete:", result.available_indices.length, "of", candidateLines.length, "available");
         if (result.available_indices.length > 0) {
           checkResult = result;
+        } else {
+          // Extract reasons why lines are unavailable for better error messaging
+          const reasons = result.results
+            .map((r) => (r as unknown as Record<string, unknown>).unavailable_reason as string | undefined)
+            .filter(Boolean);
+          const uniqueReasons = [...new Set(reasons)];
+          if (result.api_error) {
+            checkError = "Could not reach any odds data provider. Please try again in a minute.";
+          } else if (uniqueReasons.includes("game_started")) {
+            checkError = "This game appears to have started or been removed from the odds feed.";
+          } else if (uniqueReasons.includes("line_moved")) {
+            checkError = "The line has moved since this signal was created. The exact line is no longer available at any sportsbook.";
+          } else if (uniqueReasons.includes("market_unavailable")) {
+            checkError = "This market is temporarily unavailable at all sportsbooks. Try again shortly.";
+          } else if (uniqueReasons.includes("no_data")) {
+            checkError = "No odds data available for this event. The odds provider may be temporarily down.";
+          }
         }
       } catch (e) {
         console.log("[purchase] line check FAILED:", String(e).slice(0, 200));
+        checkError = "Could not reach any odds data provider. Please try again in a minute.";
       }
 
       if (!checkResult || checkResult.available_indices.length === 0) {
-        console.log("[purchase] ABORT: no lines available");
+        console.log("[purchase] ABORT: no lines available, reason:", checkError);
         setStepError(
-          "No lines are currently available at any sportsbook. The signal may have gone stale. Check back later.",
+          checkError || "No lines are currently available at any sportsbook. The signal may have gone stale. Check back later.",
         );
         setStep("idle");
         return;
@@ -592,7 +611,7 @@ export default function PurchaseSignal() {
     step === "decrypting";
 
   const stepLabel: Record<string, string> = {
-    checking_lines: "Checking sportsbook lines (5-10s)...",
+    checking_lines: "Checking sportsbook lines (up to 30s)...",
     purchasing_validator: "Verifying with validator network (5-15s)...",
     purchasing_chain: purchaseLoading && !txHash
       ? "Confirm the transaction in your wallet..."
