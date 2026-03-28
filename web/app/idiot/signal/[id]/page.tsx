@@ -249,8 +249,12 @@ export default function PurchaseSignal() {
       setAvailableIndices(checkResult.available_indices);
       console.log("[purchase] available_indices:", checkResult.available_indices,
         "total_lines:", candidateLines.length,
+        "source:", (checkResult as unknown as Record<string, unknown>).source || "miner",
         "unavailable:", checkResult.results.filter(r => !r.available).map(r =>
           `${r.index}:${(r as unknown as Record<string, unknown>).unavailable_reason ?? "unknown"}`
+        ),
+        "available:", checkResult.results.filter(r => r.available).map(r =>
+          `${r.index}:${r.bookmakers.length}books`
         ));
 
       // Extract best odds across all bookmakers for any available line
@@ -326,9 +330,35 @@ export default function PurchaseSignal() {
           .map((r) => r.reason?.message || "unknown");
         // Parse common validator errors into friendly messages
         const allNotFound = errors.length > 0 && errors.every((e) => e.includes("not found"));
-        const friendlyMsg = allNotFound
-          ? "This signal's encryption keys are not held by any active validator. It may have been created during a network reset and cannot be purchased."
-          : "Signal not currently available. The pick may have gone stale. Check back later.";
+        // Check for MPC-specific failure reasons from fulfilled (but unavailable) responses
+        const mpcReasons = availabilityResults
+          .filter((r) => r.status === "fulfilled" && !r.value.available)
+          .map((r) => {
+            if (r.status !== "fulfilled") return undefined;
+            const v = r.value as unknown as Record<string, unknown>;
+            return v.mpc_failure_reason as string | undefined;
+          })
+          .filter(Boolean);
+        const insufficientPeers = mpcReasons.some((r) => r?.includes("insufficient") || r?.includes("init_failed"));
+        const noAvailableIndices = mpcReasons.some((r) => r?.includes("no_available_indices"));
+
+        let friendlyMsg: string;
+        if (allNotFound) {
+          friendlyMsg = "This signal's encryption keys are not held by any active validator. It may have been created during a network reset and cannot be purchased.";
+        } else if (insufficientPeers) {
+          friendlyMsg = "Not enough validators are online to verify this signal right now. Please try again in a few minutes.";
+        } else if (noAvailableIndices) {
+          friendlyMsg = "No sportsbook lines are currently available for verification. Please try again shortly.";
+        } else {
+          // MPC completed but real pick not in available set, OR mix of errors
+          const unavailCount = checkResult.results.filter((r) => !r.available).length;
+          if (unavailCount > 0 && unavailCount < checkResult.results.length) {
+            friendlyMsg = `${unavailCount} of ${checkResult.results.length} lines are temporarily unavailable at sportsbooks. The signal's pick may be among them. Try again in a minute.`;
+          } else {
+            friendlyMsg = "Signal not currently available. The pick may have gone stale. Check back later.";
+          }
+        }
+        console.log("[purchase] MPC failure reasons:", mpcReasons, "rejected errors:", errors, "unavail lines:", checkResult.results.filter((r) => !r.available).length);
         setStepError(friendlyMsg);
         setStep("idle");
         return;

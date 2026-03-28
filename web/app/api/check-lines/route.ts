@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
         url.searchParams.set("markets", marketsStr);
         url.searchParams.set("oddsFormat", "decimal");
 
-        const resp = await fetch(url.toString(), { next: { revalidate: 60 } });
+        const resp = await fetch(url.toString(), { cache: "no-store" });
         if (!resp.ok) {
           fetchErrors.push(`${sport}: HTTP ${resp.status}`);
           return;
@@ -181,6 +181,7 @@ export async function POST(request: NextRequest) {
 
     if (!matchingEvent) {
       unavailable_reason = events.length === 0 ? "no_data" : "game_started";
+      console.log(`[check-lines] line ${line.index}: no matching event (${unavailable_reason}), event_id=${line.event_id}, teams=${line.home_team} vs ${line.away_team}, events_count=${events.length}`);
       results.push({ index: line.index, available: false, bookmakers: [], unavailable_reason });
       continue;
     }
@@ -223,6 +224,9 @@ export async function POST(request: NextRequest) {
 
     if (bookmakers.length === 0) {
       unavailable_reason = "market_unavailable";
+      const marketsAvail = (matchingEvent.bookmakers as Array<{ markets?: Array<{ key: string }> }> || [])
+        .flatMap((bm) => (bm.markets || []).map((m) => m.key));
+      console.log(`[check-lines] line ${line.index}: event found but no matching bookmaker, market=${line.market}, side=${line.side}, available_markets=[${[...new Set(marketsAvail)]}]`);
     }
 
     results.push({
