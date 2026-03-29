@@ -67,10 +67,3 @@ export default function Tooltip({ term, children }: TooltipProps) {
   );
 }
 
-/**
- * Utility: wrap known glossary terms in a text string with tooltips.
- * For use in JSX when you want automatic term detection.
- */
-export function glossaryTerms(): string[] {
-  return Object.keys(GLOSSARY);
-}

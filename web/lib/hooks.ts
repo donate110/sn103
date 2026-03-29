@@ -872,50 +872,6 @@ export function useWithdrawCollateral() {
 }
 
 // ---------------------------------------------------------------------------
-// USDC approval hook (reusable for any spender)
-// ---------------------------------------------------------------------------
-
-export function useApproveUsdc() {
-  const { data: walletClient } = useWalletClient();
-  const { address } = useAccount();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const approve = useCallback(
-    async (spender: string, amount: bigint) => {
-      if (!walletClient || !address) throw new Error("Wallet not connected");
-      assertCorrectChain(walletClient);
-      setLoading(true);
-      setError(null);
-      try {
-        const usdcAddr = ADDRESSES.usdc as Hex;
-        debug("[approve-usdc] approving", spender, amount.toString());
-        const hash = await walletClient.writeContract({
-          address: usdcAddr,
-          abi: ERC20_ABI,
-          functionName: "approve",
-          account: address,
-          chain: expectedChain,
-          args: [spender as Hex, amount],
-        });
-        debug("[approve-usdc] tx:", hash);
-        await waitForTx(hash);
-        return hash;
-      } catch (err) {
-        console.error("[approve-usdc] FAILED:", err);
-        setError(humanizeError(err, "Approval failed"));
-        throw err;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [walletClient, address]
-  );
-
-  return { approve, loading, error };
-}
-
-// ---------------------------------------------------------------------------
 // Early exit hook — either party can trigger before 10 signals
 // ---------------------------------------------------------------------------
 
@@ -963,48 +919,6 @@ export function useEarlyExit() {
 }
 
 // ---------------------------------------------------------------------------
-// Account state hook — check signal count for a genius-idiot pair
-// ---------------------------------------------------------------------------
-
-export function useAccountState(genius?: string, idiot?: string) {
-  const [signalCount, setSignalCount] = useState<number>(0);
-  const [isAuditReady, setIsAuditReady] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  const refresh = useCallback(async () => {
-    if (!genius || !idiot) return;
-    setLoading(true);
-    try {
-      const provider = getReadProvider();
-      const account = new ethers.Contract(
-        ADDRESSES.account,
-        [
-          "function getSignalCount(address genius, address idiot) view returns (uint256)",
-          "function isAuditReady(address genius, address idiot) view returns (bool)",
-        ],
-        provider,
-      );
-      const [count, ready] = await Promise.all([
-        account.getSignalCount(genius, idiot),
-        account.isAuditReady(genius, idiot),
-      ]);
-      setSignalCount(Number(count));
-      setIsAuditReady(ready);
-    } catch {
-      // Silently fail — account may not exist yet
-    } finally {
-      setLoading(false);
-    }
-  }, [genius, idiot]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  return { signalCount, isAuditReady, loading, refresh };
-}
-
-// ---------------------------------------------------------------------------
 // Void (cancel) a signal
 // ---------------------------------------------------------------------------
 
@@ -1046,12 +960,6 @@ export function useCancelSignal() {
   );
 
   return { cancelSignal, loading, error, txHash };
-}
-
-/** @deprecated Use useCancelSignal instead */
-export function useVoidSignal() {
-  const result = useCancelSignal();
-  return { voidSignal: result.cancelSignal, loading: result.loading, error: result.error, txHash: result.txHash };
 }
 
 // ---------------------------------------------------------------------------
