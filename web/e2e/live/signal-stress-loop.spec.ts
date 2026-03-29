@@ -756,10 +756,9 @@ async function purchaseFirstAvailableSignal(
   try {
     await heading.waitFor({ state: "visible", timeout: 15_000 });
   } catch {
-      const h1 = await page.locator("h1").first().textContent().catch(() => "none");
-      logLine("WARN", `  Could not load browse signals page (h1="${h1}")`);
-      return false;
-    }
+    const h1 = await page.locator("h1").first().textContent().catch(() => "none");
+    logLine("WARN", `  Could not load browse signals page (h1="${h1}")`);
+    return false;
   }
 
   // Wait for signal cards to load (async blockchain query).
