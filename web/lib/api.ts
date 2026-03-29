@@ -308,16 +308,8 @@ export async function discoverValidatorClients(): Promise<ValidatorClient[]> {
   }
 }
 
-export function getValidatorClients(): ValidatorClient[] {
-  return getValidatorUrls().map((url) => new ValidatorClient(url.trim()));
-}
-
-export function getValidatorClient(): ValidatorClient {
+function getValidatorClient(): ValidatorClient {
   return new ValidatorClient(getValidatorUrls()[0].trim());
-}
-
-export function getMinerClient(): MinerClient {
-  return new MinerClient(getMinerUrl());
 }
 
 /**

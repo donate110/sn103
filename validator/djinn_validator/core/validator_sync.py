@@ -8,8 +8,6 @@ agree on the same proposed set, it atomically replaces the old one.
 
 from __future__ import annotations
 
-from typing import Any
-
 import httpx
 import structlog
 

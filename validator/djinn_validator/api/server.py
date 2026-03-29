@@ -2382,7 +2382,6 @@ def create_app(
 
         # Try share_x lookup on known good peers (unsigned)
         share_x_results = {}
-        import httpx as _httpx_diag
         for peer in peers[:5]:
             try:
                 resp = await _orchestrator._http.get(

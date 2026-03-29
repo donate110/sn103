@@ -48,7 +48,6 @@ from djinn_validator.core.ot_network import (
 from djinn_validator.core.spdz import (
     AuthenticatedParticipantState,
     AuthenticatedShare,
-    authenticate_value,
     verify_mac_opening,
 )
 from djinn_validator.utils.circuit_breaker import CircuitBreaker

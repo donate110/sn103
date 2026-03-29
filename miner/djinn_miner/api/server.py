@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 import time
-
-from djinn_miner.core.tlsn_bootstrap import ensure_binary
 from typing import TYPE_CHECKING, Any
 
 import structlog

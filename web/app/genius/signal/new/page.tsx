@@ -19,7 +19,7 @@ import {
   deriveSignalKey,
   isMasterSeedCached,
 } from "@/lib/crypto";
-import { discoverValidatorClients, getValidatorClient, resilientCheckLines } from "@/lib/api";
+import { discoverValidatorClients, resilientCheckLines } from "@/lib/api";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
 import { fetchProtocolStats } from "@/lib/subgraph";
 import { formatUsdc } from "@/lib/types";

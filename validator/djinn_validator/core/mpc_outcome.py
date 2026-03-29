@@ -20,14 +20,11 @@ The MPC never outputs the secret index — only the outcome value (0-3).
 
 from __future__ import annotations
 
-import secrets
 from dataclasses import dataclass, field
 
 import structlog
 
 from djinn_validator.core.mpc import (
-    BeaverTriple,
-    _split_secret_at_points,
     generate_beaver_triples,
     reconstruct_at_zero,
 )
