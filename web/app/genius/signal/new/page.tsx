@@ -123,6 +123,7 @@ export default function CreateSignal() {
   const [seedDeriving, setSeedDeriving] = useState(false);
   const [seedReady, setSeedReady] = useState(() => isMasterSeedCached());
   const seedAttemptedRef = useRef(false);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     if (!walletClient || seedAttemptedRef.current || isMasterSeedCached()) {
@@ -280,6 +281,9 @@ export default function CreateSignal() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    try {
     setStepError(null);
 
     if (!realPick) {
@@ -656,6 +660,9 @@ export default function CreateSignal() {
       // Stay on configure page for recoverable errors (wallet, validation)
       // so the user can fix and retry without losing their settings
       setStep("configure");
+    }
+    } finally {
+      submittingRef.current = false;
     }
   };
 

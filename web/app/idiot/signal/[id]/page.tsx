@@ -32,7 +32,47 @@ type PurchaseStep =
   | "collecting_shares"
   | "decrypting"
   | "complete"
-  | "error";
+  | "error"
+  | "recovering";
+
+// Persist in-progress purchase state so it survives page refresh.
+// After the on-chain TX lands (USDC deducted), we save the signal ID
+// and buyer address. On mount, if we find incomplete state, we skip
+// straight to share collection and decryption.
+const PURCHASE_STATE_KEY = "djinn_purchase_pending";
+
+interface PendingPurchase {
+  signalId: string;
+  buyer: string;
+  timestamp: number;
+}
+
+function savePendingPurchase(signalId: string, buyer: string) {
+  try {
+    localStorage.setItem(
+      PURCHASE_STATE_KEY,
+      JSON.stringify({ signalId, buyer, timestamp: Date.now() } satisfies PendingPurchase),
+    );
+  } catch { /* quota exceeded or SSR */ }
+}
+
+function loadPendingPurchase(): PendingPurchase | null {
+  try {
+    const raw = localStorage.getItem(PURCHASE_STATE_KEY);
+    if (!raw) return null;
+    const parsed: PendingPurchase = JSON.parse(raw);
+    // Expire after 1 hour (shares may no longer be available)
+    if (Date.now() - parsed.timestamp > 3_600_000) {
+      localStorage.removeItem(PURCHASE_STATE_KEY);
+      return null;
+    }
+    return parsed;
+  } catch { return null; }
+}
+
+function clearPendingPurchase() {
+  try { localStorage.removeItem(PURCHASE_STATE_KEY); } catch { /* SSR */ }
+}
 
 export default function PurchaseSignal() {
   const params = useParams();
@@ -124,6 +164,89 @@ export default function PurchaseSignal() {
     observer.observe(el);
     return () => observer.disconnect();
   }, [step]);
+
+  // Recovery: if user refreshed after on-chain purchase but before decryption,
+  // resume the share collection and decryption steps automatically.
+  useEffect(() => {
+    if (!signalId || !isConnected || !address || !signal || step !== "idle") return;
+    const pending = loadPendingPurchase();
+    if (!pending || pending.signalId !== signalId.toString() || pending.buyer !== address) return;
+
+    let cancelled = false;
+    const recover = async () => {
+      setStep("recovering");
+      setStepError(null);
+      try {
+        const validators = await discoverValidatorClients();
+        const purchaseReq = {
+          buyer_address: address,
+          sportsbook: "",
+          available_indices: [] as number[],
+          buyer_signature: "",
+        };
+        const shareResults = await Promise.allSettled(
+          validators.map((v) => v.purchaseSignal(signalId.toString(), purchaseReq)),
+        );
+        if (cancelled) return;
+
+        const shares: ShamirShare[] = [];
+        for (const result of shareResults) {
+          if (
+            result.status === "fulfilled" &&
+            result.value.available &&
+            result.value.encrypted_key_share &&
+            result.value.share_x != null
+          ) {
+            const x = result.value.share_x;
+            if (!shares.some((s) => s.x === x)) {
+              shares.push({ x, y: BigInt("0x" + result.value.encrypted_key_share) });
+            }
+          }
+        }
+
+        if (shares.length === 0) {
+          setStepError("Recovery: could not collect key shares from validators. They may have restarted. Your purchase is on-chain but the pick cannot be decrypted right now.");
+          setStep("idle");
+          return;
+        }
+
+        const reconstructedBigInt = reconstructSecret(shares);
+        const keyBytes = bigIntToKey(reconstructedBigInt);
+        const blobBytes = signal.encryptedBlob.startsWith("0x")
+          ? signal.encryptedBlob.slice(2)
+          : signal.encryptedBlob;
+        const blobStr = new TextDecoder().decode(fromHex(blobBytes));
+        const colonIdx = blobStr.indexOf(":");
+        if (colonIdx === -1) throw new Error("Invalid encrypted blob format");
+        const iv = blobStr.slice(0, colonIdx);
+        const ciphertext = blobStr.slice(colonIdx + 1);
+        const plaintext = await decrypt(ciphertext, iv, keyBytes);
+        const parsed = JSON.parse(plaintext);
+
+        if (cancelled) return;
+        setDecryptedPick(parsed);
+        clearPendingPurchase();
+        savePurchasedSignal(address, {
+          signalId: signalId.toString(),
+          realIndex: parsed.realIndex,
+          pick: parsed.pick,
+          sportsbook: "",
+          notional: "0",
+          purchasedAt: Math.floor(Date.now() / 1000),
+        });
+        setStep("complete");
+      } catch (err) {
+        if (!cancelled) {
+          setStepError(`Recovery failed: ${err instanceof Error ? err.message : "Unknown error"}. Your USDC was spent on-chain. Contact support with signal ID ${signalId}.`);
+          setStep("idle");
+        }
+      }
+    };
+
+    recover();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signalId, isConnected, address, signal]);
 
   if (!isConnected) {
     return (
@@ -431,6 +554,9 @@ export default function PurchaseSignal() {
 
       await purchase(signalId, notionalBig, oddsBig);
 
+      // Persist state so we can recover if user refreshes after payment
+      savePendingPurchase(signalId.toString(), buyerAddress);
+
       // Step 4: Collect key shares from validators (payment now exists on-chain)
       // Skip if we already got enough shares (dev mode)
       if (collectedShares.length < 7) {
@@ -561,6 +687,7 @@ export default function PurchaseSignal() {
         }
       }
 
+      clearPendingPurchase();
       setStep("complete");
       triggerOnboardingRefresh();
     } catch (err) {
@@ -648,6 +775,7 @@ export default function PurchaseSignal() {
       : "Confirming on Base Sepolia (10-30s)...",
     collecting_shares: "Collecting decryption keys (5s)...",
     decrypting: "Decrypting your signal...",
+    recovering: "Recovering your purchase (refreshed mid-purchase)...",
   };
 
   return (
