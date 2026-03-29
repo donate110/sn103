@@ -981,12 +981,32 @@ async def _request_and_verify_proof(
         return False, False
 
 
-# Known-good HTTPS URLs for attestation challenges. The validator
-# fetches these itself to confirm the miner's proof is for the correct server.
+# Known-good HTTPS URLs for attestation challenges. Requirements:
+# - Public, no auth, HTTPS only
+# - Response under 10KB (must fit in 512KB MPC circuit with headroom)
+# - Live/dynamic data (harder to fabricate; caching won't help cheaters)
+# - Varied domains (tests TLS handshake across different CAs and servers)
+# - ToS-compatible: open source, public domain, or explicitly free for any use
 _ATTESTATION_CHALLENGE_URLS = [
+    # Reflectors -- vary per request (open source, designed for testing)
     "https://httpbin.org/get",
-    "https://api.github.com/zen",
     "https://httpbin.org/headers",
+    # Government / public domain data
+    "https://earthquake.usgs.gov/fdsnws/event/1/count?format=geojson&starttime=2025-01-01",
+    "https://api.nbp.pl/api/exchangerates/rates/a/usd?format=json",
+    "https://date.nager.at/api/v3/NextPublicHolidays/US",
+    "https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY",
+    "https://api.fda.gov/food/enforcement.json?limit=1",
+    # Open source APIs (MIT / Apache 2.0)
+    "https://dog.ceo/api/breeds/image/random",
+    "https://api.spacexdata.com/v4/launches/latest",
+    "https://official-joke-api.appspot.com/random_joke",
+    # Explicitly free APIs (no ToS restrictions on automated access)
+    "https://api.chucknorris.io/jokes/random",
+    "https://uselessfacts.jsph.pl/api/v2/facts/random",
+    "https://api.adviceslip.com/advice",
+    "https://catfact.ninja/fact",
+    "https://randomfox.ca/floof/",
 ]
 
 
