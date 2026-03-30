@@ -47,7 +47,7 @@ const IDIOT_KEY = (() => {
 })();
 
 const USDC_ADDRESS = (process.env.NEXT_PUBLIC_USDC_ADDRESS ||
-  "0x26a9F00523fa5Cf2f18119854b2dd959CF792fB8") as Hex;
+  "0x00e8293b05dbD3732EF3396ad1483E87e7265054") as Hex;
 
 const transport = http(RPC_URL);
 const publicClient = createPublicClient({ chain: baseSepolia, transport });

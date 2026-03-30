@@ -19,6 +19,7 @@ import { ADDRESSES, SIGNAL_COMMITMENT_ABI } from "@/lib/contracts";
 const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
 const MAX_LIMIT = 100;
 const SCAN_BLOCKS = 100_000; // How far back to scan for SignalCommitted events
+const CHUNK_SIZE = 9_999; // Max blocks per queryFilter call (RPC provider limit)
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -47,10 +48,21 @@ export async function GET(request: NextRequest) {
       provider,
     );
 
-    // Query SignalCommitted events to find signal IDs
+    // Query SignalCommitted events in chunks to avoid RPC block range limits
     const geniusFilter = genius ? ethers.getAddress(genius) : null;
     const filter = contract.filters.SignalCommitted(null, geniusFilter);
-    const events = await contract.queryFilter(filter, -SCAN_BLOCKS);
+    const currentBlock = await provider.getBlockNumber();
+    const fromBlock = Math.max(0, currentBlock - SCAN_BLOCKS);
+    const events: (ethers.EventLog | ethers.Log)[] = [];
+    for (let start = fromBlock; start <= currentBlock; start += CHUNK_SIZE) {
+      const end = Math.min(start + CHUNK_SIZE - 1, currentBlock);
+      try {
+        const chunk = await contract.queryFilter(filter, start, end);
+        events.push(...chunk);
+      } catch {
+        // Skip failed chunks rather than crashing the entire request
+      }
+    }
 
     const now = Math.floor(Date.now() / 1000);
     const signals: Record<string, unknown>[] = [];
