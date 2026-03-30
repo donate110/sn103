@@ -418,11 +418,10 @@ export default function PurchaseSignal() {
       };
 
       // MPC availability check: query all validators. Distributed MPC
-      // computation takes 30-45s on the current network (measured: UID 1
-      // completes in ~43s). Use a 50s client timeout to accommodate this.
-      // Some validators have shorter internal timeouts (15-35s) and will
-      // respond with their own timeout error before our client timeout.
-      const MPC_TIMEOUT_MS = 50_000;
+      // computation takes 30-45s direct, 45-60s through proxy (measured:
+      // UID 1 completes in ~43s direct, ~55s via Vercel proxy). Use 90s
+      // to accommodate proxy latency and network variability.
+      const MPC_TIMEOUT_MS = 90_000;
       const availabilityResults = await Promise.allSettled(
         validators.map((v) =>
           Promise.race([
@@ -791,7 +790,7 @@ export default function PurchaseSignal() {
 
   const stepLabel: Record<string, string> = {
     checking_lines: "Checking sportsbook lines (up to 30s)...",
-    purchasing_validator: "Verifying with validator network (30-50s)...",
+    purchasing_validator: "Verifying with validator network (up to 60s)...",
     purchasing_chain: purchaseLoading && !txHash
       ? "Confirm the transaction in your wallet..."
       : "Confirming on Base Sepolia (10-30s)...",
