@@ -417,53 +417,33 @@ export default function PurchaseSignal() {
         buyer_signature: buyerSig,
       };
 
-      // MPC availability check: query all validators with generous timeout.
-      // Validators run distributed MPC which can take 20-30s depending on
-      // network conditions. We try twice: first at 25s, retry at 35s.
-      const MPC_TIMEOUT_MS = 25_000;
+      // MPC availability check: query all validators. Distributed MPC
+      // computation takes 30-45s on the current network (measured: UID 1
+      // completes in ~43s). Use a 50s client timeout to accommodate this.
+      // Some validators have shorter internal timeouts (15-35s) and will
+      // respond with their own timeout error before our client timeout.
+      const MPC_TIMEOUT_MS = 50_000;
+      const availabilityResults = await Promise.allSettled(
+        validators.map((v) =>
+          Promise.race([
+            v.purchaseSignal(signalId.toString(), purchaseReq),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("MPC check timeout")), MPC_TIMEOUT_MS),
+            ),
+          ]),
+        ),
+      );
 
-      const runMpcCheck = async (timeoutMs: number) => {
-        return Promise.allSettled(
-          validators.map((v) =>
-            Promise.race([
-              v.purchaseSignal(signalId.toString(), purchaseReq),
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("MPC check timeout")), timeoutMs),
-              ),
-            ]),
-          ),
-        );
-      };
-
-      let availabilityResults = await runMpcCheck(MPC_TIMEOUT_MS);
-
-      // Check if any validator confirmed the signal is available
+      // Check if any validator confirmed the signal is available.
       // Accept both "available" and "payment_required" as positive signals:
       // payment_required means the validator confirmed availability but
       // wants on-chain payment before releasing the key share.
-      let anyAvailable = availabilityResults.some(
+      const anyAvailable = availabilityResults.some(
         (r) => r.status === "fulfilled" && (
           r.value.available ||
           (r.value as unknown as Record<string, string>).status === "payment_required"
         ),
       );
-
-      // Retry once with a longer timeout if all timed out (MPC can be slow)
-      if (!anyAvailable) {
-        const allTimedOut = availabilityResults.every(
-          (r) => r.status === "rejected" && r.reason?.message?.includes("timeout"),
-        );
-        if (allTimedOut) {
-          console.log("[purchase] All MPC checks timed out at", MPC_TIMEOUT_MS, "ms. Retrying with 35s...");
-          availabilityResults = await runMpcCheck(35_000);
-          anyAvailable = availabilityResults.some(
-            (r) => r.status === "fulfilled" && (
-              r.value.available ||
-              (r.value as unknown as Record<string, string>).status === "payment_required"
-            ),
-          );
-        }
-      }
 
       // Log MPC results from each validator for debugging
       console.log("[purchase] MPC results:", availabilityResults.map((r, i) => {
@@ -811,7 +791,7 @@ export default function PurchaseSignal() {
 
   const stepLabel: Record<string, string> = {
     checking_lines: "Checking sportsbook lines (up to 30s)...",
-    purchasing_validator: "Verifying with validator network (5-15s)...",
+    purchasing_validator: "Verifying with validator network (30-50s)...",
     purchasing_chain: purchaseLoading && !txHash
       ? "Confirm the transaction in your wallet..."
       : "Confirming on Base Sepolia (10-30s)...",
