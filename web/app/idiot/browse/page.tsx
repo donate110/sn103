@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
-import { useActiveSignals } from "@/lib/hooks/useSignals";
+import { useBrowseSignals } from "@/lib/hooks/useBrowseSignals";
 import { useActiveRelationships } from "@/lib/hooks/useActiveRelationships";
 import { formatUsdc, formatBps, truncateAddress } from "@/lib/types";
 
@@ -29,7 +29,7 @@ export default function BrowseSignals() {
   const { address } = useAccount();
   const [sportFilter, setSportFilter] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("expiry");
-  const { signals, loading, error: signalError } = useActiveSignals(sportFilter || undefined);
+  const { signals, loading, error: signalError } = useBrowseSignals(sportFilter || undefined);
   const { relationships } = useActiveRelationships(address, "idiot");
 
   const geniusesWithOpenAuditSets = useMemo(() => {

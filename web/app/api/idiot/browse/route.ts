@@ -18,8 +18,13 @@ import { ADDRESSES, SIGNAL_COMMITMENT_ABI } from "@/lib/contracts";
 
 const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
 const MAX_LIMIT = 100;
-const SCAN_BLOCKS = 100_000; // How far back to scan for SignalCommitted events
+const DEPLOY_BLOCK = Number(process.env.NEXT_PUBLIC_DEPLOY_BLOCK ?? "0");
 const CHUNK_SIZE = 9_999; // Max blocks per queryFilter call (RPC provider limit)
+
+// In-memory cache for the browse endpoint to avoid re-scanning on every request.
+// Serverless cold starts will re-populate, but warm instances serve instantly.
+let browseCache: { signals: Record<string, unknown>[]; lastBlock: number; updatedAt: number } | null = null;
+const BROWSE_CACHE_TTL_MS = 30_000; // 30 seconds
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -48,78 +53,125 @@ export async function GET(request: NextRequest) {
       provider,
     );
 
-    // Query SignalCommitted events in chunks to avoid RPC block range limits
+    // Use cached results if fresh enough
+    const now = Math.floor(Date.now() / 1000);
+    if (browseCache && Date.now() - browseCache.updatedAt < BROWSE_CACHE_TTL_MS) {
+      // Filter cached signals (remove newly expired ones)
+      const signals = browseCache.signals.filter((s) => {
+        if ((s.expires_at_unix as number) < now) return false;
+        if (sport && s.sport !== sport) return false;
+        if (genius && (s.genius as string).toLowerCase() !== ethers.getAddress(genius).toLowerCase()) return false;
+        return true;
+      });
+
+      if (sortBy === "expires_soon") {
+        signals.sort((a, b) => String(a.expires_at).localeCompare(String(b.expires_at)));
+      } else if (sortBy === "fee") {
+        signals.sort((a, b) => (a.fee_bps as number) - (b.fee_bps as number));
+      }
+
+      const paged = signals.slice(offset, offset + limit);
+      return NextResponse.json({ signals: paged, total: signals.length, offset, limit });
+    }
+
+    // Query SignalCommitted events in parallel chunks starting from deploy block
     const geniusFilter = genius ? ethers.getAddress(genius) : null;
     const filter = contract.filters.SignalCommitted(null, geniusFilter);
     const currentBlock = await provider.getBlockNumber();
-    const fromBlock = Math.max(0, currentBlock - SCAN_BLOCKS);
-    const events: (ethers.EventLog | ethers.Log)[] = [];
+    const fromBlock = DEPLOY_BLOCK > 0 ? DEPLOY_BLOCK : Math.max(0, currentBlock - 100_000);
+
+    // Build chunk ranges and query with limited concurrency to avoid RPC rate limits
+    const chunkRanges: [number, number][] = [];
     for (let start = fromBlock; start <= currentBlock; start += CHUNK_SIZE) {
-      const end = Math.min(start + CHUNK_SIZE - 1, currentBlock);
-      try {
-        const chunk = await contract.queryFilter(filter, start, end);
-        events.push(...chunk);
-      } catch {
-        // Skip failed chunks rather than crashing the entire request
+      chunkRanges.push([start, Math.min(start + CHUNK_SIZE - 1, currentBlock)]);
+    }
+    const events: (ethers.EventLog | ethers.Log)[] = [];
+    const CONCURRENCY = 5;
+    for (let i = 0; i < chunkRanges.length; i += CONCURRENCY) {
+      const batch = chunkRanges.slice(i, i + CONCURRENCY);
+      const results = await Promise.allSettled(
+        batch.map(([start, end]) =>
+          contract.queryFilter(filter, start, end),
+        ),
+      );
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          events.push(...result.value);
+        }
       }
     }
 
-    const now = Math.floor(Date.now() / 1000);
     const signals: Record<string, unknown>[] = [];
 
-    // Fetch signal details for each event
-    for (const event of events.reverse()) {
+    // Fetch signal details for each event (parallelize isActive + getSignal)
+    const enrichmentPromises = events.reverse().map(async (event) => {
       const args = (event as ethers.EventLog).args;
-      if (!args) continue;
+      if (!args) return null;
 
       const signalId = args.signalId;
-      const eventSport = args.sport;
-      const feeBps = Number(args.maxPriceBps);
-      const slaBps = Number(args.slaMultiplierBps);
-      const maxNotional = Number(args.maxNotional);
       const expiresAt = Number(args.expiresAt);
-      const signalGenius = args.genius;
 
       // Skip expired
-      if (expiresAt < now) continue;
-
-      // Apply sport filter
-      if (sport && eventSport !== sport) continue;
+      if (expiresAt < now) return null;
 
       // Check if still active on-chain
       try {
         const isActive = await contract.isActive(signalId);
-        if (!isActive) continue;
+        if (!isActive) return null;
       } catch {
-        continue;
+        return null;
       }
 
-      signals.push({
-        signal_id: signalId.toString(),
-        genius: signalGenius,
-        sport: eventSport,
-        fee_bps: feeBps,
-        sla_multiplier_bps: slaBps,
-        max_notional_usdc: maxNotional / 1e6,
-        expires_at: new Date(expiresAt * 1000).toISOString(),
-      });
+      // Fetch minNotional from contract for exclusive-signal detection
+      let minNotional = "0";
+      try {
+        const signalData = await contract.getSignal(signalId);
+        if (signalData?.minNotional != null) {
+          minNotional = signalData.minNotional.toString();
+        }
+      } catch { /* non-critical */ }
 
-      // Stop scanning once we have enough candidates
-      if (signals.length >= offset + limit + 50) break;
+      return {
+        signal_id: signalId.toString(),
+        genius: args.genius,
+        sport: args.sport,
+        fee_bps: Number(args.maxPriceBps),
+        sla_multiplier_bps: Number(args.slaMultiplierBps),
+        max_notional: args.maxNotional.toString(),
+        min_notional: minNotional,
+        expires_at_unix: expiresAt,
+        max_notional_usdc: Number(args.maxNotional) / 1e6,
+        expires_at: new Date(expiresAt * 1000).toISOString(),
+      };
+    });
+
+    const enriched = await Promise.all(enrichmentPromises);
+    for (const s of enriched) {
+      if (s) signals.push(s);
     }
+
+    // Update cache with all signals (unfiltered by sport/genius for reuse)
+    browseCache = { signals: [...signals], lastBlock: currentBlock, updatedAt: Date.now() };
+
+    // Apply filters for this request
+    const filtered = signals.filter((s) => {
+      if (sport && s.sport !== sport) return false;
+      if (genius && (s.genius as string).toLowerCase() !== ethers.getAddress(genius).toLowerCase()) return false;
+      return true;
+    });
 
     // Sort
     if (sortBy === "expires_soon") {
-      signals.sort((a, b) => String(a.expires_at).localeCompare(String(b.expires_at)));
+      filtered.sort((a, b) => String(a.expires_at).localeCompare(String(b.expires_at)));
     } else if (sortBy === "fee") {
-      signals.sort((a, b) => (a.fee_bps as number) - (b.fee_bps as number));
+      filtered.sort((a, b) => (a.fee_bps as number) - (b.fee_bps as number));
     }
 
-    const paged = signals.slice(offset, offset + limit);
+    const paged = filtered.slice(offset, offset + limit);
 
     return NextResponse.json({
       signals: paged,
-      total: signals.length,
+      total: filtered.length,
       offset,
       limit,
     });
