@@ -216,9 +216,12 @@ export class ValidatorClient {
     if (!SIGNAL_ID_RE.test(signalId)) {
       throw new Error("Invalid signal ID format");
     }
+    // MPC computation takes 30-45s on the current network. Use 60s timeout
+    // (default 30s is too short and causes every purchase to fail).
     return post<PurchaseResponse>(
       `${this.baseUrl}/v1/signal/${encodeURIComponent(signalId)}/purchase`,
       req,
+      60_000,
     );
   }
 
