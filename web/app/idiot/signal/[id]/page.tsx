@@ -465,26 +465,40 @@ export default function PurchaseSignal() {
         const insufficientPeers = mpcReasons.some((r) => r?.includes("insufficient") || r?.includes("init_failed"));
         const noAvailableIndices = mpcReasons.some((r) => r?.includes("no_available_indices"));
 
-        let friendlyMsg: string;
-        if (allNotFound) {
-          friendlyMsg = "This signal's encryption keys are not held by any active validator. It may have been created during a network reset and cannot be purchased.";
-        } else if (insufficientPeers) {
-          friendlyMsg = "Not enough validators are online to verify this signal right now. Please try again in a few minutes.";
-        } else if (noAvailableIndices) {
-          friendlyMsg = "No sportsbook lines are currently available for verification. Please try again shortly.";
+        // MPC timeout bypass: if ALL validators timed out (none explicitly said
+        // "unavailable") AND line checking already confirmed available lines,
+        // proceed with the purchase. The MPC check is a pre-payment courtesy
+        // verification; the real security gate is on-chain (Escrow.purchase
+        // validates signal is active + not expired). Shares are released after
+        // on-chain payment regardless of the MPC pre-check result.
+        const allTimedOut = errors.length > 0 && errors.every((e) => e.includes("timeout") || e.includes("timed out") || e.includes("aborted"));
+        const noExplicitReject = mpcReasons.length === 0;
+        const lineCheckConfirmed = checkResult.available_indices.length > 0;
+
+        if (allTimedOut && noExplicitReject && lineCheckConfirmed) {
+          console.log("[purchase] MPC timed out on all validators, but line check confirmed", checkResult.available_indices.length, "available lines. Proceeding with on-chain purchase (MPC bypass).");
         } else {
-          // MPC completed but real pick not in available set, OR mix of errors
-          const unavailCount = checkResult.results.filter((r) => !r.available).length;
-          if (unavailCount > 0 && unavailCount < checkResult.results.length) {
-            friendlyMsg = `${unavailCount} of ${checkResult.results.length} lines are temporarily unavailable at sportsbooks. The signal's pick may be among them. Try again in a minute.`;
+          let friendlyMsg: string;
+          if (allNotFound) {
+            friendlyMsg = "This signal's encryption keys are not held by any active validator. It may have been created during a network reset and cannot be purchased.";
+          } else if (insufficientPeers) {
+            friendlyMsg = "Not enough validators are online to verify this signal right now. Please try again in a few minutes.";
+          } else if (noAvailableIndices) {
+            friendlyMsg = "No sportsbook lines are currently available for verification. Please try again shortly.";
           } else {
-            friendlyMsg = "Signal not currently available. The pick may have gone stale. Check back later.";
+            // MPC completed but real pick not in available set, OR mix of errors
+            const unavailCount = checkResult.results.filter((r) => !r.available).length;
+            if (unavailCount > 0 && unavailCount < checkResult.results.length) {
+              friendlyMsg = `${unavailCount} of ${checkResult.results.length} lines are temporarily unavailable at sportsbooks. The signal's pick may be among them. Try again in a minute.`;
+            } else {
+              friendlyMsg = "Signal not currently available. The pick may have gone stale. Check back later.";
+            }
           }
+          console.log("[purchase] MPC failure reasons:", mpcReasons, "rejected errors:", errors, "unavail lines:", checkResult.results.filter((r) => !r.available).length);
+          setStepError(friendlyMsg);
+          setStep("idle");
+          return;
         }
-        console.log("[purchase] MPC failure reasons:", mpcReasons, "rejected errors:", errors, "unavail lines:", checkResult.results.filter((r) => !r.available).length);
-        setStepError(friendlyMsg);
-        setStep("idle");
-        return;
       }
 
       // Collect any shares already released (dev mode without chain_client)
@@ -558,12 +572,21 @@ export default function PurchaseSignal() {
       savePendingPurchase(signalId.toString(), buyerAddress);
 
       // Step 4: Collect key shares from validators (payment now exists on-chain)
-      // Skip if we already got enough shares (dev mode)
-      if (collectedShares.length < 7) {
+      // Need at least SHAMIR_MIN (2) shares for reconstruction. Skip if we
+      // already got enough from the MPC pre-check.
+      const SHARE_COLLECTION_TIMEOUT_MS = 30_000;
+      if (collectedShares.length < 2) {
         setStep("collecting_shares");
 
         const shareResults = await Promise.allSettled(
-          validators.map((v) => v.purchaseSignal(signalId.toString(), purchaseReq)),
+          validators.map((v) =>
+            Promise.race([
+              v.purchaseSignal(signalId.toString(), purchaseReq),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("Share collection timeout")), SHARE_COLLECTION_TIMEOUT_MS),
+              ),
+            ]),
+          ),
         );
 
         for (const result of shareResults) {
