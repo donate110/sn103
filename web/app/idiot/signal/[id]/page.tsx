@@ -482,7 +482,7 @@ export default function PurchaseSignal() {
         } else if (noAvailableIndices) {
           friendlyMsg = "No sportsbook lines are currently available for verification. Please try again shortly.";
         } else {
-          const allTimedOut = errors.length > 0 && errors.every((e) => e.includes("timeout"));
+          const allTimedOut = errors.length > 0 && errors.every((e) => e.toLowerCase().includes("timeout") || e.toLowerCase().includes("timed out") || e.includes("502") || e.includes("504"));
           if (allTimedOut) {
             friendlyMsg = "Validator network is slow right now. MPC verification timed out. Please try again in a minute.";
           } else {

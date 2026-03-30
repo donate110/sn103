@@ -312,30 +312,84 @@ test.describe("Purchase benchmark", () => {
         if (isNotFound) throw new Error("Signal not found");
         steps["02_page_load"] = Date.now() - ts; ts = Date.now();
 
-        // 3. Fill notional
-        const inp = page.locator("input[type='number']").first();
+        // 2b. Dismiss Terms of Service modal if present
+        const tosCheckbox = page.locator("input[type='checkbox']").first();
+        if (await tosCheckbox.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await tosCheckbox.check();
+          const acceptBtn = page.getByRole("button", { name: /accept.*continue|accept/i }).first();
+          if (await acceptBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+            await acceptBtn.click();
+            await page.waitForTimeout(1000);
+          }
+        }
+
+        // 3. Fill notional (use #notional ID selector)
+        const inp = page.locator("#notional");
         if (!await inp.isVisible({ timeout: 5000 }).catch(() => false)) {
+          await page.screenshot({ path: `test-results/purchase-noinput-${i}.png`, fullPage: true });
           throw new Error("Notional input not visible");
         }
         await inp.fill("10");
+        // Verify the value was set
+        const val = await inp.inputValue();
+        if (!val || val === "0") {
+          await inp.clear();
+          await inp.type("10");
+        }
         steps["03_fill_notional"] = Date.now() - ts; ts = Date.now();
+
+        // Capture console logs from the purchase flow
+        const purchaseLogs: string[] = [];
+        page.on("console", (msg) => {
+          const text = msg.text();
+          if (text.includes("[purchase]") || text.includes("error") || text.includes("FAIL")) {
+            purchaseLogs.push(`[${((Date.now() - t0) / 1000).toFixed(1)}s] ${text.slice(0, 200)}`);
+          }
+        });
 
         // 4. Click purchase
         const buyBtn = page.getByRole("button", { name: /purchase signal/i }).first();
         if (!await buyBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+          // Take a screenshot to see what the page looks like
+          await page.screenshot({ path: `test-results/purchase-nobutton-${i}.png`, fullPage: true });
           throw new Error("Purchase button not visible");
         }
         await buyBtn.click();
 
-        // 5. Wait for result
-        const successLoc = page.getByText(/Signal Purchased|Decrypted|Your Pick/i).first();
-        const errLoc = page.getByText(/no lines.*available|not enough validator|insufficient|error|failed|stale|unavailable/i).first();
+        // 5. Wait for result (check every 10s, take screenshots for debugging)
+        let outcome = "timeout";
+        for (let sec = 0; sec < 180; sec += 5) {
+          await page.waitForTimeout(5_000);
 
-        const outcome = await Promise.race([
-          successLoc.waitFor({ state: "visible", timeout: 180_000 }).then(() => "ok"),
-          errLoc.waitFor({ state: "visible", timeout: 180_000 }).then(() => "err"),
-          page.waitForTimeout(180_000).then(() => "timeout"),
-        ]);
+          // Check for success
+          if (await page.getByText(/Signal Purchased|Decrypted|Your Pick/i).first().isVisible().catch(() => false)) {
+            outcome = "ok";
+            break;
+          }
+
+          // Check for error: the purchase page shows errors in role="alert" divs
+          const alertEl = page.locator("[role='alert']").first();
+          if (await alertEl.isVisible().catch(() => false)) {
+            const alertText = await alertEl.textContent().catch(() => "");
+            if (alertText && alertText.length > 10) {
+              throw new Error(`Purchase error: ${alertText.slice(0, 150)}`);
+            }
+          }
+          // Also check for red error text outside alerts
+          const redErr = page.locator(".bg-red-50 .text-red-600").first();
+          if (await redErr.isVisible().catch(() => false)) {
+            const errText = await redErr.textContent().catch(() => "");
+            if (errText && errText.length > 5) {
+              throw new Error(`Purchase error: ${errText.slice(0, 150)}`);
+            }
+          }
+
+          // Log progress every 30s
+          if (sec > 0 && sec % 30 === 0) {
+            await page.screenshot({ path: `test-results/purchase-progress-${i}-${sec}s.png`, fullPage: true });
+            console.log(`    [${sec}s] Still waiting. Console: ${purchaseLogs.slice(-3).join(" | ")}`);
+          }
+        }
 
         steps["04_purchase"] = Date.now() - ts;
 
