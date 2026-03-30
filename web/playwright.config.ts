@@ -23,7 +23,14 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        // Use real Chrome channel to avoid Kasada/BotD headless fingerprinting
+        channel: "chrome",
+        launchOptions: {
+          args: ["--disable-blink-features=AutomationControlled"],
+        },
+      },
     },
   ],
   // Only start a local server when targeting localhost

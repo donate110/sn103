@@ -24,18 +24,36 @@ export default defineConfig({
   projects: [
     {
       name: "ui",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        channel: "chrome",
+        launchOptions: {
+          args: ["--disable-blink-features=AutomationControlled"],
+        },
+      },
       testIgnore: /onchain-smoke|signal-lifecycle/,
     },
     {
       name: "onchain",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        channel: "chrome",
+        launchOptions: {
+          args: ["--disable-blink-features=AutomationControlled"],
+        },
+      },
       testMatch: /onchain-smoke\.spec\.ts/,
       dependencies: ["ui"],
     },
     {
       name: "lifecycle",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        channel: "chrome",
+        launchOptions: {
+          args: ["--disable-blink-features=AutomationControlled"],
+        },
+      },
       testMatch: /signal-lifecycle\.spec\.ts/,
       dependencies: ["onchain"],
     },
