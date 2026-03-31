@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { discoverMetagraph } from "@/lib/bt-metagraph";
+import { discoverMetagraph, isPublicIp } from "@/lib/bt-metagraph";
 
 export async function GET(
   _request: Request,
@@ -19,7 +19,8 @@ export async function GET(
         n.uid === uid &&
         n.isValidator &&
         n.port > 0 &&
-        n.ip !== "0.0.0.0",
+        n.ip !== "0.0.0.0" &&
+        isPublicIp(n.ip),
     );
 
     if (!valNode) {
@@ -42,7 +43,7 @@ export async function GET(
     let health = null;
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
+      const timeout = setTimeout(() => controller.abort(), 10000);
       const res = await fetch(`http://${valNode.ip}:${valNode.port}/health`, {
         signal: controller.signal,
         cache: "no-store",
