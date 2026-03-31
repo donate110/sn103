@@ -294,6 +294,24 @@ def create_app(
             return None
         return await spawn_ephemeral_notary(key_path=notary_sidecar._key_path)
 
+    # Notary ticket enforcement. Miners can set REQUIRE_NOTARY_TICKET=true
+    # now to enforce immediately. If unset, defaults to true on 2026-04-01
+    # (gives validators 24h to update before tickets become mandatory).
+    _ticket_env = os.getenv("REQUIRE_NOTARY_TICKET", "").lower()
+    if _ticket_env in ("1", "true", "yes"):
+        _require_notary_ticket = True
+    elif _ticket_env in ("0", "false", "no"):
+        _require_notary_ticket = False
+    else:
+        # No explicit setting: enforce starting 2026-04-01 00:00 UTC
+        import datetime
+        _require_notary_ticket = datetime.datetime.now(datetime.timezone.utc) >= datetime.datetime(2026, 4, 1, tzinfo=datetime.timezone.utc)
+
+    if _require_notary_ticket:
+        log.info("notary_ticket_required", msg="Connections without a valid notary ticket will be rejected")
+    else:
+        log.info("notary_ticket_optional", msg="Ticketless connections allowed (grace period). Set REQUIRE_NOTARY_TICKET=true to enforce now.")
+
     @app.websocket("/v1/notary/ws")
     async def notary_ws_proxy(ws: WebSocket) -> None:
         """WebSocket-to-TCP proxy for the peer notary MPC handshake.
@@ -303,11 +321,10 @@ def create_app(
         cascade failure where post-session restarts kill concurrent
         sessions. The process is killed when the session ends.
 
-        Ticket verification is automatic: if the connecting prover
-        presents a ?ticket= query parameter, it is verified against
-        registered validator hotkeys. Invalid tickets are rejected.
-        Connections without a ticket are allowed for backward
-        compatibility with validators that haven't updated yet.
+        Ticket verification: if a ?ticket= query param is present, it
+        is verified strictly. If absent, the connection is allowed during
+        the grace period (until 2026-04-01) or rejected if
+        REQUIRE_NOTARY_TICKET=true.
         """
         if notary_sidecar is None or not notary_sidecar.enabled:
             await ws.close(code=1013, reason="notary not available")
@@ -318,9 +335,7 @@ def create_app(
             NOTARY_SESSIONS.labels(status="busy").inc()
             return
 
-        # Verify notary ticket if present. Ticketless connections are
-        # allowed for backward compat with old validators; as validators
-        # update, all legitimate connections will carry tickets.
+        # Verify notary ticket if present; reject ticketless if required
         ticket_b64 = ws.query_params.get("ticket")
         if ticket_b64:
             from djinn_miner.api.middleware import verify_notary_ticket, _get_validator_hotkeys
@@ -338,6 +353,12 @@ def create_app(
                 await ws.close(code=1008, reason=f"ticket rejected: {err}")
                 NOTARY_SESSIONS.labels(status="rejected").inc()
                 return
+            log.info("notary_ticket_verified", prover_uid=payload.get("prover_uid"), validator=payload.get("validator"))
+        elif _require_notary_ticket:
+            log.warning("notary_ticket_missing", client=ws.client.host if ws.client else "unknown")
+            await ws.close(code=1008, reason="notary ticket required")
+            NOTARY_SESSIONS.labels(status="rejected").inc()
+            return
             log.info("notary_ticket_verified", prover_uid=payload.get("prover_uid"), validator=payload.get("validator"))
 
         await ws.accept()
