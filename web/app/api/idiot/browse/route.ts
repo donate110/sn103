@@ -78,11 +78,15 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Query SignalCommitted events in parallel chunks starting from deploy block
+    // Query SignalCommitted events from recent blocks only.
+    // Active signals expire within 7 days max, so scanning 7 days of blocks
+    // (~604800 blocks at 2 blocks/sec on Base Sepolia) covers all active signals.
+    // Using DEPLOY_BLOCK as a floor to avoid scanning before contracts existed.
     const geniusFilter = genius ? ethers.getAddress(genius) : null;
     const filter = contract.filters.SignalCommitted(null, geniusFilter);
     const currentBlock = await provider.getBlockNumber();
-    const fromBlock = DEPLOY_BLOCK > 0 ? DEPLOY_BLOCK : Math.max(0, currentBlock - 100_000);
+    const SEVEN_DAYS_BLOCKS = 604_800; // ~7 days at 2 blocks/sec
+    const fromBlock = Math.max(DEPLOY_BLOCK, currentBlock - SEVEN_DAYS_BLOCKS);
 
     // Build chunk ranges and query with limited concurrency to avoid RPC rate limits
     const chunkRanges: [number, number][] = [];
