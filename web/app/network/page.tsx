@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import StatCard from "@/components/network/StatCard";
 import MetricDropdown from "@/components/network/MetricDropdown";
+import CopyTableButton, { useCopyTable } from "@/components/CopyTableButton";
 import { formatStake, u16ToPercent, useSortable, type SortDir } from "@/components/network/helpers";
 
 // Lazy-load chart (needs canvas/window)
@@ -90,6 +91,7 @@ function SortArrow({ active, dir }: { active: boolean; dir: SortDir }) {
 
 function ValidatorTable({ validators }: { validators: ValidatorData[] }) {
   const router = useRouter();
+  const { ref: tableRef, copy, copied } = useCopyTable();
   const getVal = useCallback((v: ValidatorData, key: string): number | string => {
     switch (key) {
       case "uid": return v.uid;
@@ -109,7 +111,10 @@ function ValidatorTable({ validators }: { validators: ValidatorData[] }) {
     </th>
   );
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto" ref={tableRef}>
+      <div className="flex justify-end px-3 pt-2">
+        <CopyTableButton onClick={copy} copied={copied} />
+      </div>
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-slate-400 uppercase tracking-wide border-b">
@@ -169,6 +174,7 @@ function AttestBadge({ valid, total, proactive }: { valid: number; total: number
 
 function MinerTable({ miners }: { miners: MinerData[] }) {
   const router = useRouter();
+  const { ref: tableRef, copy, copied } = useCopyTable();
   const getVal = useCallback((m: MinerData, key: string): number | string => {
     switch (key) {
       case "uid": return m.uid;
@@ -194,7 +200,10 @@ function MinerTable({ miners }: { miners: MinerData[] }) {
     </th>
   );
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto" ref={tableRef}>
+      <div className="flex justify-end px-3 pt-2">
+        <CopyTableButton onClick={copy} copied={copied} />
+      </div>
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-slate-400 uppercase tracking-wide border-b">

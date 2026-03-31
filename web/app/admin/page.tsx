@@ -12,6 +12,7 @@ import {
   type SubgraphRecentAudit,
 } from "@/lib/subgraph";
 import { formatUsdc } from "@/lib/types";
+import CopyTableButton, { useCopyTable } from "@/components/CopyTableButton";
 import MetricsCharts from "./metrics-charts";
 
 // ---------------------------------------------------------------------------
@@ -241,6 +242,10 @@ export default function AdminDashboard() {
   // Table filter state
   const [minerFilter, setMinerFilter] = useState<"all" | "djinn" | "healthy" | "odds" | "operational">("all");
   const [validatorFilter, setValidatorFilter] = useState<"all" | "djinn" | "healthy" | "chain" | "shares">("all");
+
+  // Copy table hooks
+  const { ref: valTableRef, copy: copyValTable, copied: valCopied } = useCopyTable();
+  const { ref: minerTableRef, copy: copyMinerTable, copied: minerCopied } = useCopyTable();
 
   // Check for existing admin session via server-side cookie verification
   useEffect(() => {
@@ -683,7 +688,10 @@ export default function AdminDashboard() {
           {/* Validator Grid */}
           <div className="mb-8">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-              <h2 className="text-xl font-semibold text-slate-900">Validators <span className="text-sm font-normal text-slate-400">({filteredValidators.length}/{validators.length})</span></h2>
+              <h2 className="text-xl font-semibold text-slate-900">
+                Validators <span className="text-sm font-normal text-slate-400">({filteredValidators.length}/{validators.length})</span>
+                <CopyTableButton onClick={copyValTable} copied={valCopied} />
+              </h2>
               <div className="flex flex-wrap gap-1">
                 {([
                   ["all", "All"],
@@ -706,7 +714,7 @@ export default function AdminDashboard() {
                 ))}
               </div>
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+            <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto" ref={valTableRef}>
               <table className="w-full text-sm min-w-[900px]">
                 <thead className="bg-slate-50 text-slate-500 sticky top-0 z-10">
                   <tr>
@@ -796,7 +804,10 @@ export default function AdminDashboard() {
           {/* Miners Grid */}
           <div className="mb-8">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-              <h2 className="text-xl font-semibold text-slate-900">Miners <span className="text-sm font-normal text-slate-400">({filteredMiners.length}/{miners.length})</span></h2>
+              <h2 className="text-xl font-semibold text-slate-900">
+                Miners <span className="text-sm font-normal text-slate-400">({filteredMiners.length}/{miners.length})</span>
+                <CopyTableButton onClick={copyMinerTable} copied={minerCopied} />
+              </h2>
               <div className="flex flex-wrap gap-1">
                 {([
                   ["all", "All"],
@@ -819,7 +830,7 @@ export default function AdminDashboard() {
                 ))}
               </div>
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+            <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto" ref={minerTableRef}>
               <table className="w-full text-sm min-w-[800px]">
                 <thead className="bg-slate-50 text-slate-500 sticky top-0 z-10">
                   <tr>
