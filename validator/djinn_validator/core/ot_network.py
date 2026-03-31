@@ -218,6 +218,37 @@ class GilboaSenderSetup:
         fp = self.prime
         dh_bytes = self.dh_group.byte_length
         a_inv = pow(self.dh_public, dhp - 2, dhp)
+        dh_secret = self.dh_secret
+
+        # Batch the 2*n_bits modexps in parallel (biggest bottleneck).
+        # t_values[k]^dh_secret and (t_values[k]*a_inv)^dh_secret for each k.
+        bases_for_modexp: list[int] = []
+        for k in range(self._n_bits):
+            bases_for_modexp.append(t_values[k])
+            bases_for_modexp.append((t_values[k] * a_inv) % dhp)
+
+        # All modexps use the same exponent (dh_secret) and modulus (dhp)
+        exponents = [dh_secret] * len(bases_for_modexp)
+        n = len(bases_for_modexp)
+        if n >= 32:
+            # Use process pool for parallel modexp
+            global _modexp_pool
+            try:
+                if _modexp_pool is None:
+                    import multiprocessing as mp
+                    try:
+                        mp.set_start_method("forkserver", force=False)
+                    except (RuntimeError, ValueError):
+                        pass
+                    workers = min(os.cpu_count() or 4, 8)
+                    _modexp_pool = ProcessPoolExecutor(max_workers=workers)
+                args = [(b, dh_secret, dhp) for b in bases_for_modexp]
+                modexp_results = list(_modexp_pool.map(_modexp_worker, args, chunksize=max(1, n // (os.cpu_count() or 4))))
+            except Exception:
+                modexp_results = [pow(b, dh_secret, dhp) for b in bases_for_modexp]
+        else:
+            modexp_results = [pow(b, dh_secret, dhp) for b in bases_for_modexp]
+
         sender_share = 0
         pairs: list[tuple[bytes, bytes]] = []
 
@@ -227,8 +258,8 @@ class GilboaSenderSetup:
             m0 = r_k
             m1 = (r_k + x_shifted) % fp
 
-            k0 = _ot_key(pow(t_values[k], self.dh_secret, dhp), k, 0, dh_bytes)
-            k1 = _ot_key(pow((t_values[k] * a_inv) % dhp, self.dh_secret, dhp), k, 1, dh_bytes)
+            k0 = _ot_key(modexp_results[k * 2], k, 0, dh_bytes)
+            k1 = _ot_key(modexp_results[k * 2 + 1], k, 1, dh_bytes)
 
             e0 = _xor_bytes(_int_to_field_bytes(m0, fp), k0)
             e1 = _xor_bytes(_int_to_field_bytes(m1, fp), k1)
@@ -289,15 +320,17 @@ class GilboaReceiverSetup:
         encrypted_pairs: list[tuple[bytes, bytes]],
     ) -> int:
         """Decrypt OT messages and return receiver's accumulated share."""
-        receiver_share = 0
         a = self._sender_pk
         dhp = self.dh_group.prime
         fp = self.prime
         dh_bytes = self.dh_group.byte_length
 
+        # Batch all modexps: a^r_k mod dhp for each bit
+        dh_results = _batch_modexp(a, self._r_values, dhp)
+
+        receiver_share = 0
         for k in range(self._n_bits):
-            dh_result = pow(a, self._r_values[k], dhp)
-            key = _ot_key(dh_result, k, self._bits[k], dh_bytes)
+            key = _ot_key(dh_results[k], k, self._bits[k], dh_bytes)
             ciphertext = encrypted_pairs[k][self._bits[k]]
             plaintext = _xor_bytes(ciphertext, key)
             m = _field_bytes_to_int(plaintext)
