@@ -56,6 +56,29 @@ All configuration is via environment variables. Copy `.env.example` and set:
 | `TLSN_NOTARY_PORT` | TLSNotary server port (default: `443`) |
 | `TLSN_PROVER_BINARY` | Path to TLSNotary prover binary |
 
+## Firewall
+
+Set up a host firewall before starting your miner. Without one, every port on your server responds to probes, making it trivial to fingerprint and target.
+
+```bash
+# Run the included setup script (in the repo root)
+bash scripts/miner-firewall.sh
+```
+
+Or manually:
+
+```bash
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp              # SSH
+ufw allow 8422/tcp            # Miner API (validator challenges)
+ufw allow 7047/tcp            # Notary sidecar (peer attestation)
+ufw limit 22/tcp              # Rate-limit SSH brute force
+ufw --force enable
+```
+
+Port 8422 must be open or validators cannot reach your miner (zero score). Port 7047 must be open or you cannot serve as a peer notary (50% attestation penalty). See `miner/README.md` for details.
+
 ## Running
 
 ```bash

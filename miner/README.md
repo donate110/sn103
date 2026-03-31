@@ -20,14 +20,49 @@ The miner starts a FastAPI server on port 8422 (configurable via `API_PORT`) and
 
 ### Firewall
 
-Open **two ports** on your firewall:
+Every miner should run a host firewall. Without one, all 65,535 ports respond to probes, making your server easier to fingerprint and target.
+
+**Quick setup (recommended):**
 
 ```bash
-ufw allow 8422/tcp   # API port (validator challenges)
-ufw allow 7047/tcp   # Notary sidecar (peer attestation via direct TCP)
+# Run the included setup script
+bash scripts/miner-firewall.sh
 ```
 
-Port 7047 is required for peer notary attestation. Miners whose notary port is unreachable cannot serve as peer notaries for other miners, which reduces their notary reliability score.
+**Manual setup:**
+
+```bash
+# Default deny all incoming traffic
+ufw default deny incoming
+ufw default allow outgoing
+
+# Allow SSH (change port if you use a non-standard one)
+ufw allow 22/tcp
+
+# Miner API port (validator challenges, health checks)
+ufw allow 8422/tcp
+
+# Notary sidecar (peer attestation via direct TCP)
+ufw allow 7047/tcp
+
+# Rate-limit SSH to slow brute-force attempts (max 6 connections per 30s)
+ufw limit 22/tcp
+
+# Enable
+ufw --force enable
+ufw status verbose
+```
+
+**Why both ports matter:**
+
+- **8422/tcp** (API): validators send health checks, line queries, and attestation challenges here. If blocked, your miner scores zero.
+- **7047/tcp** (Notary): peer miners connect here for MPC attestation sessions. If blocked, you cannot serve as a peer notary, which reduces your attestation score by up to 50%.
+
+**What this prevents:**
+
+- Port scanning: only 3 ports respond (SSH, API, Notary). Everything else is silently dropped.
+- Connection floods: ufw's connection tracking drops malformed packets at the kernel before they reach Python.
+- SSH brute force: `ufw limit` caps connection rate to 6 per 30 seconds per IP.
 
 ## How Scoring Works
 
