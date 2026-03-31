@@ -167,10 +167,13 @@ export default function PurchaseSignal() {
 
   // Recovery: if user refreshed after on-chain purchase but before decryption,
   // resume the share collection and decryption steps automatically.
+  const recoveryAttemptedRef = useRef(false);
   useEffect(() => {
     if (!signalId || !isConnected || !address || !signal || step !== "idle") return;
+    if (recoveryAttemptedRef.current || purchaseInFlight.current) return;
     const pending = loadPendingPurchase();
     if (!pending || pending.signalId !== signalId.toString() || pending.buyer !== address) return;
+    recoveryAttemptedRef.current = true;
 
     let cancelled = false;
     const recover = async () => {

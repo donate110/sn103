@@ -112,6 +112,7 @@ export default function BrowseSignals() {
               className="input w-auto"
               value={sportFilter}
               onChange={(e) => setSportFilter(e.target.value)}
+              disabled={loading}
             >
               {SPORT_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -133,6 +134,7 @@ export default function BrowseSignals() {
               className="input w-auto"
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as SortOption)}
+              disabled={loading}
             >
               {SORT_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>

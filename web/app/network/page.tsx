@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import StatCard from "@/components/network/StatCard";
 import MetricDropdown from "@/components/network/MetricDropdown";
@@ -88,6 +89,7 @@ function SortArrow({ active, dir }: { active: boolean; dir: SortDir }) {
 // ---------- Tables ----------
 
 function ValidatorTable({ validators }: { validators: ValidatorData[] }) {
+  const router = useRouter();
   const getVal = useCallback((v: ValidatorData, key: string): number | string => {
     switch (key) {
       case "uid": return v.uid;
@@ -123,7 +125,7 @@ function ValidatorTable({ validators }: { validators: ValidatorData[] }) {
         </thead>
         <tbody>
           {sorted.map((v) => (
-            <tr key={v.uid} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => window.location.href = `/network/validator/${v.uid}`}>
+            <tr key={v.uid} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => router.push(`/network/validator/${v.uid}`)}>
               <td className="px-3 py-2 font-mono font-medium">
                 <Link href={`/network/validator/${v.uid}`} className="text-blue-600 hover:text-blue-800 hover:underline" onClick={(e) => e.stopPropagation()}>
                   {v.uid}
@@ -166,6 +168,7 @@ function AttestBadge({ valid, total, proactive }: { valid: number; total: number
 }
 
 function MinerTable({ miners }: { miners: MinerData[] }) {
+  const router = useRouter();
   const getVal = useCallback((m: MinerData, key: string): number | string => {
     switch (key) {
       case "uid": return m.uid;
@@ -209,7 +212,7 @@ function MinerTable({ miners }: { miners: MinerData[] }) {
             const aTotal = m.lifetime_attestations ?? m.attestations_total ?? 0;
             const aValid = m.lifetime_attestations_valid ?? m.attestations_valid ?? 0;
             return (
-              <tr key={m.uid} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => window.location.href = `/network/miner/${m.uid}`}>
+              <tr key={m.uid} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => router.push(`/network/miner/${m.uid}`)}>
                 <td className="px-3 py-2 font-mono font-medium">
                   <Link href={`/network/miner/${m.uid}`} className="text-blue-600 hover:text-blue-800 hover:underline" onClick={(e) => e.stopPropagation()}>
                     {m.uid}
