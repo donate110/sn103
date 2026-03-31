@@ -31,6 +31,7 @@ from djinn_miner.core.notary_sidecar import NotarySidecar
 from djinn_miner.core.telemetry import TelemetryStore
 from djinn_miner.data.odds_api import OddsApiClient
 from djinn_miner.data.provider import SportsDataProvider
+from djinn_miner.utils.firewall import firewall_loop
 from djinn_miner.utils.watchtower import watch_loop as watchtower_loop
 
 log = structlog.get_logger()
@@ -323,6 +324,8 @@ async def async_main() -> None:
     # Always run BT sync loop so the miner can detect re-registration
     # even if it started while deregistered.
     running_tasks.append(asyncio.create_task(bt_sync_loop(neuron, health_tracker, telemetry)))
+    # Auto-manage firewall: whitelist validator IPs, block everything else
+    running_tasks.append(asyncio.create_task(firewall_loop(neuron, config.api_port)))
     if notary_sidecar.enabled:
         running_tasks.append(asyncio.create_task(notary_sidecar.watchdog_loop()))
 
