@@ -282,6 +282,10 @@ def _check_nonce(nonce: str) -> bool:
             _NONCE_LAST_CLEANUP = now
         if nonce in _NONCE_CACHE:
             return False
+        # After cleanup, if cache is still at capacity, reject to prevent
+        # unbounded growth (possible under sustained high-rate traffic).
+        if len(_NONCE_CACHE) >= _NONCE_CACHE_MAX:
+            return False
         _NONCE_CACHE[nonce] = now
         return True
 
@@ -409,11 +413,19 @@ def create_signed_headers(
 def require_admin_auth(admin_api_key: str) -> Callable:
     """Create a FastAPI dependency that checks Bearer token auth for admin endpoints.
 
-    If admin_api_key is empty, returns a no-op dependency (endpoints remain open).
+    If admin_api_key is empty on a production network, admin endpoints are blocked.
+    On dev/test networks without a key, endpoints remain open for convenience.
     """
     from fastapi import Depends, Header
+    import os
 
     if not admin_api_key:
+        bt_network = os.getenv("BT_NETWORK", "").lower()
+        if bt_network in ("finney", "mainnet"):
+            log.warning("admin_auth_blocked", msg="ADMIN_API_KEY not set on production network; admin endpoints will return 403")
+            async def _deny() -> None:
+                raise HTTPException(status_code=403, detail="Admin endpoints disabled (ADMIN_API_KEY not configured)")
+            return Depends(_deny)
         async def _noop() -> None:
             return None
         return Depends(_noop)
@@ -429,6 +441,102 @@ def require_admin_auth(admin_api_key: str) -> Callable:
             raise HTTPException(status_code=403, detail="Invalid admin API key")
 
     return Depends(_check_admin_token)
+
+
+def create_notary_ticket(
+    prover_uid: int,
+    notary_uid: int,
+    wallet: object,
+    ttl_seconds: int = 300,
+) -> str:
+    """Create a signed notary ticket authorizing a prover to connect to a peer notary.
+
+    The ticket is a base64-encoded JSON payload signed by the validator's hotkey.
+    Miners present this ticket when connecting to /v1/notary/ws so the notary
+    can verify the connection was authorized by a validator.
+
+    Args:
+        prover_uid: UID of the miner that will generate the proof (the prover).
+        notary_uid: UID of the miner serving as peer notary.
+        wallet: Bittensor Wallet with hotkey keypair.
+        ttl_seconds: Ticket validity window (default 5 minutes).
+
+    Returns:
+        Base64-encoded ticket string containing JSON payload + validator signature.
+    """
+    import base64
+    import json
+    import uuid
+
+    nonce = uuid.uuid4().hex
+    expires = int(time.time()) + ttl_seconds
+
+    payload = {
+        "prover_uid": prover_uid,
+        "notary_uid": notary_uid,
+        "expires": expires,
+        "nonce": nonce,
+        "validator": wallet.hotkey.ss58_address,
+    }
+    payload_bytes = json.dumps(payload, sort_keys=True).encode()
+    signature = wallet.hotkey.sign(payload_bytes).hex()
+
+    ticket = {
+        "payload": payload,
+        "signature": signature,
+    }
+    return base64.b64encode(json.dumps(ticket).encode()).decode()
+
+
+def verify_notary_ticket(
+    ticket_b64: str,
+    expected_notary_uid: int | None = None,
+    validator_hotkeys: set[str] | None = None,
+) -> tuple[bool, str, dict]:
+    """Verify a notary ticket signed by a validator.
+
+    Args:
+        ticket_b64: Base64-encoded ticket string.
+        expected_notary_uid: If set, verify the ticket is for this notary.
+        validator_hotkeys: If set, verify the signer is in this set.
+
+    Returns:
+        (valid, error_message, payload_dict)
+    """
+    import base64
+    import json
+
+    try:
+        ticket_json = base64.b64decode(ticket_b64)
+        ticket = json.loads(ticket_json)
+    except Exception:
+        return False, "malformed ticket", {}
+
+    payload = ticket.get("payload")
+    signature = ticket.get("signature")
+    if not payload or not signature:
+        return False, "missing payload or signature", {}
+
+    # Check expiry
+    expires = payload.get("expires", 0)
+    if int(time.time()) > expires:
+        return False, "ticket expired", payload
+
+    # Verify validator hotkey is allowed
+    validator_ss58 = payload.get("validator", "")
+    if validator_hotkeys and validator_ss58 not in validator_hotkeys:
+        return False, "validator not authorized", payload
+
+    # Verify notary UID matches
+    if expected_notary_uid is not None and payload.get("notary_uid") != expected_notary_uid:
+        return False, "notary_uid mismatch", payload
+
+    # Verify signature
+    payload_bytes = json.dumps(payload, sort_keys=True).encode()
+    if not verify_hotkey_signature(payload_bytes, signature, validator_ss58):
+        return False, "invalid signature", payload
+
+    return True, "", payload
 
 
 def get_cors_origins(env_value: str = "", bt_network: str = "") -> list[str]:

@@ -219,6 +219,7 @@ def create_app(
                     notary_port=request.notary_port,
                     notary_ws=request.notary_ws,
                     notary_ws_port=request.notary_ws_port,
+                    notary_ticket=request.notary_ticket,
                 ),
                 timeout=300.0,
             )
@@ -293,6 +294,10 @@ def create_app(
             return None
         return await spawn_ephemeral_notary(key_path=notary_sidecar._key_path)
 
+    _require_notary_ticket = os.getenv("REQUIRE_NOTARY_TICKET", "").lower() in ("1", "true", "yes")
+    if _require_notary_ticket:
+        log.info("notary_ticket_enforcement_enabled", msg="WebSocket connections without a valid notary ticket will be rejected")
+
     @app.websocket("/v1/notary/ws")
     async def notary_ws_proxy(ws: WebSocket) -> None:
         """WebSocket-to-TCP proxy for the peer notary MPC handshake.
@@ -301,6 +306,12 @@ def create_app(
         This gives every prover a clean MPC state and eliminates the
         cascade failure where post-session restarts kill concurrent
         sessions. The process is killed when the session ends.
+
+        Supports optional notary ticket verification. When a prover
+        includes a ?ticket= query parameter, the ticket is verified
+        against registered validator hotkeys. When REQUIRE_NOTARY_TICKET=true,
+        connections without a valid ticket are rejected (use after all
+        validators have updated to send tickets).
         """
         if notary_sidecar is None or not notary_sidecar.enabled:
             await ws.close(code=1013, reason="notary not available")
@@ -309,6 +320,32 @@ def create_app(
         if _notary_sem.locked():
             await ws.close(code=1013, reason="notary at capacity")
             NOTARY_SESSIONS.labels(status="busy").inc()
+            return
+
+        # Verify notary ticket if present (or required)
+        ticket_b64 = ws.query_params.get("ticket")
+        if ticket_b64:
+            from djinn_miner.api.middleware import verify_notary_ticket, _get_validator_hotkeys
+            validator_hotkeys = _get_validator_hotkeys(neuron)
+            # Determine our own UID for notary_uid verification
+            our_uid = getattr(neuron, "uid", None) if neuron else None
+            if hasattr(our_uid, "item"):
+                our_uid = our_uid.item()
+            valid, err, payload = verify_notary_ticket(
+                ticket_b64,
+                expected_notary_uid=our_uid,
+                validator_hotkeys=validator_hotkeys,
+            )
+            if not valid:
+                log.warning("notary_ticket_rejected", error=err, payload=payload)
+                await ws.close(code=1008, reason=f"ticket rejected: {err}")
+                NOTARY_SESSIONS.labels(status="rejected").inc()
+                return
+            log.info("notary_ticket_verified", prover_uid=payload.get("prover_uid"), validator=payload.get("validator"))
+        elif _require_notary_ticket:
+            log.warning("notary_ticket_missing_required")
+            await ws.close(code=1008, reason="notary ticket required")
+            NOTARY_SESSIONS.labels(status="rejected").inc()
             return
 
         await ws.accept()
@@ -454,6 +491,7 @@ def create_app(
                         notary_port=request.notary_port,
                         notary_ws=request.notary_ws,
                         notary_ws_port=request.notary_ws_port,
+                        notary_ticket=request.notary_ticket,
                         timeout=45.0,
                     ),
                     timeout=60.0,

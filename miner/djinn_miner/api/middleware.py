@@ -188,11 +188,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 def require_admin_auth(admin_api_key: str) -> object:
     """Create a FastAPI dependency that checks Bearer token auth for admin endpoints.
 
-    If admin_api_key is empty, returns a no-op dependency (endpoints remain open).
+    If admin_api_key is empty on a production network, admin endpoints are blocked.
+    On dev/test networks without a key, endpoints remain open for convenience.
     """
     from fastapi import Depends, Header, HTTPException
+    import os
 
     if not admin_api_key:
+        bt_network = os.getenv("BT_NETWORK", "").lower()
+        if bt_network in ("finney", "mainnet"):
+            log.warning("admin_auth_blocked", msg="ADMIN_API_KEY not set on production network; admin endpoints will return 403")
+            async def _deny() -> None:
+                raise HTTPException(status_code=403, detail="Admin endpoints disabled (ADMIN_API_KEY not configured)")
+            return Depends(_deny)
         async def _noop() -> None:
             return None
         return Depends(_noop)
@@ -208,6 +216,56 @@ def require_admin_auth(admin_api_key: str) -> object:
             raise HTTPException(status_code=403, detail="Invalid admin API key")
 
     return Depends(_check_admin_token)
+
+
+def verify_notary_ticket(
+    ticket_b64: str,
+    expected_notary_uid: int | None = None,
+    validator_hotkeys: set[str] | None = None,
+) -> tuple[bool, str, dict]:
+    """Verify a validator-signed notary ticket.
+
+    Provers present this ticket when connecting to /v1/notary/ws so the
+    notary miner can confirm the connection was authorized by a validator.
+
+    Args:
+        ticket_b64: Base64-encoded ticket string from the prover.
+        expected_notary_uid: If set, verify the ticket targets this notary.
+        validator_hotkeys: If set, verify the signer is a registered validator.
+
+    Returns:
+        (valid, error_message, payload_dict)
+    """
+    import base64
+    import json
+
+    try:
+        ticket_json = base64.b64decode(ticket_b64)
+        ticket = json.loads(ticket_json)
+    except Exception:
+        return False, "malformed ticket", {}
+
+    payload = ticket.get("payload")
+    signature = ticket.get("signature")
+    if not payload or not signature:
+        return False, "missing payload or signature", {}
+
+    expires = payload.get("expires", 0)
+    if int(time.time()) > expires:
+        return False, "ticket expired", payload
+
+    validator_ss58 = payload.get("validator", "")
+    if validator_hotkeys and validator_ss58 not in validator_hotkeys:
+        return False, "validator not authorized", payload
+
+    if expected_notary_uid is not None and payload.get("notary_uid") != expected_notary_uid:
+        return False, "notary_uid mismatch", payload
+
+    payload_bytes = json.dumps(payload, sort_keys=True).encode()
+    if not verify_hotkey_signature(payload_bytes, signature, validator_ss58):
+        return False, "invalid signature", payload
+
+    return True, "", payload
 
 
 def get_cors_origins(env_value: str = "", bt_network: str = "") -> list[str]:
@@ -411,9 +469,18 @@ class ValidatorAuthMiddleware(BaseHTTPMiddleware):
             log.debug("auth_grace_period", elapsed_s=round(elapsed, 1), path=path)
             return await call_next(request)
 
-        # In dev mode (no metagraph), skip auth
+        # If metagraph is unavailable, check if we're on a production network.
+        # On production, deny by default (fail closed). On dev/test, allow through.
         registered_ips = _get_registered_ips(self._neuron)
         if registered_ips is None:
+            import os
+            bt_network = os.getenv("BT_NETWORK", "").lower()
+            if bt_network in ("finney", "mainnet"):
+                log.warning("auth_denied_no_metagraph", path=path, reason="metagraph unavailable on production network")
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "Service starting up, metagraph not yet available. Try again shortly."},
+                )
             return await call_next(request)
 
         client_ip = request.client.host if request.client else "unknown"

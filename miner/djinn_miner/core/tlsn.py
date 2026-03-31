@@ -87,6 +87,7 @@ async def generate_proof(
     notary_port: int | None = None,
     notary_ws: bool = False,
     notary_ws_port: int | None = None,
+    notary_ticket: str | None = None,
     output_dir: str | None = None,
     timeout: float = 180.0,
 ) -> TLSNProofResult:
@@ -190,6 +191,7 @@ async def generate_proof(
                 return await _run_prover_via_ws(
                     url, notary_host, ws_port, output_path, timeout,
                     max_recv_data=recv_data_size,
+                    notary_ticket=notary_ticket,
                 )
 
             # No WS fallback available, TCP refused
@@ -345,6 +347,7 @@ async def _run_prover_via_ws(
     output_path: str,
     timeout: float,
     max_recv_data: int = 0,
+    notary_ticket: str | None = None,
 ) -> TLSNProofResult:
     """Run the prover via a WebSocket bridge to a peer notary.
 
@@ -354,7 +357,9 @@ async def _run_prover_via_ws(
     """
     import websockets.client
 
-    ws_url = f"ws://{notary_host}:{notary_api_port}/v1/notary/ws"
+    # Append ticket as query param if available (peer notary verifies it)
+    ticket_param = f"?ticket={notary_ticket}" if notary_ticket else ""
+    ws_url = f"ws://{notary_host}:{notary_api_port}/v1/notary/ws{ticket_param}"
     log.info("tlsn_ws_bridge_connecting", ws_url=ws_url)
 
     # Find a free local port for the bridge

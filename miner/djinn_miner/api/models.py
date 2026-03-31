@@ -100,6 +100,7 @@ class ProofRequest(BaseModel):
     notary_port: int | None = Field(default=None, description="Peer notary TCP port (direct connection)")
     notary_ws: bool = Field(default=False, description="Legacy WS flag; direct TCP tried first")
     notary_ws_port: int | None = Field(default=None, description="API port for WS bridge fallback")
+    notary_ticket: str | None = Field(default=None, description="Validator-signed ticket authorizing peer notary connection")
 
 
 class ProofResponse(BaseModel):
@@ -185,6 +186,10 @@ class AttestRequest(BaseModel):
     notary_ws_port: int | None = Field(
         default=None, ge=1, le=65535,
         description="API port for WebSocket bridge fallback (ws://host:port/v1/notary/ws).",
+    )
+    notary_ticket: str | None = Field(
+        default=None, max_length=4096,
+        description="Validator-signed ticket authorizing peer notary connection.",
     )
 
     @field_validator("url")

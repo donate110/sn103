@@ -911,6 +911,19 @@ async def _request_and_verify_proof(
             payload["notary_host"] = notary.ip
             payload["notary_port"] = notary.notary_port
             payload["notary_ws_port"] = notary.port
+            # Include a signed notary ticket so the peer notary can verify
+            # this connection was authorized by a validator. Old miners
+            # without ticket support will ignore this field harmlessly.
+            if wallet:
+                try:
+                    from djinn_validator.api.middleware import create_notary_ticket
+                    payload["notary_ticket"] = create_notary_ticket(
+                        prover_uid=uid,
+                        notary_uid=notary.uid,
+                        wallet=wallet,
+                    )
+                except Exception as e:
+                    log.warning("notary_ticket_creation_failed", uid=uid, error=str(e))
         body = json.dumps(payload).encode()
         auth_headers = _sign_miner_request("/v1/proof", body, wallet)
         proof_resp = await client.post(
