@@ -20,43 +20,19 @@ The miner starts a FastAPI server on port 8422 (configurable via `API_PORT`) and
 
 ### Firewall
 
-Every miner should run a host firewall. Without one, all 65,535 ports respond to probes, making your server easier to fingerprint and target.
+The miner automatically manages its own firewall on startup. It reads validator IPs from the metagraph, whitelists only those on the API port, and blocks all other incoming traffic. Rules refresh every 15 minutes as validators change IPs. Kernel-level SYN flood protection and connection rate limiting are also applied automatically.
 
-**Quick setup (recommended):**
+**Requirements:** run as root (or with sudo) and have `ufw` installed. If either condition is missing, the miner logs a warning and continues without firewall management.
 
-```bash
-# Run the included setup script
-bash scripts/miner-firewall.sh
-```
-
-**Manual setup:**
+For manual setup or one-off runs, use `scripts/miner-firewall.sh`:
 
 ```bash
-# Default deny all incoming traffic
-ufw default deny incoming
-ufw default allow outgoing
+# Preview what it would do
+bash scripts/miner-firewall.sh --dry-run
 
-# Allow SSH (change port if you use a non-standard one)
-ufw allow 22/tcp
-
-# Miner API port (validator challenges, health checks)
-ufw allow 8422/tcp
-
-# Notary sidecar (peer attestation via direct TCP)
-ufw allow 7047/tcp
-
-# Rate-limit SSH to slow brute-force attempts (max 6 connections per 30s)
-ufw limit 22/tcp
-
-# Enable
-ufw --force enable
-ufw status verbose
+# Apply
+sudo bash scripts/miner-firewall.sh
 ```
-
-**Why both ports matter:**
-
-- **8422/tcp** (API): validators send health checks, line queries, and attestation challenges here. If blocked, your miner scores zero.
-- **7047/tcp** (Notary): peer miners connect here for MPC attestation sessions. If blocked, you cannot serve as a peer notary, which reduces your attestation score by up to 50%.
 
 **What this prevents:**
 
