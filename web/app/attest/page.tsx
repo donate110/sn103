@@ -411,17 +411,18 @@ function ResultCard({
 
   const hasBody = !!result.response_body;
 
+  const copyRef = useRef<HTMLTextAreaElement>(null);
+
   const copySource = useCallback(async () => {
     if (!result.response_body) return;
     try {
       await navigator.clipboard.writeText(result.response_body);
     } catch {
-      const ta = document.createElement("textarea");
-      ta.value = result.response_body;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
+      if (copyRef.current) {
+        copyRef.current.value = result.response_body;
+        copyRef.current.select();
+        document.execCommand("copy");
+      }
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -429,6 +430,7 @@ function ResultCard({
 
   return (
     <div className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
+      <textarea ref={copyRef} aria-hidden className="sr-only" tabIndex={-1} />
       <div className="flex items-center gap-2 mb-4">
         <span
           className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium cursor-default ${
