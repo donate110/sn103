@@ -513,22 +513,54 @@ class OTTripleGenState:
     completed: bool = False
 
     def initialize(self) -> None:
-        """Generate private random (a_i, b_i) values for all triples."""
+        """Generate private random (a_i, b_i) values for all triples.
+
+        Pre-computes all modular exponentiations across all triples in one
+        batch to maximize CPU utilization via the process pool. With 10
+        triples * 254 bits, this batches 2540 modexps into one pool.map call.
+        """
         self.a_values = [secrets.randbelow(self.prime) for _ in range(self.n_triples)]
         self.b_values = [secrets.randbelow(self.prime) for _ in range(self.n_triples)]
         self.c_values = [(self.a_values[t] * self.b_values[t]) % self.prime for t in range(self.n_triples)]
+
+        g = self.dh_group.generator
+        dhp = self.dh_group.prime
+        n_bits = _n_bits_for_prime(self.prime)
+
+        # Generate all receiver random values upfront so we can batch modexps
+        all_receiver_r_values: list[list[int]] = []
+        all_receiver_bits: list[list[int]] = []
+        all_r_flat: list[int] = []
+        for t in range(self.n_triples):
+            r_vals = [self.dh_group.rand_scalar() for _ in range(n_bits)]
+            bits = [(self.b_values[t] >> k) & 1 for k in range(n_bits)]
+            all_receiver_r_values.append(r_vals)
+            all_receiver_bits.append(bits)
+            all_r_flat.extend(r_vals)
+
+        # Batch ALL receiver g^r modexps across all triples at once
+        all_bases_flat = _batch_modexp(g, all_r_flat, dhp)
+
+        # Create senders (1 modexp each for DH public key, negligible)
         for t in range(self.n_triples):
             self.senders[t] = GilboaSenderSetup(
                 x=self.a_values[t],
                 prime=self.prime,
                 dh_group=self.dh_group,
             )
+
+        # Create receivers with pre-computed bases (skip __post_init__ modexps)
         for t in range(self.n_triples):
-            self.receivers[t] = GilboaReceiverSetup(
-                y=self.b_values[t],
-                prime=self.prime,
-                dh_group=self.dh_group,
-            )
+            recv = GilboaReceiverSetup.__new__(GilboaReceiverSetup)
+            recv.y = self.b_values[t]
+            recv.prime = self.prime
+            recv.dh_group = self.dh_group
+            recv._n_bits = n_bits
+            recv._r_values = all_receiver_r_values[t]
+            recv._bits = all_receiver_bits[t]
+            recv._sender_pk = 0
+            recv._g_r_bases = all_bases_flat[t * n_bits : (t + 1) * n_bits]
+            self.receivers[t] = recv
 
     def get_sender_public_keys(self) -> dict[int, int]:
         """Return DH public keys for all sender OT instances."""
