@@ -869,14 +869,24 @@ export default function PurchaseSignal() {
     step === "decrypting";
 
   const stepLabel: Record<string, string> = {
-    checking_lines: "Checking sportsbook lines (up to 30s)...",
-    purchasing_validator: "Verifying with validator network (30-90s, auto-retries)...",
+    checking_lines: "Querying live odds from sportsbooks...",
+    purchasing_validator: "Running cryptographic verification across validators...",
     purchasing_chain: purchaseLoading && !txHash
       ? "Confirm the transaction in your wallet..."
-      : "Confirming on Base Sepolia (10-30s)...",
-    collecting_shares: "Collecting decryption keys (5s)...",
-    decrypting: "Decrypting your signal...",
-    recovering: "Recovering your purchase (refreshed mid-purchase)...",
+      : "Recording purchase on-chain...",
+    collecting_shares: "Collecting decryption key shares...",
+    decrypting: "Decrypting the signal...",
+    recovering: "Recovering your purchase...",
+  };
+
+  // Progress bar: each step has a weight proportional to its expected duration
+  const stepProgress: Record<string, { pct: number; elapsed: string }> = {
+    checking_lines: { pct: 15, elapsed: "~10s" },
+    purchasing_validator: { pct: 60, elapsed: "~45s" },
+    purchasing_chain: { pct: 85, elapsed: "~15s" },
+    collecting_shares: { pct: 95, elapsed: "~5s" },
+    decrypting: { pct: 98, elapsed: "<1s" },
+    recovering: { pct: 50, elapsed: "" },
   };
 
   return (
@@ -1244,10 +1254,27 @@ export default function PurchaseSignal() {
                 )}
 
                 {isProcessing && (
-                  <div className="rounded-lg bg-blue-50 border border-blue-200 p-3" aria-live="polite">
-                    <p className="text-xs text-blue-600">
-                      {stepLabel[step] ?? "Processing..."}
-                    </p>
+                  <div className="rounded-lg bg-blue-50 border border-blue-200 p-4" aria-live="polite">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-sm font-medium text-blue-700">
+                        {stepLabel[step] ?? "Processing..."}
+                      </p>
+                      {stepProgress[step]?.elapsed && (
+                        <span className="text-xs text-blue-500">{stepProgress[step].elapsed}</span>
+                      )}
+                    </div>
+                    <div className="w-full bg-blue-200 rounded-full h-1.5">
+                      <div
+                        className="bg-blue-600 h-1.5 rounded-full transition-all duration-1000 ease-out"
+                        style={{ width: `${stepProgress[step]?.pct ?? 50}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between mt-2 text-xs text-blue-500">
+                      <span>Lines</span>
+                      <span>Verify</span>
+                      <span>Pay</span>
+                      <span>Decrypt</span>
+                    </div>
                   </div>
                 )}
 
@@ -1329,9 +1356,20 @@ export default function PurchaseSignal() {
 
       {isProcessing && (
         <div className="fixed bottom-0 left-0 right-0 md:hidden bg-blue-50 border-t border-blue-200 px-4 py-3 z-10">
-          <p className="text-xs text-blue-600 text-center">
-            {stepLabel[step] ?? "Processing..."}
-          </p>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs text-blue-700 font-medium">
+              {stepLabel[step] ?? "Processing..."}
+            </p>
+            {stepProgress[step]?.elapsed && (
+              <span className="text-xs text-blue-500">{stepProgress[step].elapsed}</span>
+            )}
+          </div>
+          <div className="w-full bg-blue-200 rounded-full h-1">
+            <div
+              className="bg-blue-600 h-1 rounded-full transition-all duration-1000 ease-out"
+              style={{ width: `${stepProgress[step]?.pct ?? 50}%` }}
+            />
+          </div>
         </div>
       )}
     </div>
