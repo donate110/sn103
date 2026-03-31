@@ -17,6 +17,9 @@ import {
 /** Max blocks per queryFilter call to avoid RPC rate limits. */
 const BLOCK_CHUNK_SIZE = 9_999;
 
+/** Number of chunk queries to run in parallel. */
+const CHUNK_CONCURRENCY = 5;
+
 /** Block number when contracts were first deployed. Avoids scanning from genesis. */
 const RAW_DEPLOY_BLOCK = Number(process.env.NEXT_PUBLIC_DEPLOY_BLOCK ?? "0");
 
@@ -43,8 +46,13 @@ export async function resolveDeployBlock(provider: ethers.Provider): Promise<num
 // Keep a synchronous alias for call sites that already have the value
 const DEPLOY_BLOCK = RAW_DEPLOY_BLOCK;
 
-/** Cache TTL in milliseconds (60 seconds). */
-const CACHE_TTL_MS = 60_000;
+/**
+ * Dedup interval: skip RPC if cache was updated within the last 5 seconds.
+ * This prevents multiple hooks firing on mount from all hitting the RPC.
+ * Once populated, the cache never expires; polling triggers cheap incremental
+ * scans from lastBlock + 1 (just a few new blocks).
+ */
+const CACHE_DEDUP_MS = 5_000;
 
 /** Maximum number of cache keys before evicting oldest entry. */
 const MAX_CACHE_KEYS = 100;
@@ -68,7 +76,7 @@ class EventCache<T extends { blockNumber: number }> {
   get(key: string): CacheEntry<T> | undefined {
     const entry = this.cache.get(key);
     if (!entry) return undefined;
-    if (Date.now() - entry.updatedAt > CACHE_TTL_MS) {
+    if (Date.now() - entry.updatedAt > CACHE_DEDUP_MS) {
       // Stale — return it for the lastBlock but mark for incremental refresh
       return entry;
     }
@@ -113,7 +121,7 @@ class EventCache<T extends { blockNumber: number }> {
   isFresh(key: string): boolean {
     const entry = this.cache.get(key);
     if (!entry) return false;
-    return Date.now() - entry.updatedAt < CACHE_TTL_MS;
+    return Date.now() - entry.updatedAt < CACHE_DEDUP_MS;
   }
 
   delete(key: string): void {
@@ -129,11 +137,20 @@ const signalCache = new EventCache<SignalEvent>();
 const purchaseCache = new EventCache<PurchaseEvent>();
 const auditCache = new EventCache<AuditEvent>();
 
+/** Separate cache for cancel event IDs (keyed by genius address). */
+interface CancelCacheEntry {
+  cancelledIds: Set<string>;
+  lastBlock: number;
+  updatedAt: number;
+}
+const cancelCache = new Map<string, CancelCacheEntry>();
+
 /** Reset all caches. Exported for test isolation. */
 export function resetEventCaches(): void {
   signalCache.clear();
   purchaseCache.clear();
   auditCache.clear();
+  cancelCache.clear();
 }
 
 /**
@@ -143,6 +160,7 @@ export function resetEventCaches(): void {
 export function invalidateSignalCache(geniusAddress?: string): void {
   if (geniusAddress) {
     signalCache.delete(`signals:genius:${geniusAddress.toLowerCase()}`);
+    cancelCache.delete(geniusAddress.toLowerCase());
   }
   // Always invalidate the global active signals cache too
   signalCache.delete("signals:active");
@@ -177,23 +195,35 @@ export async function queryFilterChunked(
     return contract.queryFilter(filter, fromBlock, toBlock);
   }
 
-  const allEvents: (ethers.EventLog | ethers.Log)[] = [];
+  // Build chunk ranges upfront
+  const chunkRanges: [number, number][] = [];
   for (let start = fromBlock; start <= toBlock; start += BLOCK_CHUNK_SIZE) {
-    const end = Math.min(start + BLOCK_CHUNK_SIZE - 1, toBlock);
-    let chunk: (ethers.EventLog | ethers.Log)[] | null = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        chunk = await contract.queryFilter(filter, start, end);
-        break;
-      } catch {
-        if (attempt < 2) {
-          // Exponential backoff: 1s, 2s
-          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+    chunkRanges.push([start, Math.min(start + BLOCK_CHUNK_SIZE - 1, toBlock)]);
+  }
+
+  // Query chunks in concurrent batches (CHUNK_CONCURRENCY at a time)
+  const allEvents: (ethers.EventLog | ethers.Log)[] = [];
+  for (let i = 0; i < chunkRanges.length; i += CHUNK_CONCURRENCY) {
+    const batch = chunkRanges.slice(i, i + CHUNK_CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map(async ([start, end]) => {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            return await contract.queryFilter(filter, start, end);
+          } catch {
+            if (attempt < 2) {
+              await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+            }
+          }
         }
-        // On final attempt, skip this chunk rather than crashing entire query
+        return null; // Skip chunk after 3 failures
+      }),
+    );
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value) {
+        allEvents.push(...result.value);
       }
     }
-    if (chunk) allEvents.push(...chunk);
   }
   return allEvents;
 }
@@ -337,15 +367,21 @@ export async function getSignalsByGenius(
   }
 
   if (includeAll) {
-    // Always re-check cancel events so the UI reflects recent cancellations
+    // Incrementally check cancel events (only scan new blocks since last check)
+    const cancelKey = geniusAddress.toLowerCase();
+    const cancelCached = cancelCache.get(cancelKey);
+    const cancelFrom = cancelCached ? cancelCached.lastBlock + 1 : effectiveFrom;
     const cancelFilter = contract.filters.SignalCancelled(null, geniusAddress);
-    const cancelEvents = await queryFilterChunked(contract, cancelFilter, effectiveFrom).catch(() => []);
-    const cancelledIds = new Set<string>();
+    const cancelEvents = await queryFilterChunked(contract, cancelFilter, cancelFrom).catch(() => []);
+    const cancelledIds = cancelCached ? new Set(cancelCached.cancelledIds) : new Set<string>();
+    let maxCancelBlock = cancelCached?.lastBlock ?? effectiveFrom;
     for (const e of cancelEvents) {
       if (e instanceof ethers.EventLog) {
         cancelledIds.add(e.args[0].toString());
+        if (e.blockNumber > maxCancelBlock) maxCancelBlock = e.blockNumber;
       }
     }
+    cancelCache.set(cancelKey, { cancelledIds, lastBlock: maxCancelBlock, updatedAt: Date.now() });
     for (const s of all) {
       if (cancelledIds.has(s.signalId)) s.cancelled = true;
     }
