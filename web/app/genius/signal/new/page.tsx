@@ -1556,22 +1556,36 @@ export default function CreateSignal() {
         <SecretModal
           open={isProcessing}
           variant={step === "preflight" ? "network" : step === "committing" ? "local" : "distribute"}
-          title={step === "preflight" ? "Checking Your Lines" : step === "committing" ? "Locking In Your Pick" : "Securing Your Pick"}
+          title={step === "preflight" ? "Verifying Your Lines" : step === "committing" ? "Sealing Your Pick" : "Distributing Key Shares"}
           message={step === "preflight"
-            ? "Making sure your picks are live at sportsbooks and can be bet on right now."
+            ? "Miners are checking that your picks are live at sportsbooks right now."
             : step === "committing"
-            ? "Your pick is being sealed so nobody can see it, then recorded on-chain."
-            : "Your pick is being split up and distributed for safekeeping. Nobody can see it without enough pieces."}
+            ? "Encrypting your pick and recording it on-chain. Confirm in your wallet."
+            : "Splitting your encryption key and distributing the pieces to validators."}
         >
-          <p className="text-xs text-slate-400">
-            {step === "committing" ? "Typically 10\u201330 seconds" : "A few seconds"}
-          </p>
-          <p className="text-xs text-slate-500 mt-2">
+          {/* Progress indicator */}
+          <div className="w-full max-w-xs mx-auto mb-3">
+            <div className="flex justify-between text-xs text-slate-500 mb-1">
+              <span className={step === "preflight" ? "text-blue-400 font-medium" : ""}>Verify</span>
+              <span className={step === "committing" ? "text-emerald-400 font-medium" : ""}>Seal</span>
+              <span className={step === "distributing" ? "text-amber-400 font-medium" : ""}>Distribute</span>
+            </div>
+            <div className="w-full bg-slate-700 rounded-full h-1.5">
+              <div
+                className={`h-1.5 rounded-full transition-all duration-1000 ease-out ${
+                  step === "preflight" ? "bg-blue-500 w-1/3"
+                  : step === "committing" ? "bg-emerald-500 w-2/3"
+                  : "bg-amber-500 w-full"
+                }`}
+              />
+            </div>
+          </div>
+          <p className="text-xs text-slate-500">
             {step === "preflight"
-              ? "Querying miners to independently verify line availability. Your real pick is hidden among decoys."
+              ? "Your real pick is hidden among 9 decoys. Miners verify all 10 independently."
               : step === "committing"
-              ? "Encrypting with AES-256 and committing the encrypted blob on-chain. Your wallet will ask you to confirm."
-              : "Splitting your encryption key into shares via Shamir secret sharing and distributing them to validators."}
+              ? "AES-256 encryption, then on-chain commit. Takes 10-30s on mainnet."
+              : "Shamir secret sharing splits the key so no single party can read your pick."}
           </p>
         </SecretModal>
 
