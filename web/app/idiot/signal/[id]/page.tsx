@@ -1047,6 +1047,18 @@ export default function PurchaseSignal() {
               </div>
             )}
 
+            {linesAvailable === null && isActive && signalAvailable !== false && (
+              <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 mb-4">
+                <p className="text-xs text-blue-600 animate-pulse">Checking if lines are available at sportsbooks...</p>
+              </div>
+            )}
+
+            {linesAvailable === true && isActive && (
+              <div className="rounded-lg bg-green-50 border border-green-200 p-3 mb-4">
+                <p className="text-xs text-green-700">Lines confirmed available at sportsbooks. Ready to purchase.</p>
+              </div>
+            )}
+
             {linesAvailable === false && isActive && (
               <div className="rounded-lg bg-red-50 border border-red-200 p-4 mb-4" role="alert">
                 <p className="text-sm font-medium text-red-800 mb-1">Game Started or Lines Unavailable</p>
