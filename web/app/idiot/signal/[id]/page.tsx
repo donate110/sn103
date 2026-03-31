@@ -1036,7 +1036,7 @@ export default function PurchaseSignal() {
               </div>
             )}
 
-            {signalAvailable === false && isActive && (
+            {signalAvailable === false && isActive && !isProcessing && (
               <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 mb-4" role="alert">
                 <p className="text-sm font-medium text-amber-800 mb-1">Signal Temporarily Unavailable</p>
                 <p className="text-xs text-amber-700">
