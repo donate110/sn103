@@ -24,7 +24,7 @@ const CHUNK_SIZE = 9_999; // Max blocks per queryFilter call (RPC provider limit
 // In-memory cache for the browse endpoint to avoid re-scanning on every request.
 // Serverless cold starts will re-populate, but warm instances serve instantly.
 let browseCache: { signals: Record<string, unknown>[]; lastBlock: number; updatedAt: number } | null = null;
-const BROWSE_CACHE_TTL_MS = 30_000; // 30 seconds
+const BROWSE_CACHE_TTL_MS = 120_000; // 2 minutes (signals change infrequently)
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -71,7 +71,11 @@ export async function GET(request: NextRequest) {
       }
 
       const paged = signals.slice(offset, offset + limit);
-      return NextResponse.json({ signals: paged, total: signals.length, offset, limit });
+      return NextResponse.json({ signals: paged, total: signals.length, offset, limit }, {
+        headers: {
+          "Cache-Control": "public, s-maxage=30, stale-while-revalidate=120",
+        },
+      });
     }
 
     // Query SignalCommitted events in parallel chunks starting from deploy block
@@ -174,6 +178,10 @@ export async function GET(request: NextRequest) {
       total: filtered.length,
       offset,
       limit,
+    }, {
+      headers: {
+        "Cache-Control": "public, s-maxage=30, stale-while-revalidate=120",
+      },
     });
   } catch (error) {
     console.error("browse_error", error);
