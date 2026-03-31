@@ -68,8 +68,9 @@ async def test_exact_spread_match(checker: LineChecker) -> None:
 
 
 @pytest.mark.asyncio
-async def test_spread_exact_match_only(checker: LineChecker) -> None:
+async def test_spread_exact_match_only(odds_client: OddsApiClient) -> None:
     """Exact match: -3.0 matches FanDuel (-3.0) but not DraftKings (-3.5)."""
+    exact_checker = LineChecker(odds_client=odds_client, line_tolerance=0.0)
     lines = [
         CandidateLine(
             index=1,
@@ -82,7 +83,7 @@ async def test_spread_exact_match_only(checker: LineChecker) -> None:
             side="Los Angeles Lakers",
         ),
     ]
-    results = (await checker.check(lines)).results
+    results = (await exact_checker.check(lines)).results
     bookmaker_names = [b.bookmaker for b in results[0].bookmakers]
     assert "FanDuel" in bookmaker_names
     assert "DraftKings" not in bookmaker_names  # -3.5 != -3.0
