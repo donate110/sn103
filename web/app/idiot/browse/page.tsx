@@ -222,6 +222,7 @@ export default function BrowseSignals() {
             const msLeft = Math.max(0, expires.getTime() - Date.now());
             const hoursLeft = msLeft / 3_600_000;
             const isUrgent = hoursLeft < 2;
+            const maybeStarted = hoursLeft < 3;
             const isExclusive = s.minNotional > 0n && s.minNotional === s.maxNotional;
 
             let timeLabel: string;
@@ -276,6 +277,12 @@ export default function BrowseSignals() {
                     </span>
                   )}
                 </div>
+
+                {maybeStarted && (
+                  <p className="text-[10px] text-amber-600 font-medium mb-2">
+                    Game may have started. Check before purchasing.
+                  </p>
+                )}
 
                 <div className="grid grid-cols-3 gap-2 mb-4">
                   <div>
