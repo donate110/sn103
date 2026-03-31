@@ -167,8 +167,8 @@ export default function Leaderboard() {
             ) : sorted.length === 0 ? (
               <tr>
                 <td colSpan={8} className="text-center text-slate-500 py-12">
-                  No leaderboard data available. Genius rankings will appear
-                  after signals are committed and audited on-chain.
+                  No Geniuses with signal activity yet. Rankings will appear
+                  once signals are created on-chain.
                 </td>
               </tr>
             ) : (

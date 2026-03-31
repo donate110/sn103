@@ -83,7 +83,7 @@ export async function fetchLeaderboard(
       first: ${safeLimit}
       orderBy: aggregateQualityScore
       orderDirection: desc
-      where: { totalAudits_gt: "0" }
+      where: { totalSignals_gt: "0" }
     ) {
       id
       totalSignals

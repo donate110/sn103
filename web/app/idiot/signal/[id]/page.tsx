@@ -421,17 +421,42 @@ export default function PurchaseSignal() {
       // computation takes 30-45s direct, 45-60s through proxy (measured:
       // UID 1 completes in ~43s direct, ~55s via Vercel proxy). Use 90s
       // to accommodate proxy latency and network variability.
+      // Retry once on failure since MPC is the flakiest step.
       const MPC_TIMEOUT_MS = 90_000;
-      const availabilityResults = await Promise.allSettled(
-        validators.map((v) =>
-          Promise.race([
-            v.purchaseSignal(signalId.toString(), purchaseReq),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error("MPC check timeout")), MPC_TIMEOUT_MS),
-            ),
-          ]),
+      const runMpcCheck = (vList: typeof validators) =>
+        Promise.allSettled(
+          vList.map((v) =>
+            Promise.race([
+              v.purchaseSignal(signalId.toString(), purchaseReq),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("MPC check timeout")), MPC_TIMEOUT_MS),
+              ),
+            ]),
+          ),
+        );
+
+      let availabilityResults = await runMpcCheck(validators);
+
+      // Check if first attempt succeeded
+      let anyAvailableFirstPass = availabilityResults.some(
+        (r) => r.status === "fulfilled" && (
+          r.value.available ||
+          (r.value as unknown as Record<string, string>).status === "payment_required"
         ),
       );
+
+      // Auto-retry once if MPC failed (fresh discovery in case validator set changed)
+      if (!anyAvailableFirstPass) {
+        console.log("[purchase] MPC attempt 1 failed, retrying with fresh validator discovery...");
+        try {
+          const freshValidators = await discoverValidatorClients();
+          if (freshValidators.length > 0) {
+            availabilityResults = await runMpcCheck(freshValidators);
+          }
+        } catch (retryErr) {
+          console.log("[purchase] MPC retry discovery failed:", retryErr);
+        }
+      }
 
       // Check if any validator confirmed the signal is available.
       // Accept both "available" and "payment_required" as positive signals:
@@ -482,14 +507,28 @@ export default function PurchaseSignal() {
           friendlyMsg = "No sportsbook lines are currently available for verification. Please try again shortly.";
         } else {
           const allTimedOut = errors.length > 0 && errors.every((e) => e.toLowerCase().includes("timeout") || e.toLowerCase().includes("timed out") || e.includes("502") || e.includes("504"));
+          const allNetworkErrors = errors.length > 0 && errors.every((e) => e.includes("502") || e.includes("503") || e.includes("504") || e.includes("fetch") || e.toLowerCase().includes("network"));
           if (allTimedOut) {
             friendlyMsg = "Validator network is slow right now. MPC verification timed out. Please try again in a minute.";
+          } else if (allNetworkErrors) {
+            friendlyMsg = "Could not reach any validators. The network may be experiencing issues. Please try again shortly.";
           } else {
+            // Build a diagnostic message from actual MPC/validator responses
+            const fulfilledCount = availabilityResults.filter((r) => r.status === "fulfilled").length;
+            const rejectedCount = availabilityResults.filter((r) => r.status === "rejected").length;
             const unavailCount = checkResult.results.filter((r) => !r.available).length;
-            if (unavailCount > 0 && unavailCount < checkResult.results.length) {
+
+            if (fulfilledCount === 0 && rejectedCount > 0) {
+              // All validators rejected (not timeout, not network, but actual errors)
+              friendlyMsg = `All ${rejectedCount} validators returned errors. ${errors[0]?.slice(0, 100) || "Unknown error"}. Please try again.`;
+            } else if (mpcReasons.length > 0) {
+              // MPC ran but returned specific failure reasons we didn't catch above
+              friendlyMsg = `MPC verification failed: ${mpcReasons[0]}. Please try again in a few minutes.`;
+            } else if (unavailCount > 0 && unavailCount < checkResult.results.length) {
               friendlyMsg = `${unavailCount} of ${checkResult.results.length} lines are temporarily unavailable at sportsbooks. The signal's pick may be among them. Try again in a minute.`;
             } else {
-              friendlyMsg = "Signal not currently available. The pick may have gone stale. Check back later.";
+              // True catch-all: include validator count for diagnostics
+              friendlyMsg = `MPC verification failed across ${availabilityResults.length} validators (${fulfilledCount} responded, ${rejectedCount} errored). Please try again.`;
             }
           }
         }
@@ -790,7 +829,7 @@ export default function PurchaseSignal() {
 
   const stepLabel: Record<string, string> = {
     checking_lines: "Checking sportsbook lines (up to 30s)...",
-    purchasing_validator: "Verifying with validator network (up to 60s)...",
+    purchasing_validator: "Verifying with validator network (30-90s, auto-retries)...",
     purchasing_chain: purchaseLoading && !txHash
       ? "Confirm the transaction in your wallet..."
       : "Confirming on Base Sepolia (10-30s)...",
@@ -1124,10 +1163,15 @@ export default function PurchaseSignal() {
                 )}
 
                 {(purchaseError || stepError) && (
-                  <div className="rounded-lg bg-red-50 border border-red-200 p-3" role="alert">
-                    <p className="text-xs text-red-600">
+                  <div className="rounded-lg bg-red-50 border border-red-200 p-4" role="alert">
+                    <p className="text-sm text-red-700 font-medium">
                       {purchaseError || stepError}
                     </p>
+                    {step === "idle" && !isProcessing && (
+                      <p className="text-xs text-red-500 mt-2">
+                        You can try again by clicking the button below.
+                      </p>
+                    )}
                   </div>
                 )}
 

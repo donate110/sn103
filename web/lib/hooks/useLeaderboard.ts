@@ -28,9 +28,9 @@ function toLeaderboardEntry(g: SubgraphGeniusEntry): GeniusLeaderboardEntry {
 
 export function useLeaderboard() {
   const [data, setData] = useState<GeniusLeaderboardEntry[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const configured = isSubgraphConfigured();
+  const [loading, setLoading] = useState(configured);
+  const [error, setError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
 
   const refresh = useCallback(async () => {
