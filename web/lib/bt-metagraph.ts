@@ -251,7 +251,7 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 /** Reject private/loopback/link-local IPs to prevent SSRF. */
-function isPublicIp(ip: string): boolean {
+export function isPublicIp(ip: string): boolean {
   if (ip === "0.0.0.0" || ip.startsWith("127.") || ip.startsWith("10.")) return false;
   if (ip.startsWith("172.")) {
     const second = parseInt(ip.split(".")[1], 10);

@@ -116,10 +116,12 @@ export function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL("/blocked", request.url));
     }
 
-    // Rate limiting
+    // Rate limiting: prefer x-real-ip (set by trusted reverse proxy) over
+    // x-forwarded-for (first entry is attacker-controllable in many setups)
     const ip =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.ip ||
       request.headers.get("x-real-ip") ||
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
       "unknown";
 
     // Skip rate limiting for localhost (dev/testing)

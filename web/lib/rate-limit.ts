@@ -16,14 +16,22 @@ function getMap(route: string): Map<string, number[]> {
   return m;
 }
 
-/** Extract client IP from request (prefers trusted sources). */
+/** Extract client IP from request.
+ *
+ * Priority: request.ip (framework-trusted) > x-real-ip (set by reverse proxy)
+ * > last entry of x-forwarded-for (closest proxy hop, hardest to spoof).
+ * The first x-forwarded-for entry is attacker-controllable and must not be used.
+ */
 export function getIp(request: NextRequest): string {
-  return (
-    request.ip ||
-    request.headers.get("x-real-ip") ||
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    "unknown"
-  );
+  if (request.ip) return request.ip;
+  const realIp = request.headers.get("x-real-ip");
+  if (realIp) return realIp;
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff) {
+    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
+  return "unknown";
 }
 
 /**

@@ -38,11 +38,15 @@ function isRateLimited(ip: string): boolean {
 }
 
 function getIp(request: NextRequest): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
+  if (request.ip) return request.ip;
+  const realIp = request.headers.get("x-real-ip");
+  if (realIp) return realIp;
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff) {
+    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
+  return "unknown";
 }
 
 interface ErrorReport {
