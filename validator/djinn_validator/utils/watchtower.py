@@ -8,7 +8,7 @@ Enable by setting ``AUTO_UPDATE=true`` in the environment. Configuration:
 
     AUTO_UPDATE            – "true" to enable (default: "false")
     AUTO_UPDATE_BRANCH     – branch to track (default: "main")
-    AUTO_UPDATE_INTERVAL   – seconds between checks (default: 300)
+    AUTO_UPDATE_INTERVAL   – seconds between checks (default: 900)
     AUTO_UPDATE_REPO_ROOT  – path to the git repo root; auto-detected if unset
 """
 
