@@ -120,6 +120,44 @@ export default function PurchaseSignal() {
   const purchaseBtnRef = useRef<HTMLButtonElement>(null);
   const [purchaseBtnVisible, setPurchaseBtnVisible] = useState(false);
   const checkResultRef = useRef<CheckResponse | null>(null);
+  const [linesAvailable, setLinesAvailable] = useState<boolean | null>(null); // null = not checked yet
+  const [linesReason, setLinesReason] = useState<string | null>(null);
+
+  // Pre-check line availability on page load (before user clicks Purchase)
+  useEffect(() => {
+    if (!signal || signalLoading || !signal.decoyLines?.length) return;
+    let cancelled = false;
+
+    const preCheck = async () => {
+      try {
+        const candidateLines: CandidateLine[] = signal.decoyLines.map(
+          (raw, i) => decoyLineToCandidateLine(raw, i + 1, signal.sport, params.id as string),
+        );
+        const result = await resilientCheckLines({ lines: candidateLines });
+        if (cancelled) return;
+        if (result.available_indices.length > 0) {
+          setLinesAvailable(true);
+        } else {
+          setLinesAvailable(false);
+          const reasons = result.results
+            .map((r) => (r as unknown as Record<string, unknown>).unavailable_reason as string | undefined)
+            .filter(Boolean);
+          const unique = [...new Set(reasons)];
+          if (unique.includes("game_started")) {
+            setLinesReason("The game for this signal has started. Lines are no longer available at sportsbooks.");
+          } else if (unique.includes("line_moved")) {
+            setLinesReason("The lines for this signal have moved and are no longer available.");
+          } else {
+            setLinesReason("Lines are temporarily unavailable at sportsbooks. Try again shortly.");
+          }
+        }
+      } catch {
+        if (!cancelled) setLinesAvailable(null); // couldn't check, don't block
+      }
+    };
+    preCheck();
+    return () => { cancelled = true; };
+  }, [signal, signalLoading, params.id]);
 
   // Check if any validator holds shares for this signal (polls every 15s)
   useEffect(() => {
@@ -1009,6 +1047,21 @@ export default function PurchaseSignal() {
               </div>
             )}
 
+            {linesAvailable === false && isActive && (
+              <div className="rounded-lg bg-red-50 border border-red-200 p-4 mb-4" role="alert">
+                <p className="text-sm font-medium text-red-800 mb-1">Game Started or Lines Unavailable</p>
+                <p className="text-xs text-red-700">
+                  {linesReason || "The betting lines for this signal are no longer available at sportsbooks. The game may have started or lines may have moved."}
+                </p>
+                <button
+                  onClick={() => router.push("/idiot/browse")}
+                  className="mt-2 text-xs text-red-600 hover:text-red-800 underline font-medium"
+                >
+                  Browse other signals
+                </button>
+              </div>
+            )}
+
             {address && signal.genius && address.toLowerCase() === signal.genius.toLowerCase() && (
               <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 mb-4" role="status">
                 <p className="text-xs text-amber-700 font-medium">
@@ -1190,15 +1243,17 @@ export default function PurchaseSignal() {
                   ref={purchaseBtnRef}
                   type="submit"
                   disabled={
-                    isProcessing || purchaseLoading || signalAvailable === false
+                    isProcessing || purchaseLoading || signalAvailable === false || linesAvailable === false
                   }
                   className="btn-primary w-full py-3"
                 >
                   {isProcessing
                     ? "Processing..."
-                    : signalAvailable === false
-                      ? "Unavailable"
-                      : "Purchase Signal"}
+                    : linesAvailable === false
+                      ? "Game Started"
+                      : signalAvailable === false
+                        ? "Unavailable"
+                        : "Purchase Signal"}
                 </button>
               </form>
             )}
