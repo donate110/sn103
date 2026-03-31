@@ -272,31 +272,27 @@ export async function getActiveSignals(
   const now = BigInt(Math.floor(Date.now() / 1000));
   const notExpired = all.filter((s) => s.expiresAt > now);
 
-  // Check on-chain status with retries to avoid dropping valid signals on transient RPC errors.
+  // Check on-chain status. First try without retries for speed; retry only on failure.
   const enriched = await Promise.all(
     notExpired.map(async (s) => {
       const id = BigInt(s.signalId);
       let active = false;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        active = await contract.isActive(id);
+      } catch {
+        // Single retry after brief pause
         try {
+          await new Promise((r) => setTimeout(r, 300));
           active = await contract.isActive(id);
-          break;
-        } catch {
-          if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
-        }
+        } catch { /* skip this signal */ }
       }
       if (!active) return null;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const signalData = await contract.getSignal(id);
-          if (signalData && signalData.minNotional != null) {
-            s.minNotional = BigInt(signalData.minNotional);
-          }
-          break;
-        } catch {
-          if (attempt < 1) await new Promise((r) => setTimeout(r, 500));
+      try {
+        const signalData = await contract.getSignal(id);
+        if (signalData && signalData.minNotional != null) {
+          s.minNotional = BigInt(signalData.minNotional);
         }
-      }
+      } catch { /* minNotional stays 0n, non-critical */ }
       return s;
     }),
   );
@@ -358,31 +354,26 @@ export async function getSignalsByGenius(
   const now = BigInt(Math.floor(Date.now() / 1000));
   const notExpired = all.filter((s) => s.expiresAt > now);
 
-  // Check on-chain status with retries to avoid dropping valid signals on transient RPC errors.
+  // Check on-chain status. First try without retries for speed; retry only on failure.
   const enriched = await Promise.all(
     notExpired.map(async (s) => {
       const id = BigInt(s.signalId);
       let active = false;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        active = await contract.isActive(id);
+      } catch {
         try {
+          await new Promise((r) => setTimeout(r, 300));
           active = await contract.isActive(id);
-          break;
-        } catch {
-          if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
-        }
+        } catch { /* skip this signal */ }
       }
       if (!active) return null;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const signalData = await contract.getSignal(id);
-          if (signalData && signalData.minNotional != null) {
-            s.minNotional = BigInt(signalData.minNotional);
-          }
-          break;
-        } catch {
-          if (attempt < 1) await new Promise((r) => setTimeout(r, 500));
+      try {
+        const signalData = await contract.getSignal(id);
+        if (signalData && signalData.minNotional != null) {
+          s.minNotional = BigInt(signalData.minNotional);
         }
-      }
+      } catch { /* minNotional stays 0n, non-critical */ }
       return s;
     }),
   );

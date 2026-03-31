@@ -150,11 +150,30 @@ export default function BrowseSignals() {
 
       {/* Content */}
       {loading ? (
-        <div className="card">
-          <div className="flex flex-col items-center justify-center py-16">
-            <div className="w-10 h-10 rounded-full border-2 border-idiot-200 border-t-idiot-500 animate-spin mb-4" />
-            <p className="text-slate-500">Loading available signals...</p>
-          </div>
+        <div className="grid md:grid-cols-2 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="card animate-pulse">
+              <div className="flex justify-between mb-3">
+                <div className="h-5 bg-slate-200 rounded w-12" />
+                <div className="h-5 bg-slate-100 rounded w-16" />
+              </div>
+              <div className="h-4 bg-slate-100 rounded w-24 mb-4" />
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <div className="h-3 bg-slate-100 rounded w-14 mb-1" />
+                  <div className="h-5 bg-slate-200 rounded w-12" />
+                </div>
+                <div>
+                  <div className="h-3 bg-slate-100 rounded w-8 mb-1" />
+                  <div className="h-5 bg-slate-200 rounded w-10" />
+                </div>
+                <div>
+                  <div className="h-3 bg-slate-100 rounded w-20 mb-1" />
+                  <div className="h-5 bg-slate-200 rounded w-12" />
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       ) : signalError ? (
         <div className="card">

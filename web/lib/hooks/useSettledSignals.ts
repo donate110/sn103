@@ -277,25 +277,24 @@ export function useSettledSignals(geniusAddress: string | undefined) {
         const purchases: ProofReadyPurchase[] = [];
 
         if (subSig?.purchases) {
-          for (const p of subSig.purchases) {
-            if (p.outcome === "Pending") continue;
-
-            let odds = "0";
-            // Try to fetch odds from on-chain Purchase struct
-            if (p.onChainPurchaseId) {
+          const settled = subSig.purchases.filter((p) => p.outcome !== "Pending");
+          const oddsResults = await Promise.all(
+            settled.map(async (p) => {
+              if (!p.onChainPurchaseId) return "0";
               try {
                 const purchase = await escrow.getPurchase(p.onChainPurchaseId);
-                odds = purchase.odds?.toString() ?? "0";
+                return purchase.odds?.toString() ?? "0";
               } catch {
-                // Contract query failed, odds will be 0
+                return "0";
               }
-            }
-
+            }),
+          );
+          for (let i = 0; i < settled.length; i++) {
             purchases.push({
-              purchaseId: p.onChainPurchaseId,
-              notional: p.notional,
-              odds,
-              outcome: p.outcome,
+              purchaseId: settled[i].onChainPurchaseId,
+              notional: settled[i].notional,
+              odds: oddsResults[i],
+              outcome: settled[i].outcome,
               slaBps: subSig.slaMultiplierBps,
             });
           }
