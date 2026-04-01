@@ -360,7 +360,8 @@ export default function PurchaseSignal() {
     setStepError(null);
 
     try {
-      // Step 1: Check line availability (platform API races against miner network)
+      const t0 = performance.now();
+      // Step 1: Check line availability via miner network (subnet only)
       setStep("checking_lines");
 
       const candidateLines: CandidateLine[] = signal.decoyLines.map(
@@ -442,6 +443,7 @@ export default function PurchaseSignal() {
       setMarketOdds(bestOdds);
 
       // Step 2: Verify availability with validators (MPC check — before payment)
+      console.log(`[purchase] Step 1 (line check) took ${((performance.now() - t0) / 1000).toFixed(1)}s`);
       setStep("purchasing_validator");
 
       const validators = await discoverValidatorClients();
@@ -603,6 +605,7 @@ export default function PurchaseSignal() {
       }
 
       // Step 3: Execute on-chain purchase (now that MPC confirmed availability)
+      console.log(`[purchase] Step 2 (MPC) took ${((performance.now() - t0) / 1000).toFixed(1)}s total`);
       setStep("purchasing_chain");
 
       const notionalNum = parseFloat(notional);
@@ -656,6 +659,7 @@ export default function PurchaseSignal() {
       // Persist state so we can recover if user refreshes after payment
       savePendingPurchase(signalId.toString(), buyerAddress);
 
+      console.log(`[purchase] Step 3 (on-chain tx) took ${((performance.now() - t0) / 1000).toFixed(1)}s total`);
       // Step 4: Collect key shares from validators (payment now exists on-chain)
       // Need at least SHAMIR_MIN (2) shares for reconstruction. Skip if we
       // already got enough from the MPC pre-check.
@@ -702,6 +706,7 @@ export default function PurchaseSignal() {
       }
 
       // Step 5: Decrypt the signal
+      console.log(`[purchase] Step 4 (share collection) took ${((performance.now() - t0) / 1000).toFixed(1)}s total, got ${collectedShares.length} shares`);
       setStep("decrypting");
 
       if (collectedShares.length > 0) {
