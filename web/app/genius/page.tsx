@@ -23,6 +23,16 @@ export default function GeniusDashboard() {
   const { withdraw: withdrawCollateral, loading: withdrawLoading } = useWithdrawCollateral();
   const { signals: mySignals, loading: signalsLoading, forceRefresh: forceRefreshSignals } = useActiveSignals(undefined, address, true);
   const { audits, loading: auditsLoading, aggregateQualityScore } = useAuditHistory(address);
+
+  // If we just created a signal, bust the server cache so it appears immediately
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem("djinn_signal_just_created")) {
+        sessionStorage.removeItem("djinn_signal_just_created");
+        forceRefreshSignals();
+      }
+    } catch {}
+  }, [forceRefreshSignals]);
   const { data: walletClient } = useWalletClient();
 
   // Encrypted signal data from localStorage
