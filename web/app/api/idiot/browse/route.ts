@@ -24,7 +24,7 @@ const CHUNK_SIZE = 9_999; // Max blocks per queryFilter call (RPC provider limit
 // In-memory cache for the browse endpoint to avoid re-scanning on every request.
 // Serverless cold starts will re-populate, but warm instances serve instantly.
 let browseCache: { signals: Record<string, unknown>[]; lastBlock: number; updatedAt: number } | null = null;
-const BROWSE_CACHE_TTL_MS = 300_000; // 5 minutes (signals change infrequently)
+const BROWSE_CACHE_TTL_MS = 60_000; // 1 minute (was 5, but new signals should appear quickly)
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
