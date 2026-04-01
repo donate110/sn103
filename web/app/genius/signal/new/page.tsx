@@ -392,19 +392,15 @@ export default function CreateSignal() {
       // Pre-flight: miner executability check — ALL 10 lines must be available.
       // Miners are blind to which line is real. If any line fails, the signal cannot be created.
       // This prevents Geniuses from creating signals with fake/expired lines to game results.
-      const minerVerified = true; // Always true — signal creation is blocked if miner check fails
       const candidateLines = allLines.map((line, i) => toCandidateLine(line, i + 1));
       try {
-        // Resilient check: retries across multiple validators/miners since
-        // some miners have broken Odds API keys and return 0 available lines.
+        // Resilient check: races platform Odds API against miner network.
         const checkResult = await resilientCheckLines({ lines: candidateLines });
 
-        // If the miner's upstream data source returned an error (e.g. 401, 500),
-        // surface it distinctly so the user knows it's a data-source problem, not
-        // that their pick is unavailable.
+        // If the odds data source returned an error, surface it distinctly.
         if (checkResult.api_error) {
           setStepError(
-            "The miner's odds data source is experiencing errors and cannot verify your lines right now.\n" +
+            "The odds data source is experiencing errors and cannot verify your lines right now.\n" +
             `(${checkResult.api_error})\n` +
             "Please try again in a few minutes.",
           );
