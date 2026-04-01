@@ -87,28 +87,35 @@ export function useActiveRelationships(
         return;
       }
 
-      // Query current state for ALL counterparties in parallel (not sequential)
+      // Query current state for counterparties with controlled concurrency
       const accountContract = getAccountContract(provider);
-      const cpArray = Array.from(counterparties);
-      const results = await Promise.allSettled(
-        cpArray.map(async (cp) => {
-          const genius = role === "genius" ? address : cp;
-          const idiot = role === "genius" ? cp : address;
-          const state = await accountContract.getAccountState(genius, idiot);
-          const signalCount = Number(state.signalCount);
-          if (signalCount > 0) {
-            return {
-              genius,
-              idiot,
-              signalCount,
-              qualityScore: Number(state.outcomeBalance),
-              currentCycle: Number(state.currentCycle),
-              isAuditReady: signalCount >= 10,
-            } as ActiveRelationship;
-          }
-          return null;
-        }),
-      );
+      const cpArray = Array.from(counterparties).slice(0, 50); // Cap at 50 to avoid RPC flood
+      const BATCH = 10;
+      const results: PromiseSettledResult<ActiveRelationship | null>[] = [];
+      for (let i = 0; i < cpArray.length; i += BATCH) {
+        const batch = cpArray.slice(i, i + BATCH);
+        const batchResults = await Promise.allSettled(
+          batch.map(async (cp) => {
+            const genius = role === "genius" ? address : cp;
+            const idiot = role === "genius" ? cp : address;
+            const state = await accountContract.getAccountState(genius, idiot);
+            const signalCount = Number(state.signalCount);
+            if (signalCount > 0) {
+              return {
+                genius,
+                idiot,
+                signalCount,
+                qualityScore: Number(state.outcomeBalance),
+                currentCycle: Number(state.currentCycle),
+                isAuditReady: signalCount >= 10,
+              } as ActiveRelationship;
+            }
+            return null;
+          }),
+        );
+        results.push(...batchResults);
+        if (cancelledRef.current) break;
+      }
 
       if (!cancelledRef.current) {
         const active = results
