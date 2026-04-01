@@ -24,6 +24,14 @@ log = structlog.get_logger()
 
 
 @dataclass
+class PrecomputedTriple:
+    """A Beaver triple for MPC gate computation, pre-computed at signal creation."""
+    a: int
+    b: int
+    c: int
+
+
+@dataclass
 class SignalShareRecord:
     """A validator's share for a single signal."""
 
@@ -35,6 +43,7 @@ class SignalShareRecord:
     shamir_threshold: int = 7  # Declared Shamir reconstruction threshold from genius
     stored_at: float = field(default_factory=time.time)
     released_to: set[str] = field(default_factory=set)
+    precomputed_triples: list[PrecomputedTriple] = field(default_factory=list)
 
 
 class ShareStore:
@@ -201,6 +210,7 @@ class ShareStore:
         encrypted_key_share: bytes,
         encrypted_index_share: bytes = b"",
         shamir_threshold: int = 7,
+        precomputed_triples: list[PrecomputedTriple] | None = None,
     ) -> None:
         """Store a new key share for a signal."""
         if not _SAFE_ID_RE.match(signal_id):
@@ -209,20 +219,35 @@ class ShareStore:
             raise ValueError("genius_address must not be empty")
         if not encrypted_key_share:
             raise ValueError("encrypted_key_share must not be empty")
+
+        import json as _json
+        triples_json = _json.dumps(
+            [{"a": hex(t.a), "b": hex(t.b), "c": hex(t.c)} for t in (precomputed_triples or [])]
+        )
+
         with self._lock:
+            # Auto-migrate: add precomputed_triples column if missing
+            try:
+                self._conn.execute("SELECT precomputed_triples FROM shares LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute("ALTER TABLE shares ADD COLUMN precomputed_triples TEXT DEFAULT '[]'")
+                self._conn.commit()
+
             try:
                 self._conn.execute(
                     "INSERT INTO shares (signal_id, genius_address, share_x, share_y, "
-                    "encrypted_key_share, encrypted_index_share, stored_at, shamir_threshold) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "encrypted_key_share, encrypted_index_share, stored_at, shamir_threshold, "
+                    "precomputed_triples) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (signal_id, genius_address, share.x, str(share.y),
                      encrypted_key_share, encrypted_index_share, time.time(),
-                     shamir_threshold),
+                     shamir_threshold, triples_json),
                 )
                 self._conn.commit()
                 log.info("share_stored", signal_id=signal_id, genius=genius_address,
                          has_index_share=len(encrypted_index_share) > 0,
-                         shamir_threshold=shamir_threshold)
+                         shamir_threshold=shamir_threshold,
+                         precomputed_triples=len(precomputed_triples or []))
             except sqlite3.IntegrityError:
                 log.warning("share_already_stored", signal_id=signal_id)
                 raise ValueError(f"Share already stored for signal {signal_id}")
@@ -232,7 +257,7 @@ class ShareStore:
         with self._lock:
             row = self._conn.execute(
                 "SELECT signal_id, genius_address, share_x, share_y, encrypted_key_share, "
-                "encrypted_index_share, stored_at, shamir_threshold "
+                "encrypted_index_share, stored_at, shamir_threshold, precomputed_triples "
                 "FROM shares WHERE signal_id = ?",
                 (signal_id,),
             ).fetchone()
@@ -247,6 +272,15 @@ class ShareStore:
                 ).fetchall()
             }
 
+        import json as _json
+        triples: list[PrecomputedTriple] = []
+        if len(row) > 8 and row[8]:
+            try:
+                raw = _json.loads(row[8])
+                triples = [PrecomputedTriple(a=int(t["a"], 16), b=int(t["b"], 16), c=int(t["c"], 16)) for t in raw]
+            except (ValueError, KeyError, TypeError):
+                pass
+
         return SignalShareRecord(
             signal_id=row[0],
             genius_address=row[1],
@@ -256,6 +290,7 @@ class ShareStore:
             shamir_threshold=row[7] if len(row) > 7 else 7,
             stored_at=row[6],
             released_to=released,
+            precomputed_triples=triples,
         )
 
     def get_all(self, signal_id: str) -> list[SignalShareRecord]:

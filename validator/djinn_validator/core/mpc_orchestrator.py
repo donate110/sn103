@@ -1257,6 +1257,62 @@ class MPCOrchestrator:
         )
         return triples
 
+    async def precompute_triples_for_signal(
+        self,
+        signal_id: str,
+        share_x: int,
+        n_triples: int = 10,
+    ) -> list[Any] | None:
+        """Pre-generate Beaver triples for a signal's future MPC purchase.
+
+        Called asynchronously after share storage. Triples are input-independent
+        so they can be generated before any purchase request exists.
+        If peers are not available (signal too new, validators haven't all received
+        shares yet), this fails silently and triples will be generated on-the-fly
+        during purchase.
+        """
+        peers = self._get_peer_validators()
+        if not peers:
+            return None
+
+        # Find a peer that holds this signal
+        target_peer = None
+        for peer in peers:
+            try:
+                resp = await self._peer_request(
+                    "get",
+                    f"{peer['url']}/v1/signal/{signal_id}/share_info",
+                    peer_uid=peer["uid"],
+                )
+                if resp and resp.status_code == 200:
+                    target_peer = peer
+                    break
+            except Exception:
+                continue
+
+        if not target_peer:
+            return None
+
+        # Generate triples via OT with the first available peer
+        participant_xs = sorted({share_x, resp.json().get("share_x", 1)})
+        if len(participant_xs) < 2:
+            return None
+
+        try:
+            session_id = f"precompute-{signal_id}-{secrets.token_hex(4)}"
+            triples = await self._generate_ot_triples_via_network(
+                session_id=session_id,
+                peer=target_peer,
+                n_triples=n_triples,
+                participant_xs=participant_xs,
+                my_x=share_x,
+                dh_group=self._ot_dh_group,
+                field_prime=self._ot_field_prime or BN254_PRIME,
+            )
+            return triples
+        except Exception:
+            return None
+
     def _single_validator_check(
         self,
         share: Share,

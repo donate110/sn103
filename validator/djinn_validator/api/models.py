@@ -24,6 +24,13 @@ def _validate_signal_id(v: str) -> str:
     return v
 
 
+class BeaverTripleData(BaseModel):
+    """Pre-computed Beaver triple for MPC gate computation."""
+    a: str = Field(max_length=66)  # Hex-encoded field element
+    b: str = Field(max_length=66)
+    c: str = Field(max_length=66)
+
+
 class StoreShareRequest(BaseModel):
     """POST /v1/signal — Accept encrypted key share from a Genius."""
 
@@ -34,6 +41,7 @@ class StoreShareRequest(BaseModel):
     encrypted_key_share: str = Field(max_length=4096)  # Hex-encoded encrypted AES key share
     encrypted_index_share: str = Field(default="", max_length=4096)  # Hex-encoded index share for MPC
     shamir_threshold: int = Field(default=7, ge=1, le=10, description="Shamir reconstruction threshold declared by the client")
+    precomputed_triples: list[BeaverTripleData] = Field(default_factory=list, max_length=20, description="Pre-computed Beaver triples for fast MPC purchase")
 
     @field_validator("share_y")
     @classmethod

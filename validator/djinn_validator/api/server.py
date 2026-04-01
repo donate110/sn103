@@ -444,6 +444,13 @@ def create_app(
             except Exception as e:
                 log.warning("on_chain_signal_verification_failed", signal_id=req.signal_id, err=str(e))
 
+        # Parse pre-computed Beaver triples if provided
+        from djinn_validator.core.shares import PrecomputedTriple
+        triples = [
+            PrecomputedTriple(a=int(t.a, 16), b=int(t.b, 16), c=int(t.c, 16))
+            for t in req.precomputed_triples
+        ] if req.precomputed_triples else []
+
         try:
             share_store.store(
                 signal_id=req.signal_id,
@@ -452,6 +459,7 @@ def create_app(
                 encrypted_key_share=encrypted,
                 encrypted_index_share=encrypted_index,
                 shamir_threshold=req.shamir_threshold,
+                precomputed_triples=triples,
             )
         except ValueError as e:
             detail = str(e)
@@ -461,6 +469,23 @@ def create_app(
 
         SHARES_STORED.inc()
         ACTIVE_SHARES.set(share_store.count)
+
+        # Pre-generate Beaver triples in the background for fast MPC at purchase time.
+        # Triples are input-independent and can be generated before the buyer exists.
+        if not triples and _orchestrator is not None:
+            async def _precompute_triples() -> None:
+                try:
+                    n_triples = 10  # Max number of multiplication gates (10 available indices)
+                    generated = await _orchestrator.precompute_triples_for_signal(
+                        signal_id=req.signal_id,
+                        share_x=req.share_x,
+                        n_triples=n_triples,
+                    )
+                    if generated:
+                        log.info("triples_precomputed", signal_id=req.signal_id, count=len(generated))
+                except Exception as e:
+                    log.debug("triple_precompute_failed", signal_id=req.signal_id, err=str(e)[:100])
+            asyncio.create_task(_precompute_triples())
 
         return StoreShareResponse(signal_id=req.signal_id, stored=True)
 
