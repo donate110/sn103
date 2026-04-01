@@ -322,11 +322,26 @@ function getValidatorClient(): ValidatorClient {
  * results (union of available_indices). The client queries multiple
  * validators for redundancy and merges across validators too.
  *
- * Falls back to platform Odds API when the miner network is unavailable.
+ * Races the platform Odds API against the miner network: whichever returns
+ * available lines first wins. The platform API typically responds in ~100ms
+ * while miners take 5-30s. This gives instant results when the Odds API is
+ * up, with miner verification as a fallback.
  */
 export async function resilientCheckLines(
   req: CheckRequest,
 ): Promise<CheckResponse> {
+  // Race: platform Odds API (fast, ~100ms) vs miner network (slow, 5-30s)
+  // Use whichever returns usable results first.
+  const platformPromise = post<CheckResponse>("/api/check-lines", req, 15_000)
+    .then((r) => {
+      if (r.available_indices.length > 0) {
+        console.log("[checkLines] Platform API responded first:", r.available_indices.length, "lines available in", r.response_time_ms, "ms");
+        return r;
+      }
+      return null;
+    })
+    .catch(() => null);
+
   let validators: ValidatorClient[];
   try {
     validators = await discoverValidatorClients();
@@ -334,67 +349,62 @@ export async function resilientCheckLines(
     validators = [getValidatorClient()];
   }
 
-  // Query all validators in parallel. Each validator queries up to 15
-  // miners internally, so even a single validator provides broad coverage.
-  const settled = await Promise.allSettled(
+  const minerPromise = Promise.allSettled(
     validators.map((v) => v.checkLines(req)),
-  );
-
-  // Collect successful responses (skip those with api_error)
-  const responses: CheckResponse[] = [];
-  for (const r of settled) {
-    if (r.status === "fulfilled" && !r.value.api_error) {
-      responses.push(r.value);
-    }
-  }
-
-  // Fallback: if all validators/miners failed, check lines via platform Odds API
-  if (responses.length === 0) {
-    console.log("[checkLines] All validators failed, falling back to platform Odds API");
-    try {
-      const fallback = await post<CheckResponse>("/api/check-lines", req, 30_000);
-      if (fallback.available_indices.length > 0) {
-        console.log("[checkLines] Platform fallback found", fallback.available_indices.length, "available lines");
-        return fallback;
+  ).then((settled) => {
+    const responses: CheckResponse[] = [];
+    for (const r of settled) {
+      if (r.status === "fulfilled" && !r.value.api_error) {
+        responses.push(r.value);
       }
-    } catch (e) {
-      console.log("[checkLines] Platform fallback also failed:", String(e).slice(0, 100));
     }
+    if (responses.length === 0) return null;
+
+    // Merge across validators
+    const mergedResults: Map<number, LineResult> = new Map();
+    for (const resp of responses) {
+      for (const lr of resp.results) {
+        const existing = mergedResults.get(lr.index);
+        if (!existing) {
+          mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
+        } else if (lr.available && !existing.available) {
+          mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
+        } else if (lr.available && existing.available && lr.bookmakers.length > existing.bookmakers.length) {
+          mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
+        }
+      }
+    }
+    const mergedArray = req.lines.map((l) =>
+      mergedResults.get(l.index) ?? { index: l.index, available: false, bookmakers: [] },
+    );
+    const mergedIndices = mergedArray.filter((r) => r.available).map((r) => r.index);
+    if (mergedIndices.length === 0) return null;
+
+    console.log("[checkLines] Miner network responded:", mergedIndices.length, "lines available");
     return {
-      results: req.lines.map((l) => ({
-        index: l.index,
-        available: false,
-        bookmakers: [],
-      })),
-      available_indices: [],
-      response_time_ms: 0,
-      api_error: "No odds data providers available. The miner network and platform API are both unreachable.",
-    };
-  }
+      results: mergedArray,
+      available_indices: mergedIndices,
+      response_time_ms: Math.max(...responses.map((r) => r.response_time_ms)),
+    } as CheckResponse;
+  });
 
-  // Merge across validators: union of available_indices, richest data wins
-  const mergedResults: Map<number, LineResult> = new Map();
-  for (const resp of responses) {
-    for (const lr of resp.results) {
-      const existing = mergedResults.get(lr.index);
-      if (!existing) {
-        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
-      } else if (lr.available && !existing.available) {
-        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
-      } else if (lr.available && existing.available && lr.bookmakers.length > existing.bookmakers.length) {
-        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
-      }
-    }
-  }
+  // Return whichever succeeds first with available lines
+  const result = await Promise.any([
+    platformPromise.then((r) => { if (!r) throw new Error("no results"); return r; }),
+    minerPromise.then((r) => { if (!r) throw new Error("no results"); return r; }),
+  ]).catch(() => null);
 
-  const mergedArray = req.lines.map((l) =>
-    mergedResults.get(l.index) ?? { index: l.index, available: false, bookmakers: [] },
-  );
-  const mergedIndices = mergedArray.filter((r) => r.available).map((r) => r.index);
+  if (result) return result;
 
+  // Both failed: return error
   return {
-    results: mergedArray,
-    available_indices: mergedIndices,
-    response_time_ms: Math.max(...responses.map((r) => r.response_time_ms)),
+    results: req.lines.map((l) => ({
+      index: l.index,
+      available: false,
+      bookmakers: [],
+    })),
+    available_indices: [],
+    response_time_ms: 0,
+    api_error: "No odds data providers available. The miner network and platform API are both unreachable.",
   };
 }
