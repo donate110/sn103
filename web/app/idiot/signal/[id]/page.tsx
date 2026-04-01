@@ -467,12 +467,10 @@ export default function PurchaseSignal() {
         buyer_signature: buyerSig,
       };
 
-      // MPC availability check: query all validators. Distributed MPC
-      // computation takes 30-45s direct, 45-60s through proxy (measured:
-      // UID 1 completes in ~43s direct, ~55s via Vercel proxy). Use 90s
-      // to accommodate proxy latency and network variability.
-      // Retry once on failure since MPC is the flakiest step.
-      const MPC_TIMEOUT_MS = 90_000;
+      // MPC availability check: query all validators in parallel but return
+      // as soon as ANY confirms availability (don't wait for broken validators).
+      // Reduced timeout from 90s since PEER_TIMEOUT is now 3s (was 10s).
+      const MPC_TIMEOUT_MS = 45_000;
       const runMpcCheck = (vList: typeof validators) =>
         Promise.allSettled(
           vList.map((v) =>
@@ -485,28 +483,34 @@ export default function PurchaseSignal() {
           ),
         );
 
-      let availabilityResults = await runMpcCheck(validators);
-
-      // Check if first attempt succeeded
-      let anyAvailableFirstPass = availabilityResults.some(
-        (r) => r.status === "fulfilled" && (
-          r.value.available ||
-          (r.value as unknown as Record<string, string>).status === "payment_required"
-        ),
-      );
-
-      // Auto-retry once if MPC failed (fresh discovery in case validator set changed)
-      if (!anyAvailableFirstPass) {
-        console.log("[purchase] MPC attempt 1 failed, retrying with fresh validator discovery...");
-        try {
-          const freshValidators = await discoverValidatorClients();
-          if (freshValidators.length > 0) {
-            availabilityResults = await runMpcCheck(freshValidators);
-          }
-        } catch (retryErr) {
-          console.log("[purchase] MPC retry discovery failed:", retryErr);
-        }
+      // Race: return as soon as ANY validator confirms availability.
+      // Don't wait for broken validators to time out.
+      type MpcResponse = Awaited<ReturnType<typeof validators[0]["purchaseSignal"]>>;
+      let firstAvailable: MpcResponse | null = null;
+      try {
+        firstAvailable = await Promise.any(
+          validators.map((v) =>
+            Promise.race([
+              v.purchaseSignal(signalId.toString(), purchaseReq),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("MPC timeout")), MPC_TIMEOUT_MS),
+              ),
+            ]).then((r) => {
+              if (r.available || (r as unknown as Record<string, string>).status === "payment_required") {
+                return r;
+              }
+              throw new Error(`unavailable: ${r.status}`);
+            }),
+          ),
+        );
+      } catch {
+        // All validators failed or returned unavailable
       }
+
+      // Build availabilityResults for downstream code compatibility
+      const availabilityResults: PromiseSettledResult<MpcResponse>[] = firstAvailable
+        ? [{ status: "fulfilled" as const, value: firstAvailable }]
+        : validators.map(() => ({ status: "rejected" as const, reason: new Error("MPC failed") }));
 
       // Check if any validator confirmed the signal is available.
       // Accept both "available" and "payment_required" as positive signals:
