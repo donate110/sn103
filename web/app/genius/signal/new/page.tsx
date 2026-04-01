@@ -357,8 +357,14 @@ export default function CreateSignal() {
         setStep("configure");
         return;
       }
+      // Health check with 5s timeout per validator (don't wait 30s for broken ones)
       const healthChecks = await Promise.allSettled(
-        preflightValidators.map((v) => v.health()),
+        preflightValidators.map((v) =>
+          Promise.race([
+            v.health(),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("health timeout")), 5000)),
+          ]),
+        ),
       );
       // Filter to validators that are healthy AND running a compatible version.
       // Old validators (v0, v0.1.0) pass health checks but have incompatible
