@@ -255,12 +255,21 @@ class ShareStore:
     def get(self, signal_id: str) -> SignalShareRecord | None:
         """Retrieve a share record by signal ID."""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT signal_id, genius_address, share_x, share_y, encrypted_key_share, "
-                "encrypted_index_share, stored_at, shamir_threshold, precomputed_triples "
-                "FROM shares WHERE signal_id = ?",
-                (signal_id,),
-            ).fetchone()
+            # Try with precomputed_triples column; fall back without if not migrated yet
+            try:
+                row = self._conn.execute(
+                    "SELECT signal_id, genius_address, share_x, share_y, encrypted_key_share, "
+                    "encrypted_index_share, stored_at, shamir_threshold, precomputed_triples "
+                    "FROM shares WHERE signal_id = ?",
+                    (signal_id,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                row = self._conn.execute(
+                    "SELECT signal_id, genius_address, share_x, share_y, encrypted_key_share, "
+                    "encrypted_index_share, stored_at, shamir_threshold "
+                    "FROM shares WHERE signal_id = ?",
+                    (signal_id,),
+                ).fetchone()
             if row is None:
                 return None
 
