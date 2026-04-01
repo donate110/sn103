@@ -353,7 +353,7 @@ export default function PurchaseSignal() {
     setStepError(null);
 
     try {
-      // Step 1: Check line availability with miner (any sportsbook)
+      // Step 1: Check line availability (platform API races against miner network)
       setStep("checking_lines");
 
       const candidateLines: CandidateLine[] = signal.decoyLines.map(
@@ -366,8 +366,8 @@ export default function PurchaseSignal() {
           ),
       );
 
-      // Resilient check: retries across ALL discovered validators/miners since
-      // most miners have broken Odds API keys and return 0 available lines.
+      // Resilient check: races platform Odds API against miner network.
+      // Platform API wins in ~100ms; miners are slower but provide redundancy.
       console.log("[purchase] starting line check for signal", params.id, "with", candidateLines.length, "lines");
       let checkResult: CheckResponse | null = null;
       let checkError: string | null = null;

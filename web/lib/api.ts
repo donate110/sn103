@@ -405,6 +405,6 @@ export async function resilientCheckLines(
     })),
     available_indices: [],
     response_time_ms: 0,
-    api_error: "No odds data providers available. The miner network and platform API are both unreachable.",
+    api_error: "No odds data available. Please check your internet connection and try again.",
   };
 }
