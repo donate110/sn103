@@ -59,7 +59,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger()
 
 # Timeout for inter-validator HTTP calls (configurable via env)
-PEER_TIMEOUT = float(os.getenv("MPC_PEER_TIMEOUT", "10.0"))
+PEER_TIMEOUT = float(os.getenv("MPC_PEER_TIMEOUT", "3.0"))
 
 
 def _is_public_ip(ip_str: str) -> bool:
