@@ -19,7 +19,7 @@ import {
   deriveSignalKey,
   isMasterSeedCached,
 } from "@/lib/crypto";
-import { discoverValidatorClients, resilientCheckLines } from "@/lib/api";
+import { discoverValidatorClients, checkLinesViaSubnet } from "@/lib/api";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
 import { fetchProtocolStats } from "@/lib/subgraph";
 import { formatUsdc } from "@/lib/types";
@@ -388,8 +388,9 @@ export default function CreateSignal() {
       // This prevents Geniuses from creating signals with fake/expired lines to game results.
       const candidateLines = allLines.map((line, i) => toCandidateLine(line, i + 1));
       try {
-        // Resilient check: races platform Odds API against miner network.
-        const checkResult = await resilientCheckLines({ lines: candidateLines });
+        // Verify lines through the decentralized miner network only.
+        // The platform Odds API is for browsing/decoys, never for verification.
+        const checkResult = await checkLinesViaSubnet({ lines: candidateLines });
 
         // If the odds data source returned an error, surface it distinctly.
         if (checkResult.api_error) {
