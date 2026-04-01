@@ -512,36 +512,21 @@ class OTTripleGenState:
 
     completed: bool = False
 
-    def initialize(self) -> None:
-        """Generate private random (a_i, b_i) values for all triples.
+    _receivers_ready: bool = False
 
-        Pre-computes all modular exponentiations across all triples in one
-        batch to maximize CPU utilization via the process pool. With 10
-        triples * 254 bits, this batches 2540 modexps into one pool.map call.
+    def initialize(self) -> None:
+        """Generate private random values and create senders + receivers.
+
+        Senders are created immediately (fast: 1 modexp each for DH public key).
+        Receiver modexp pre-computation (2540 ops for 10 triples) runs in a
+        background thread so the OT setup HTTP response can return immediately.
+        The pre-computation completes before generate_receiver_choices() is called.
         """
         self.a_values = [secrets.randbelow(self.prime) for _ in range(self.n_triples)]
         self.b_values = [secrets.randbelow(self.prime) for _ in range(self.n_triples)]
         self.c_values = [(self.a_values[t] * self.b_values[t]) % self.prime for t in range(self.n_triples)]
 
-        g = self.dh_group.generator
-        dhp = self.dh_group.prime
-        n_bits = _n_bits_for_prime(self.prime)
-
-        # Generate all receiver random values upfront so we can batch modexps
-        all_receiver_r_values: list[list[int]] = []
-        all_receiver_bits: list[list[int]] = []
-        all_r_flat: list[int] = []
-        for t in range(self.n_triples):
-            r_vals = [self.dh_group.rand_scalar() for _ in range(n_bits)]
-            bits = [(self.b_values[t] >> k) & 1 for k in range(n_bits)]
-            all_receiver_r_values.append(r_vals)
-            all_receiver_bits.append(bits)
-            all_r_flat.extend(r_vals)
-
-        # Batch ALL receiver g^r modexps across all triples at once
-        all_bases_flat = _batch_modexp(g, all_r_flat, dhp)
-
-        # Create senders (1 modexp each for DH public key, negligible)
+        # Create senders immediately (1 modexp each, fast)
         for t in range(self.n_triples):
             self.senders[t] = GilboaSenderSetup(
                 x=self.a_values[t],
@@ -549,7 +534,17 @@ class OTTripleGenState:
                 dh_group=self.dh_group,
             )
 
-        # Create receivers with pre-computed bases (skip __post_init__ modexps)
+        # Prepare receiver random values (no modexps yet)
+        n_bits = _n_bits_for_prime(self.prime)
+        all_receiver_r_values: list[list[int]] = []
+        all_receiver_bits: list[list[int]] = []
+        for t in range(self.n_triples):
+            r_vals = [self.dh_group.rand_scalar() for _ in range(n_bits)]
+            bits = [(self.b_values[t] >> k) & 1 for k in range(n_bits)]
+            all_receiver_r_values.append(r_vals)
+            all_receiver_bits.append(bits)
+
+        # Create receivers without pre-computed bases (will be filled by background thread)
         for t in range(self.n_triples):
             recv = GilboaReceiverSetup.__new__(GilboaReceiverSetup)
             recv.y = self.b_values[t]
@@ -559,8 +554,39 @@ class OTTripleGenState:
             recv._r_values = all_receiver_r_values[t]
             recv._bits = all_receiver_bits[t]
             recv._sender_pk = 0
-            recv._g_r_bases = all_bases_flat[t * n_bits : (t + 1) * n_bits]
+            recv._g_r_bases = []  # filled by _finish_receiver_init
             self.receivers[t] = recv
+
+        # Launch receiver modexp pre-computation in a background thread.
+        # The process pool does the actual parallel work; the thread just
+        # waits for it so we don't block the HTTP response.
+        import threading
+        self._receiver_init_thread = threading.Thread(
+            target=self._finish_receiver_init,
+            args=(all_receiver_r_values, n_bits),
+            daemon=True,
+        )
+        self._receiver_init_thread.start()
+
+    def _finish_receiver_init(self, all_r_values: list[list[int]], n_bits: int) -> None:
+        """Background thread: batch pre-compute receiver g^r bases."""
+        g = self.dh_group.generator
+        dhp = self.dh_group.prime
+        all_r_flat = [r for r_list in all_r_values for r in r_list]
+        all_bases_flat = _batch_modexp(g, all_r_flat, dhp)
+        for t in range(self.n_triples):
+            self.receivers[t]._g_r_bases = all_bases_flat[t * n_bits : (t + 1) * n_bits]
+        self._receivers_ready = True
+
+    def _ensure_receivers_ready(self) -> None:
+        """Block until receiver pre-computation is complete."""
+        if self._receivers_ready:
+            return
+        thread = getattr(self, "_receiver_init_thread", None)
+        if thread is not None:
+            thread.join(timeout=120)
+        if not self._receivers_ready:
+            log.warning("receiver_init_timeout", msg="Receiver pre-computation did not complete in time")
 
     def get_sender_public_keys(self) -> dict[int, int]:
         """Return DH public keys for all sender OT instances."""
@@ -571,6 +597,7 @@ class OTTripleGenState:
         peer_sender_pks: dict[int, int],
     ) -> dict[int, list[int]]:
         """Generate choice commitments for all triples where this party is receiver."""
+        self._ensure_receivers_ready()
         choices: dict[int, list[int]] = {}
         for t in range(self.n_triples):
             choices[t] = self.receivers[t].generate_choices(peer_sender_pks[t])
