@@ -91,9 +91,17 @@ async function proxy(
         "Content-Type": "application/json",
       },
     });
-  } catch {
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const errName = err instanceof Error ? err.name : "unknown";
+    console.error(`[proxy] UID ${uid} -> ${target} failed: ${errName}: ${errMsg}`);
     return NextResponse.json(
-      { error: "Validator unavailable" },
+      {
+        error: "Validator unavailable",
+        detail: errName === "TimeoutError" ? "timeout" : errName === "TypeError" ? "connection_refused" : errName,
+        target: target.replace(/\d+\.\d+\.\d+\.\d+/, "x.x.x.x"), // Redact IP
+        timeout_ms: timeoutMs,
+      },
       { status: 502 },
     );
   }

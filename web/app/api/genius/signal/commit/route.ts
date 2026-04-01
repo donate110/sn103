@@ -27,9 +27,13 @@ const RATE_LIMIT_MAX = 30;
 
 interface SharePayload {
   validator_uid: number;
-  key_share: string;
-  index_share: string;
+  // Accept both SDK-style and validator-style field names
+  key_share?: string;
+  index_share?: string;
   share_x?: number;
+  share_y?: string;
+  encrypted_key_share?: string;
+  encrypted_index_share?: string;
 }
 
 interface CommitBody {
@@ -143,23 +147,25 @@ export async function POST(request: NextRequest) {
       }
 
       try {
+        // Derive a validator-friendly signal_id from the tx hash
+        // Validators expect alphanumeric/hyphens, max 256 chars
+        const signalIdStr = commit_tx_hash.replace(/^0x/, "").slice(0, 64);
+
+        // Normalize field names: accept both SDK-style and validator-style
+        const shareY = share.share_y || share.key_share || "";
+        const encKeyShare = share.encrypted_key_share || share.index_share || shareY;
+        const encIndexShare = share.encrypted_index_share || share.index_share || "";
+
         const resp = await fetch(`${url}/v1/signal`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            genius: auth.address,
-            encrypted_blob,
-            commit_hash,
-            commit_tx_hash,
-            key_share: share.key_share,
-            index_share: share.index_share,
-            share_x: share.share_x,
-            event_id,
-            sport,
-            fee_bps,
-            sla_multiplier_bps,
-            max_notional_usdc,
-            expires_at,
+            signal_id: signalIdStr,
+            genius_address: auth.address,
+            share_x: share.share_x ?? 1,
+            share_y: shareY,
+            encrypted_key_share: encKeyShare,
+            encrypted_index_share: encIndexShare,
             shamir_threshold,
           }),
           signal: AbortSignal.timeout(15_000),

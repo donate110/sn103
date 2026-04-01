@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let body: { signal_id?: string; notional_usdc?: number };
+  let body: { signal_id?: string; notional_usdc?: number; odds_decimal?: number };
   try {
     body = await request.json();
   } catch {
@@ -179,13 +179,24 @@ export async function POST(request: NextRequest) {
     const feeOnChain = (notionalOnChain * BigInt(maxPriceBps)) / 10000n;
     const feeUsdc = Number(feeOnChain) / 1e6;
 
+    // Determine odds: use client-provided odds or a reasonable default
+    // Odds are decimal odds scaled by 1e6 (e.g. 1.91x = 1_910_000)
+    // Contract requires MIN_ODDS=1_010_000, MAX_ODDS=1_000_000_000
+    let oddsOnChain: bigint;
+    const clientOdds = body.odds_decimal;
+    if (clientOdds && typeof clientOdds === "number" && clientOdds >= 1.01) {
+      oddsOnChain = BigInt(Math.round(clientOdds * 1e6));
+    } else {
+      // Default to 2.0 (even odds) if not provided
+      oddsOnChain = 2_000_000n;
+    }
+
     // Encode unsigned purchase transaction
-    // purchase(signalId, notional, odds) - odds is set to 0 (market odds determined on-chain)
     const escrowIface = new ethers.Interface(ESCROW_ABI);
     const calldata = escrowIface.encodeFunctionData("purchase", [
       signalIdBn,
       notionalOnChain,
-      0, // odds placeholder; actual odds come from the sportsbook at execution time
+      oddsOnChain,
     ]);
 
     return NextResponse.json({
