@@ -659,37 +659,46 @@ export default function PurchaseSignal() {
       // Step 4: Collect key shares from validators (payment now exists on-chain)
       // Need at least SHAMIR_MIN (2) shares for reconstruction. Skip if we
       // already got enough from the MPC pre-check.
+      const NEEDED_SHARES = 2;
       const SHARE_COLLECTION_TIMEOUT_MS = 30_000;
-      if (collectedShares.length < 2) {
+      if (collectedShares.length < NEEDED_SHARES) {
         setStep("collecting_shares");
 
-        const shareResults = await Promise.allSettled(
-          validators.map((v) =>
+        // Collect shares: resolve as soon as we have enough (don't wait for all)
+        await new Promise<void>((resolveAll) => {
+          let resolved = false;
+          validators.forEach((v) => {
             Promise.race([
               v.purchaseSignal(signalId.toString(), purchaseReq),
               new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("Share collection timeout")), SHARE_COLLECTION_TIMEOUT_MS),
+                setTimeout(() => reject(new Error("timeout")), SHARE_COLLECTION_TIMEOUT_MS),
               ),
-            ]),
-          ),
-        );
-
-        for (const result of shareResults) {
-          if (
-            result.status === "fulfilled" &&
-            result.value.available &&
-            result.value.encrypted_key_share &&
-            result.value.share_x != null
-          ) {
-            const x = result.value.share_x;
-            if (!collectedShares.some((s) => s.x === x)) {
-              collectedShares.push({
-                x,
-                y: BigInt("0x" + result.value.encrypted_key_share),
-              });
-            }
-          }
-        }
+            ])
+              .then((result) => {
+                if (resolved) return;
+                if (
+                  result?.available &&
+                  result.encrypted_key_share &&
+                  result.share_x != null
+                ) {
+                  const x = result.share_x;
+                  if (!collectedShares.some((s) => s.x === x)) {
+                    collectedShares.push({
+                      x,
+                      y: BigInt("0x" + result.encrypted_key_share),
+                    });
+                  }
+                  if (collectedShares.length >= NEEDED_SHARES) {
+                    resolved = true;
+                    resolveAll();
+                  }
+                }
+              })
+              .catch(() => {});
+          });
+          // Fallback: resolve after timeout even if we don't have enough
+          setTimeout(() => { if (!resolved) { resolved = true; resolveAll(); } }, SHARE_COLLECTION_TIMEOUT_MS + 1000);
+        });
       }
 
       // Step 5: Decrypt the signal
