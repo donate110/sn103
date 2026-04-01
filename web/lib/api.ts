@@ -322,8 +322,7 @@ function getValidatorClient(): ValidatorClient {
  * results (union of available_indices). The client queries multiple
  * validators for redundancy and merges across validators too.
  *
- * No platform fallback: line verification is done exclusively by the
- * decentralized miner network.
+ * Falls back to platform Odds API when the miner network is unavailable.
  */
 export async function resilientCheckLines(
   req: CheckRequest,
@@ -349,7 +348,18 @@ export async function resilientCheckLines(
     }
   }
 
+  // Fallback: if all validators/miners failed, check lines via platform Odds API
   if (responses.length === 0) {
+    console.log("[checkLines] All validators failed, falling back to platform Odds API");
+    try {
+      const fallback = await post<CheckResponse>("/api/check-lines", req, 30_000);
+      if (fallback.available_indices.length > 0) {
+        console.log("[checkLines] Platform fallback found", fallback.available_indices.length, "available lines");
+        return fallback;
+      }
+    } catch (e) {
+      console.log("[checkLines] Platform fallback also failed:", String(e).slice(0, 100));
+    }
     return {
       results: req.lines.map((l) => ({
         index: l.index,
@@ -358,7 +368,7 @@ export async function resilientCheckLines(
       })),
       available_indices: [],
       response_time_ms: 0,
-      api_error: "No miners could verify line availability. The miner network may be temporarily down.",
+      api_error: "No odds data providers available. The miner network and platform API are both unreachable.",
     };
   }
 
