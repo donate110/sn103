@@ -40,9 +40,26 @@ export async function GET(request: NextRequest) {
       provider,
     );
 
-    // Query SignalCommitted events for this genius
+    // Query SignalCommitted events for this genius (chunked to avoid RPC limits)
     const filter = contract.filters.SignalCommitted(null, checksumAddr);
-    const events = await contract.queryFilter(filter, -SCAN_BLOCKS);
+    const currentBlock = await provider.getBlockNumber();
+    const fromBlock = Math.max(0, currentBlock - SCAN_BLOCKS);
+    const CHUNK_SIZE = 9_999;
+    const events: (ethers.EventLog | ethers.Log)[] = [];
+    const CONCURRENCY = 10;
+    const chunkRanges: [number, number][] = [];
+    for (let start = fromBlock; start <= currentBlock; start += CHUNK_SIZE) {
+      chunkRanges.push([start, Math.min(start + CHUNK_SIZE - 1, currentBlock)]);
+    }
+    for (let i = 0; i < chunkRanges.length; i += CONCURRENCY) {
+      const batch = chunkRanges.slice(i, i + CONCURRENCY);
+      const results = await Promise.allSettled(
+        batch.map(([start, end]) => contract.queryFilter(filter, start, end)),
+      );
+      for (const result of results) {
+        if (result.status === "fulfilled") events.push(...result.value);
+      }
+    }
 
     const now = Math.floor(Date.now() / 1000);
     const signals: Record<string, unknown>[] = [];
