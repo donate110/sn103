@@ -5,21 +5,23 @@ import { getReadProvider } from "../hooks";
 import { getPurchasesByBuyer } from "../events";
 import type { PurchaseEvent } from "../events";
 
-/** Polling interval: 60 seconds */
-const PURCHASE_POLL_MS = 60_000;
+/** Polling interval: 30 seconds (staggered +10s from signals) */
+const PURCHASE_POLL_MS = 30_000;
+const INITIAL_DELAY_MS = 10_000;
 
 export function usePurchaseHistory(buyerAddress?: string) {
   const [purchases, setPurchases] = useState<PurchaseEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (silent = false) => {
     if (!buyerAddress) {
       setPurchases([]);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const provider = getReadProvider();
@@ -38,18 +40,23 @@ export function usePurchaseHistory(buyerAddress?: string) {
     }
   }, [buyerAddress]);
 
-  // Initial fetch + polling (pauses on hidden tab)
+  // Initial fetch + polling (pauses on hidden tab, staggered start)
   useEffect(() => {
     cancelledRef.current = false;
     refresh();
-    const interval = setInterval(() => {
-      if (!cancelledRef.current && !document.hidden) refresh();
-    }, PURCHASE_POLL_MS);
-    const onVisible = () => { if (!document.hidden && !cancelledRef.current) refresh(); };
+    // Stagger polling start so hooks don't all fire at the same instant
+    const startTimer = setTimeout(() => {
+      if (cancelledRef.current) return;
+      intervalRef.current = setInterval(() => {
+        if (!cancelledRef.current && !document.hidden) refresh(true);
+      }, PURCHASE_POLL_MS);
+    }, INITIAL_DELAY_MS);
+    const onVisible = () => { if (!document.hidden && !cancelledRef.current) refresh(true); };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelledRef.current = true;
-      clearInterval(interval);
+      clearTimeout(startTimer);
+      if (intervalRef.current) clearInterval(intervalRef.current);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refresh]);

@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SignalEvent } from "../events";
 
-/** Polling interval for the browse page (60 seconds). */
-const POLL_INTERVAL_MS = 60_000;
+/** Polling interval for the browse page (30 seconds). */
+const POLL_INTERVAL_MS = 30_000;
 
 /**
  * Fetch active signals from the server-side /api/idiot/browse endpoint.

@@ -194,8 +194,12 @@ export default function PurchaseSignal() {
     };
 
     checkShares();
-    const interval = setInterval(checkShares, 15_000);
-    return () => { cancelled = true; clearInterval(interval); };
+    const interval = setInterval(() => {
+      if (!document.hidden) checkShares();
+    }, 15_000);
+    const onVisible = () => { if (!document.hidden && !cancelled) checkShares(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { cancelled = true; clearInterval(interval); document.removeEventListener("visibilitychange", onVisible); };
   }, [signalId, signalLoading]);
 
   // Hide sticky mobile bar when the form submit button scrolls into view

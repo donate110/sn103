@@ -3,22 +3,28 @@ import { ethers } from "ethers";
 import { ADDRESSES, SIGNAL_COMMITMENT_ABI } from "@/lib/contracts";
 
 /**
- * GET /api/genius/signals?address=0x...&status=active&sport=basketball_nba&limit=20&offset=0
+ * GET /api/genius/signals?address=0x...&limit=20&offset=0&include_all=1
  *
  * List all signals for a genius. All data is on-chain and public.
+ * Returns field names compatible with the client hooks (max_notional, expires_at_unix, etc).
  */
 
 const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
 const MAX_LIMIT = 100;
 const SCAN_BLOCKS = 1_500_000; // ~8.5 days at 2 blocks/sec on Base Sepolia
+const CHUNK_SIZE = 9_999;
+const CONCURRENCY = 10;
+
+// Per-address in-memory cache
+const geniusCache = new Map<string, { signals: Record<string, unknown>[]; updatedAt: number }>();
+const CACHE_TTL_MS = 30_000; // 30 seconds
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const address = searchParams.get("address");
-  const statusFilter = searchParams.get("status"); // active, expired, cancelled
-  const sportFilter = searchParams.get("sport");
   const limit = Math.min(parseInt(searchParams.get("limit") || "20", 10), MAX_LIMIT);
   const offset = parseInt(searchParams.get("offset") || "0", 10);
+  const includeAll = searchParams.get("include_all") === "1";
 
   if (!address || !ethers.isAddress(address)) {
     return NextResponse.json(
@@ -31,26 +37,36 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ signals: [], total: 0, offset, limit });
   }
 
+  const checksumAddr = ethers.getAddress(address);
+  const cacheKey = checksumAddr.toLowerCase();
+
+  // Serve from cache if fresh
+  const cached = geniusCache.get(cacheKey);
+  if (cached && Date.now() - cached.updatedAt < CACHE_TTL_MS) {
+    const now = Math.floor(Date.now() / 1000);
+    const filtered = includeAll
+      ? cached.signals
+      : cached.signals.filter((s) => (s.expires_at_unix as number) >= now && s.status === "active");
+    const paged = filtered.slice(offset, offset + limit);
+    return NextResponse.json({ signals: paged, total: filtered.length, offset, limit }, {
+      headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60" },
+    });
+  }
+
   try {
     const provider = new ethers.JsonRpcProvider(RPC_URL);
-    const checksumAddr = ethers.getAddress(address);
-    const contract = new ethers.Contract(
-      ADDRESSES.signalCommitment,
-      SIGNAL_COMMITMENT_ABI,
-      provider,
-    );
+    const contract = new ethers.Contract(ADDRESSES.signalCommitment, SIGNAL_COMMITMENT_ABI, provider);
 
-    // Query SignalCommitted events for this genius (chunked to avoid RPC limits)
+    // Query SignalCommitted events for this genius (chunked)
     const filter = contract.filters.SignalCommitted(null, checksumAddr);
     const currentBlock = await provider.getBlockNumber();
     const fromBlock = Math.max(0, currentBlock - SCAN_BLOCKS);
-    const CHUNK_SIZE = 9_999;
-    const events: (ethers.EventLog | ethers.Log)[] = [];
-    const CONCURRENCY = 10;
     const chunkRanges: [number, number][] = [];
     for (let start = fromBlock; start <= currentBlock; start += CHUNK_SIZE) {
       chunkRanges.push([start, Math.min(start + CHUNK_SIZE - 1, currentBlock)]);
     }
+
+    const events: (ethers.EventLog | ethers.Log)[] = [];
     for (let i = 0; i < chunkRanges.length; i += CONCURRENCY) {
       const batch = chunkRanges.slice(i, i + CONCURRENCY);
       const results = await Promise.allSettled(
@@ -64,52 +80,73 @@ export async function GET(request: NextRequest) {
     const now = Math.floor(Date.now() / 1000);
     const signals: Record<string, unknown>[] = [];
 
-    for (const event of events.reverse()) {
+    // Batch isActive checks with concurrency control
+    const ENRICH = 15;
+    const enrichFns = events.reverse().map((event) => async () => {
       const args = (event as ethers.EventLog).args;
-      if (!args) continue;
+      if (!args) return null;
 
-      const signalId = args.signalId;
-      const sport = args.sport;
-      const feeBps = Number(args.maxPriceBps);
-      const slaBps = Number(args.slaMultiplierBps);
-      const maxNotional = Number(args.maxNotional);
       const expiresAt = Number(args.expiresAt);
-
-      // Determine status
       let status = "active";
-      try {
-        const isActive = await contract.isActive(signalId);
-        if (!isActive) status = "cancelled";
-      } catch {
-        status = "unknown";
+      if (expiresAt < now) status = "expired";
+
+      if (status === "active") {
+        try {
+          const isActive = await contract.isActive(args.signalId);
+          if (!isActive) status = "cancelled";
+        } catch {
+          status = "unknown";
+        }
       }
-      if (status === "active" && expiresAt < now) status = "expired";
 
-      // Apply filters
-      if (statusFilter && status !== statusFilter) continue;
-      if (sportFilter && sport !== sportFilter) continue;
-
-      signals.push({
-        signal_id: signalId.toString(),
-        sport,
-        fee_bps: feeBps,
-        sla_multiplier_bps: slaBps,
-        max_notional_usdc: maxNotional / 1e6,
-        expires_at: new Date(expiresAt * 1000).toISOString(),
+      return {
+        signal_id: args.signalId.toString(),
+        genius: checksumAddr,
+        sport: args.sport,
+        fee_bps: Number(args.maxPriceBps),
+        sla_multiplier_bps: Number(args.slaMultiplierBps),
+        max_notional: args.maxNotional.toString(),
+        min_notional: "0", // Not in event; hook handles this gracefully
+        expires_at_unix: expiresAt,
         status,
         block_number: event.blockNumber,
-      });
+      };
+    });
 
-      if (signals.length >= offset + limit + 20) break;
+    // Process in batches
+    for (let i = 0; i < enrichFns.length; i += ENRICH) {
+      const batch = enrichFns.slice(i, i + ENRICH);
+      const results = await Promise.all(batch.map((fn) => fn()));
+      for (const s of results) {
+        if (s) signals.push(s);
+      }
     }
 
-    const paged = signals.slice(offset, offset + limit);
+    // Cache all signals (unfiltered)
+    geniusCache.set(cacheKey, { signals: [...signals], updatedAt: Date.now() });
+
+    // Evict stale cache entries (prevent memory leak)
+    if (geniusCache.size > 100) {
+      const cutoff = Date.now() - CACHE_TTL_MS * 10;
+      for (const [key, val] of geniusCache) {
+        if (val.updatedAt < cutoff) geniusCache.delete(key);
+      }
+    }
+
+    // Filter for response
+    const filtered = includeAll
+      ? signals
+      : signals.filter((s) => s.status === "active");
+
+    const paged = filtered.slice(offset, offset + limit);
 
     return NextResponse.json({
       signals: paged,
-      total: signals.length,
+      total: filtered.length,
       offset,
       limit,
+    }, {
+      headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60" },
     });
   } catch (error) {
     console.error("genius_signals_error", error);

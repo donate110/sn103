@@ -5,8 +5,8 @@ import { getReadProvider } from "../hooks";
 import { getActiveSignals, getSignalsByGenius, invalidateSignalCache } from "../events";
 import type { SignalEvent } from "../events";
 
-/** Default polling interval: 60 seconds */
-const POLL_INTERVAL_MS = 60_000;
+/** Default polling interval: 30 seconds */
+const POLL_INTERVAL_MS = 30_000;
 
 export function useActiveSignals(sport?: string, geniusAddress?: string, includeAll: boolean = false) {
   const [signals, setSignals] = useState<SignalEvent[]>([]);

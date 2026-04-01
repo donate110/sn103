@@ -10,6 +10,9 @@ import {
   getAccountContract,
 } from "../contracts";
 
+/** Polling interval for relationships: 60 seconds */
+const RELATIONSHIPS_POLL_MS = 60_000;
+
 export interface ActiveRelationship {
   genius: string;
   idiot: string;
@@ -38,12 +41,12 @@ export function useActiveRelationships(
   const [error, setError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (silent = false) => {
     if (!address || !ADDRESSES.account) {
       setRelationships([]);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
 
     try {
@@ -139,8 +142,15 @@ export function useActiveRelationships(
   useEffect(() => {
     cancelledRef.current = false;
     refresh();
+    const interval = setInterval(() => {
+      if (!cancelledRef.current && !document.hidden) refresh(true);
+    }, RELATIONSHIPS_POLL_MS);
+    const onVisible = () => { if (!document.hidden && !cancelledRef.current) refresh(true); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelledRef.current = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refresh]);
 

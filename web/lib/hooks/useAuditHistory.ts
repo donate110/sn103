@@ -5,8 +5,9 @@ import { getReadProvider } from "../hooks";
 import { getAuditsByGenius, getAuditsByIdiot } from "../events";
 import type { AuditEvent } from "../events";
 
-/** Polling interval for audit history: 60 seconds */
-const AUDIT_POLL_MS = 60_000;
+/** Polling interval for audit history: 30 seconds (staggered +20s from signals) */
+const AUDIT_POLL_MS = 30_000;
+const INITIAL_DELAY_MS = 20_000;
 
 export function useAuditHistory(geniusAddress?: string) {
   const [audits, setAudits] = useState<AuditEvent[]>([]);
@@ -38,17 +39,22 @@ export function useAuditHistory(geniusAddress?: string) {
     }
   }, [geniusAddress]);
 
-  // Initial fetch + silent polling (pauses on hidden tab)
+  // Initial fetch + silent polling (pauses on hidden tab, staggered start)
   useEffect(() => {
     cancelledRef.current = false;
     refresh();
-    const interval = setInterval(() => {
-      if (!cancelledRef.current && !document.hidden) refresh(true);
-    }, AUDIT_POLL_MS);
+    let interval: ReturnType<typeof setInterval>;
+    const startTimer = setTimeout(() => {
+      if (cancelledRef.current) return;
+      interval = setInterval(() => {
+        if (!cancelledRef.current && !document.hidden) refresh(true);
+      }, AUDIT_POLL_MS);
+    }, INITIAL_DELAY_MS);
     const onVisible = () => { if (!document.hidden && !cancelledRef.current) refresh(true); };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelledRef.current = true;
+      clearTimeout(startTimer);
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
     };
@@ -92,16 +98,24 @@ export function useIdiotAuditHistory(idiotAddress?: string) {
     }
   }, [idiotAddress]);
 
-  // Initial fetch + silent polling
+  // Initial fetch + silent polling (pauses on hidden tab, staggered start)
   useEffect(() => {
     cancelledRef.current = false;
     refresh();
-    const interval = setInterval(() => {
-      if (!cancelledRef.current) refresh(true);
-    }, AUDIT_POLL_MS);
+    let interval: ReturnType<typeof setInterval>;
+    const startTimer = setTimeout(() => {
+      if (cancelledRef.current) return;
+      interval = setInterval(() => {
+        if (!cancelledRef.current && !document.hidden) refresh(true);
+      }, AUDIT_POLL_MS);
+    }, INITIAL_DELAY_MS);
+    const onVisible = () => { if (!document.hidden && !cancelledRef.current) refresh(true); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelledRef.current = true;
+      clearTimeout(startTimer);
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refresh]);
 

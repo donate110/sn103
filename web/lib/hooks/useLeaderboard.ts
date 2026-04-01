@@ -8,6 +8,9 @@ import {
 } from "../subgraph";
 import type { GeniusLeaderboardEntry } from "../types";
 
+/** Polling interval for leaderboard: 60 seconds (lightweight subgraph query) */
+const LEADERBOARD_POLL_MS = 60_000;
+
 function toLeaderboardEntry(g: SubgraphGeniusEntry): GeniusLeaderboardEntry {
   const totalGain = Number(g.aggregateQualityScore) / 1e6; // USDC decimals
   const totalVolume = Number(g.totalVolume) / 1e6; // USDC decimals
@@ -33,9 +36,9 @@ export function useLeaderboard() {
   const [error, setError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (silent = false) => {
     if (!configured) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const entries = await fetchLeaderboard(100);
@@ -58,8 +61,15 @@ export function useLeaderboard() {
   useEffect(() => {
     cancelledRef.current = false;
     refresh();
+    const interval = setInterval(() => {
+      if (!cancelledRef.current && !document.hidden) refresh(true);
+    }, LEADERBOARD_POLL_MS);
+    const onVisible = () => { if (!document.hidden && !cancelledRef.current) refresh(true); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelledRef.current = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refresh]);
 
