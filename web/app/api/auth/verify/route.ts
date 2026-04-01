@@ -32,13 +32,16 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { address, signature, scope: rawScope } = body;
+    const { address, signature, nonce: clientNonce, scope: rawScope } = body;
 
     if (!address || typeof address !== "string") {
       return NextResponse.json({ error: "address is required" }, { status: 400 });
     }
     if (!signature || typeof signature !== "string") {
       return NextResponse.json({ error: "signature is required" }, { status: 400 });
+    }
+    if (!clientNonce || typeof clientNonce !== "string") {
+      return NextResponse.json({ error: "nonce is required (from /api/auth/connect)" }, { status: 400 });
     }
 
     let checksummed: string;
@@ -48,11 +51,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid Ethereum address" }, { status: 400 });
     }
 
-    // Consume the challenge nonce (single use)
-    const nonce = consumeChallenge(checksummed);
+    // Verify the stateless challenge nonce (HMAC-signed, works across instances)
+    const nonce = await consumeChallenge(checksummed, clientNonce);
     if (!nonce) {
       return NextResponse.json(
-        { error: "No pending challenge for this address. Call /api/auth/connect first." },
+        { error: "Invalid or expired challenge. Call /api/auth/connect first." },
         { status: 401 },
       );
     }

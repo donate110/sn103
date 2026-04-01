@@ -8,10 +8,8 @@ import { ethers } from "ethers";
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-// In-memory challenge store (vercel serverless: ephemeral, but challenges
-// are short-lived so this is fine. Each function instance sees its own map.)
-const challenges: Map<string, { nonce: string; ts: number }> = new Map();
-const MAX_CHALLENGES = 10_000;
+// Challenges are stateless (HMAC-signed) so they work across serverless
+// instances. No in-memory state needed.
 
 function encode(s: string): Uint8Array {
   return new TextEncoder().encode(s);
@@ -56,31 +54,43 @@ function constantTimeEqual(a: string, b: string): boolean {
 // Challenge management
 // ---------------------------------------------------------------------------
 
-export function createChallenge(address: string): string {
-  // Evict expired challenges
-  if (challenges.size > MAX_CHALLENGES) {
-    const now = Date.now();
-    for (const [key, val] of challenges) {
-      if (now - val.ts > CHALLENGE_TTL_MS) challenges.delete(key);
-    }
-  }
-
-  const nonce = toHex(crypto.getRandomValues(new Uint8Array(32)).buffer as ArrayBuffer);
-  const key = address.toLowerCase();
-  challenges.set(key, { nonce, ts: Date.now() });
-  return nonce;
+/**
+ * Create a stateless challenge nonce. The nonce embeds the address and
+ * timestamp, signed with HMAC so any serverless instance can verify it
+ * without shared state.
+ *
+ * Format: {random32hex}:{address}:{timestamp}:{hmac}
+ */
+export async function createChallenge(address: string): Promise<string> {
+  const random = toHex(crypto.getRandomValues(new Uint8Array(16)).buffer as ArrayBuffer);
+  const ts = Date.now().toString();
+  const addr = address.toLowerCase();
+  const payload = `${random}:${addr}:${ts}`;
+  const sig = await hmacSha256(getSecret(), payload);
+  return `${payload}:${sig}`;
 }
 
-export function consumeChallenge(address: string): string | null {
-  const key = address.toLowerCase();
-  const entry = challenges.get(key);
-  if (!entry) return null;
-  if (Date.now() - entry.ts > CHALLENGE_TTL_MS) {
-    challenges.delete(key);
-    return null;
-  }
-  challenges.delete(key);
-  return entry.nonce;
+/**
+ * Verify and consume a stateless challenge nonce. Returns the random
+ * component (used as the signing nonce) if valid, null otherwise.
+ * "Consuming" is implicit: the nonce has a 5-minute TTL and the
+ * wallet signature binds it to a specific address.
+ */
+export async function consumeChallenge(address: string, nonce: string): Promise<string | null> {
+  const parts = nonce.split(":");
+  if (parts.length !== 4) return null;
+
+  const [random, addr, tsStr, sig] = parts;
+  if (addr !== address.toLowerCase()) return null;
+
+  const ts = parseInt(tsStr, 10);
+  if (isNaN(ts) || Date.now() - ts > CHALLENGE_TTL_MS) return null;
+
+  const payload = `${random}:${addr}:${tsStr}`;
+  const expectedSig = await hmacSha256(getSecret(), payload);
+  if (!constantTimeEqual(sig, expectedSig)) return null;
+
+  return nonce;
 }
 
 // ---------------------------------------------------------------------------

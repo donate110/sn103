@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid Ethereum address" }, { status: 400 });
     }
 
-    const nonce = createChallenge(checksummed);
+    const nonce = await createChallenge(checksummed);
     const challenge = buildChallengeMessage(nonce);
 
     return NextResponse.json({

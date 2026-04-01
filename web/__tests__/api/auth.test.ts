@@ -22,30 +22,41 @@ describe("api-auth", () => {
   const address = wallet.address;
 
   describe("challenge management", () => {
-    it("creates and consumes a challenge", () => {
-      const nonce = createChallenge(address);
-      expect(nonce).toHaveLength(64); // 32 bytes hex
+    it("creates a stateless challenge nonce", async () => {
+      const nonce = await createChallenge(address);
+      // Format: random:address:timestamp:hmac
+      const parts = nonce.split(":");
+      expect(parts).toHaveLength(4);
+      expect(parts[1]).toBe(address.toLowerCase());
+    });
 
-      const consumed = consumeChallenge(address);
+    it("consumes a valid challenge", async () => {
+      const nonce = await createChallenge(address);
+      const consumed = await consumeChallenge(address, nonce);
       expect(consumed).toBe(nonce);
     });
 
-    it("returns null for unconsumed address", () => {
-      const result = consumeChallenge("0x0000000000000000000000000000000000000001");
+    it("returns null for wrong address", async () => {
+      const nonce = await createChallenge(address);
+      const result = await consumeChallenge("0x0000000000000000000000000000000000000001", nonce);
       expect(result).toBeNull();
     });
 
-    it("consumes only once", () => {
-      createChallenge(address);
-      consumeChallenge(address);
-      const second = consumeChallenge(address);
-      expect(second).toBeNull();
+    it("returns null for tampered nonce", async () => {
+      const nonce = await createChallenge(address);
+      const tampered = nonce.slice(0, -4) + "XXXX";
+      const result = await consumeChallenge(address, tampered);
+      expect(result).toBeNull();
     });
 
-    it("is case-insensitive on address", () => {
-      const nonce = createChallenge(address.toLowerCase());
-      const consumed = consumeChallenge(address.toUpperCase() as string);
-      // Both get lowercased internally
+    it("returns null for garbage nonce", async () => {
+      const result = await consumeChallenge(address, "not-a-valid-nonce");
+      expect(result).toBeNull();
+    });
+
+    it("is case-insensitive on address", async () => {
+      const nonce = await createChallenge(address.toLowerCase());
+      const consumed = await consumeChallenge(address, nonce);
       expect(consumed).toBe(nonce);
     });
   });
@@ -60,7 +71,7 @@ describe("api-auth", () => {
 
   describe("signature verification", () => {
     it("recovers correct address from valid signature", async () => {
-      const nonce = "deadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678";
+      const nonce = await createChallenge(address);
       const message = buildChallengeMessage(nonce);
       const signature = await wallet.signMessage(message);
 
@@ -74,11 +85,12 @@ describe("api-auth", () => {
     });
 
     it("returns wrong address for mismatched nonce", async () => {
-      const message = buildChallengeMessage("nonce-a");
+      const nonce = await createChallenge(address);
+      const message = buildChallengeMessage(nonce);
       const signature = await wallet.signMessage(message);
 
-      const recovered = recoverAddress("nonce-b", signature);
-      // Will recover some address, but not ours
+      const otherNonce = await createChallenge(address);
+      const recovered = recoverAddress(otherNonce, signature);
       expect(recovered).not.toBe(address.toLowerCase());
     });
   });
@@ -188,23 +200,24 @@ describe("api-auth", () => {
   describe("full auth flow", () => {
     it("connect -> sign -> verify -> use token", async () => {
       // Step 1: Create challenge
-      const nonce = createChallenge(address);
+      const nonce = await createChallenge(address);
 
       // Step 2: Sign challenge
       const message = buildChallengeMessage(nonce);
       const signature = await wallet.signMessage(message);
 
-      // Step 3: Verify signature
-      const consumed = consumeChallenge(address);
+      // Step 3: Verify challenge is valid
+      const consumed = await consumeChallenge(address, nonce);
       expect(consumed).toBe(nonce);
 
+      // Step 4: Recover signer address
       const recovered = recoverAddress(consumed!, signature);
       expect(recovered).toBe(address.toLowerCase());
 
-      // Step 4: Create session token
+      // Step 5: Create session token
       const { token } = await createSessionToken(address);
 
-      // Step 5: Use token
+      // Step 6: Use token
       const payload = await verifySessionToken(token);
       expect(payload).not.toBeNull();
       expect(payload!.address).toBe(address.toLowerCase());
