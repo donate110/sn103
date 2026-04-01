@@ -19,12 +19,64 @@ export function useActiveSignals(sport?: string, geniusAddress?: string, include
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const provider = getReadProvider();
       let result: SignalEvent[];
+
+      // Use server-side API when possible (faster, cached, no client-side RPC)
       if (geniusAddress) {
-        result = await getSignalsByGenius(provider, geniusAddress, undefined, includeAll);
+        try {
+          const params = new URLSearchParams({ address: geniusAddress, limit: "100" });
+          if (includeAll) params.set("include_all", "1");
+          const res = await fetch(`/api/genius/signals?${params}`);
+          if (res.ok) {
+            const data = await res.json();
+            result = (data.signals ?? []).map((s: Record<string, unknown>) => ({
+              signalId: String(s.signal_id ?? s.signalId ?? ""),
+              genius: String(s.genius ?? ""),
+              sport: String(s.sport ?? ""),
+              maxPriceBps: BigInt(Number(s.fee_bps ?? s.maxPriceBps ?? 0)),
+              slaMultiplierBps: BigInt(Number(s.sla_multiplier_bps ?? s.slaMultiplierBps ?? 0)),
+              maxNotional: BigInt(s.max_notional as string || String(s.maxNotional ?? "0")),
+              minNotional: BigInt(s.min_notional as string || String(s.minNotional ?? "0")),
+              expiresAt: BigInt(Number(s.expires_at_unix ?? s.expiresAt ?? 0)),
+              blockNumber: 0,
+            }));
+          } else {
+            // Fallback to direct RPC if API fails
+            const provider = getReadProvider();
+            result = await getSignalsByGenius(provider, geniusAddress, undefined, includeAll);
+          }
+        } catch {
+          // Fallback to direct RPC
+          const provider = getReadProvider();
+          result = await getSignalsByGenius(provider, geniusAddress, undefined, includeAll);
+        }
       } else {
-        result = await getActiveSignals(provider);
+        // Browse all signals via API
+        try {
+          const params = new URLSearchParams({ limit: "100" });
+          if (sport) params.set("sport", sport);
+          const res = await fetch(`/api/idiot/browse?${params}`);
+          if (res.ok) {
+            const data = await res.json();
+            result = (data.signals ?? []).map((s: Record<string, unknown>) => ({
+              signalId: String(s.signal_id ?? ""),
+              genius: String(s.genius ?? ""),
+              sport: String(s.sport ?? ""),
+              maxPriceBps: BigInt(Number(s.fee_bps ?? 0)),
+              slaMultiplierBps: BigInt(Number(s.sla_multiplier_bps ?? 0)),
+              maxNotional: BigInt(s.max_notional as string || "0"),
+              minNotional: BigInt(s.min_notional as string || "0"),
+              expiresAt: BigInt(Number(s.expires_at_unix ?? 0)),
+              blockNumber: 0,
+            }));
+          } else {
+            const provider = getReadProvider();
+            result = await getActiveSignals(provider);
+          }
+        } catch {
+          const provider = getReadProvider();
+          result = await getActiveSignals(provider);
+        }
       }
 
       if (sport) {
