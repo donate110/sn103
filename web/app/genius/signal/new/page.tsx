@@ -458,11 +458,10 @@ export default function CreateSignal() {
         }
 
       } catch (minerErr) {
-        console.warn("Miner executability check failed:", minerErr);
+        console.warn("Line verification failed:", minerErr);
         setStepError(
-          "No miner is available to verify your lines right now. " +
-          "Every signal must be independently verified before it can be created. " +
-          "Please try again in a few minutes.",
+          "Could not verify your lines with any data source. " +
+          "Please check your internet connection and try again.",
         );
         setStep("configure");
         return;

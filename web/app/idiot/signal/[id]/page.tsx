@@ -869,8 +869,8 @@ export default function PurchaseSignal() {
     step === "decrypting";
 
   const stepLabel: Record<string, string> = {
-    checking_lines: "Querying live odds from sportsbooks...",
-    purchasing_validator: "Running cryptographic verification across validators...",
+    checking_lines: "Checking line availability...",
+    purchasing_validator: "Running secure multi-party verification...",
     purchasing_chain: purchaseLoading && !txHash
       ? "Confirm the transaction in your wallet..."
       : "Recording purchase on-chain...",
@@ -881,9 +881,9 @@ export default function PurchaseSignal() {
 
   // Progress bar: each step has a weight proportional to its expected duration
   const stepProgress: Record<string, { pct: number; elapsed: string }> = {
-    checking_lines: { pct: 15, elapsed: "~10s" },
+    checking_lines: { pct: 5, elapsed: "<1s" },
     purchasing_validator: { pct: 60, elapsed: "~45s" },
-    purchasing_chain: { pct: 85, elapsed: "~15s" },
+    purchasing_chain: { pct: 85, elapsed: "~10s" },
     collecting_shares: { pct: 95, elapsed: "~5s" },
     decrypting: { pct: 98, elapsed: "<1s" },
     recovering: { pct: 50, elapsed: "" },
