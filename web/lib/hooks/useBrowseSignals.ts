@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SignalEvent } from "../events";
 
-/** Polling interval for the browse page (30 seconds). */
-const POLL_INTERVAL_MS = 30_000;
+/** Polling interval for the browse page (60 seconds). */
+const POLL_INTERVAL_MS = 60_000;
 
 /**
  * Fetch active signals from the server-side /api/idiot/browse endpoint.
@@ -61,11 +61,16 @@ export function useBrowseSignals(sport?: string) {
     cancelledRef.current = false;
     refresh();
     const interval = setInterval(() => {
-      if (!cancelledRef.current) refresh(true);
+      // Skip polling when tab is hidden
+      if (!cancelledRef.current && !document.hidden) refresh(true);
     }, POLL_INTERVAL_MS);
+    // Refresh when tab becomes visible again
+    const onVisible = () => { if (!document.hidden) refresh(true); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelledRef.current = true;
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refresh]);
 

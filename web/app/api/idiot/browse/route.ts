@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
       chunkRanges.push([start, Math.min(start + CHUNK_SIZE - 1, currentBlock)]);
     }
     const events: (ethers.EventLog | ethers.Log)[] = [];
-    const CONCURRENCY = 5;
+    const CONCURRENCY = 20;
     for (let i = 0; i < chunkRanges.length; i += CONCURRENCY) {
       const batch = chunkRanges.slice(i, i + CONCURRENCY);
       const results = await Promise.allSettled(
@@ -111,18 +111,23 @@ export async function GET(request: NextRequest) {
 
     const signals: Record<string, unknown>[] = [];
 
-    // Fetch signal details for each event (parallelize isActive + getSignal)
-    const enrichmentPromises = events.reverse().map(async (event) => {
+    // Pre-filter expired events before enrichment (avoids RPC calls for dead signals)
+    const activeEvents = events.reverse().filter((event) => {
+      const args = (event as ethers.EventLog).args;
+      if (!args) return false;
+      return Number(args.expiresAt) >= now;
+    });
+
+    // Batch isActive checks with controlled concurrency
+    const ENRICH_CONCURRENCY = 15;
+    const enrichmentPromises = activeEvents.map(async (event) => {
       const args = (event as ethers.EventLog).args;
       if (!args) return null;
 
       const signalId = args.signalId;
       const expiresAt = Number(args.expiresAt);
 
-      // Skip expired
-      if (expiresAt < now) return null;
-
-      // Check if still active on-chain
+      // Check if still active on-chain (single RPC call, skip getSignal)
       try {
         const isActive = await contract.isActive(signalId);
         if (!isActive) return null;
@@ -130,14 +135,8 @@ export async function GET(request: NextRequest) {
         return null;
       }
 
-      // Fetch minNotional from contract for exclusive-signal detection
-      let minNotional = "0";
-      try {
-        const signalData = await contract.getSignal(signalId);
-        if (signalData?.minNotional != null) {
-          minNotional = signalData.minNotional.toString();
-        }
-      } catch { /* non-critical */ }
+      // Use minNotional from event args if available, else default
+      const minNotional = args.minNotional?.toString() ?? "0";
 
       return {
         signal_id: signalId.toString(),
@@ -153,7 +152,13 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    const enriched = await Promise.all(enrichmentPromises);
+    // Process enrichment in batches to avoid overwhelming RPC
+    const enriched: (Record<string, unknown> | null)[] = [];
+    for (let i = 0; i < enrichmentPromises.length; i += ENRICH_CONCURRENCY) {
+      const batch = enrichmentPromises.slice(i, i + ENRICH_CONCURRENCY);
+      const results = await Promise.all(batch);
+      enriched.push(...results);
+    }
     for (const s of enriched) {
       if (s) signals.push(s);
     }

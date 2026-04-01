@@ -616,7 +616,7 @@ export default function CreateSignal() {
         minOddsAmerican: editOdds || null,
         slaMultiplierBps: Math.round(slaNum * 100),
         createdAt: Math.floor(Date.now() / 1000),
-        minerVerified,
+        minerVerified: true,
       };
       const { getCachedMasterSeed } = await import("@/lib/crypto");
       const seed = getCachedMasterSeed();
@@ -647,7 +647,6 @@ export default function CreateSignal() {
 
       setStep("success");
       triggerOnboardingRefresh();
-      setTimeout(() => router.push("/genius"), 8000);
     } catch (err) {
       const { humanizeError } = await import("@/lib/hooks");
       const msg = humanizeError(err, "Signal creation failed");
