@@ -38,16 +38,19 @@ export function useAuditHistory(geniusAddress?: string) {
     }
   }, [geniusAddress]);
 
-  // Initial fetch + silent polling
+  // Initial fetch + silent polling (pauses on hidden tab)
   useEffect(() => {
     cancelledRef.current = false;
     refresh();
     const interval = setInterval(() => {
-      if (!cancelledRef.current) refresh(true);
+      if (!cancelledRef.current && !document.hidden) refresh(true);
     }, AUDIT_POLL_MS);
+    const onVisible = () => { if (!document.hidden && !cancelledRef.current) refresh(true); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelledRef.current = true;
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refresh]);
 

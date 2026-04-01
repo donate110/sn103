@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useAccount, useWalletClient } from "wagmi";
 import { useSignal, usePurchaseSignal, useSignalNotionalFilled, useEscrowBalance, useDepositEscrow, useWalletUsdcBalance, humanizeError, getReadProvider } from "@/lib/hooks";
 import { getEscrowContract } from "@/lib/contracts";
-import { discoverValidatorClients, resilientCheckLines } from "@/lib/api";
+import { discoverValidatorClients, checkLinesViaSubnet } from "@/lib/api";
 import { decrypt, fromHex, bigIntToKey, reconstructSecret } from "@/lib/crypto";
 import type { ShamirShare } from "@/lib/crypto";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
@@ -140,7 +140,7 @@ export default function PurchaseSignal() {
         const candidateLines: CandidateLine[] = signal.decoyLines.map(
           (raw, i) => decoyLineToCandidateLine(raw, i + 1, signal.sport, params.id as string),
         );
-        const result = await resilientCheckLines({ lines: candidateLines });
+        const result = await checkLinesViaSubnet({ lines: candidateLines });
         if (cancelled) return;
         if (result.available_indices.length > 0) {
           setLinesAvailable(true);
@@ -379,7 +379,7 @@ export default function PurchaseSignal() {
       let checkResult: CheckResponse | null = null;
       let checkError: string | null = null;
       try {
-        const result = await resilientCheckLines({ lines: candidateLines });
+        const result = await checkLinesViaSubnet({ lines: candidateLines });
         console.log("[purchase] line check complete:", result.available_indices.length, "of", candidateLines.length, "available");
         if (result.available_indices.length > 0) {
           checkResult = result;

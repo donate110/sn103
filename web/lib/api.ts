@@ -322,16 +322,17 @@ function getValidatorClient(): ValidatorClient {
  * results (union of available_indices). The client queries multiple
  * validators for redundancy and merges across validators too.
  *
- * Races the platform Odds API against the miner network: whichever returns
- * available lines first wins. The platform API typically responds in ~100ms
- * while miners take 5-30s. This gives instant results when the Odds API is
- * up, with miner verification as a fallback.
+ * For genius signal creation: races the platform Odds API against the
+ * miner network. The platform API is a convenience for finding decoy lines,
+ * not a verification source.
+ *
+ * For purchase verification: use checkLinesViaSubnet() instead, which
+ * exclusively uses the decentralized miner network.
  */
 export async function resilientCheckLines(
   req: CheckRequest,
 ): Promise<CheckResponse> {
   // Race: platform Odds API (fast, ~100ms) vs miner network (slow, 5-30s)
-  // Use whichever returns usable results first.
   const platformPromise = post<CheckResponse>("/api/check-lines", req, 15_000)
     .then((r) => {
       if (r.available_indices.length > 0) {
@@ -342,61 +343,15 @@ export async function resilientCheckLines(
     })
     .catch(() => null);
 
-  let validators: ValidatorClient[];
-  try {
-    validators = await discoverValidatorClients();
-  } catch {
-    validators = [getValidatorClient()];
-  }
+  const minerResult = _checkViaMinerNetwork(req);
 
-  const minerPromise = Promise.allSettled(
-    validators.map((v) => v.checkLines(req)),
-  ).then((settled) => {
-    const responses: CheckResponse[] = [];
-    for (const r of settled) {
-      if (r.status === "fulfilled" && !r.value.api_error) {
-        responses.push(r.value);
-      }
-    }
-    if (responses.length === 0) return null;
-
-    // Merge across validators
-    const mergedResults: Map<number, LineResult> = new Map();
-    for (const resp of responses) {
-      for (const lr of resp.results) {
-        const existing = mergedResults.get(lr.index);
-        if (!existing) {
-          mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
-        } else if (lr.available && !existing.available) {
-          mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
-        } else if (lr.available && existing.available && lr.bookmakers.length > existing.bookmakers.length) {
-          mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
-        }
-      }
-    }
-    const mergedArray = req.lines.map((l) =>
-      mergedResults.get(l.index) ?? { index: l.index, available: false, bookmakers: [] },
-    );
-    const mergedIndices = mergedArray.filter((r) => r.available).map((r) => r.index);
-    if (mergedIndices.length === 0) return null;
-
-    console.log("[checkLines] Miner network responded:", mergedIndices.length, "lines available");
-    return {
-      results: mergedArray,
-      available_indices: mergedIndices,
-      response_time_ms: Math.max(...responses.map((r) => r.response_time_ms)),
-    } as CheckResponse;
-  });
-
-  // Return whichever succeeds first with available lines
   const result = await Promise.any([
     platformPromise.then((r) => { if (!r) throw new Error("no results"); return r; }),
-    minerPromise.then((r) => { if (!r) throw new Error("no results"); return r; }),
+    minerResult.then((r) => { if (!r) throw new Error("no results"); return r; }),
   ]).catch(() => null);
 
   if (result) return result;
 
-  // Both failed: return error
   return {
     results: req.lines.map((l) => ({
       index: l.index,
@@ -406,5 +361,76 @@ export async function resilientCheckLines(
     available_indices: [],
     response_time_ms: 0,
     api_error: "No odds data available. Please check your internet connection and try again.",
+  };
+}
+
+/**
+ * Check line availability exclusively through the decentralized miner network.
+ * Used for purchase verification where the result must come from the subnet,
+ * not the platform's own Odds API.
+ */
+export async function checkLinesViaSubnet(
+  req: CheckRequest,
+): Promise<CheckResponse> {
+  const result = await _checkViaMinerNetwork(req);
+  if (result) return result;
+
+  return {
+    results: req.lines.map((l) => ({
+      index: l.index,
+      available: false,
+      bookmakers: [],
+    })),
+    available_indices: [],
+    response_time_ms: 0,
+    api_error: "No miners could verify line availability. The miner network may be temporarily down.",
+  };
+}
+
+/** Internal: query all validators/miners for line check data. */
+async function _checkViaMinerNetwork(req: CheckRequest): Promise<CheckResponse | null> {
+  let validators: ValidatorClient[];
+  try {
+    validators = await discoverValidatorClients();
+  } catch {
+    validators = [getValidatorClient()];
+  }
+
+  const settled = await Promise.allSettled(
+    validators.map((v) => v.checkLines(req)),
+  );
+
+  const responses: CheckResponse[] = [];
+  for (const r of settled) {
+    if (r.status === "fulfilled" && !r.value.api_error) {
+      responses.push(r.value);
+    }
+  }
+  if (responses.length === 0) return null;
+
+  const mergedResults: Map<number, LineResult> = new Map();
+  for (const resp of responses) {
+    for (const lr of resp.results) {
+      const existing = mergedResults.get(lr.index);
+      if (!existing) {
+        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
+      } else if (lr.available && !existing.available) {
+        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
+      } else if (lr.available && existing.available && lr.bookmakers.length > existing.bookmakers.length) {
+        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
+      }
+    }
+  }
+  const mergedArray = req.lines.map((l) =>
+    mergedResults.get(l.index) ?? { index: l.index, available: false, bookmakers: [] },
+  );
+  const mergedIndices = mergedArray.filter((r) => r.available).map((r) => r.index);
+  if (mergedIndices.length === 0) return null;
+
+  console.log("[checkLines] Miner network responded:", mergedIndices.length, "lines available");
+  return {
+    results: mergedArray,
+    available_indices: mergedIndices,
+    response_time_ms: Math.max(...responses.map((r) => r.response_time_ms)),
   };
 }

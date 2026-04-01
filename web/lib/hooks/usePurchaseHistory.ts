@@ -5,8 +5,8 @@ import { getReadProvider } from "../hooks";
 import { getPurchasesByBuyer } from "../events";
 import type { PurchaseEvent } from "../events";
 
-/** Polling interval: 30 seconds */
-const PURCHASE_POLL_MS = 30_000;
+/** Polling interval: 60 seconds */
+const PURCHASE_POLL_MS = 60_000;
 
 export function usePurchaseHistory(buyerAddress?: string) {
   const [purchases, setPurchases] = useState<PurchaseEvent[]>([]);
@@ -38,26 +38,20 @@ export function usePurchaseHistory(buyerAddress?: string) {
     }
   }, [buyerAddress]);
 
-  // Initial fetch + polling
+  // Initial fetch + polling (pauses on hidden tab)
   useEffect(() => {
     cancelledRef.current = false;
     refresh();
     const interval = setInterval(() => {
-      if (!cancelledRef.current) refresh();
+      if (!cancelledRef.current && !document.hidden) refresh();
     }, PURCHASE_POLL_MS);
+    const onVisible = () => { if (!document.hidden && !cancelledRef.current) refresh(); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelledRef.current = true;
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [refresh]);
-
-  // Refresh on window focus
-  useEffect(() => {
-    const onFocus = () => {
-      if (!cancelledRef.current) refresh();
-    };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
   return { purchases, loading, error, refresh };
