@@ -99,10 +99,10 @@ async function proxy(
   }
 }
 
-// MPC purchase verification takes 30-45s on the current network.
-// Default Vercel serverless timeout is 30s (Hobby) or 60s (Pro).
-// Extend to 60s so MPC can complete.
-export const maxDuration = 60;
+// MPC purchase verification takes 30-90s depending on network conditions
+// and validator count. Vercel Pro allows up to 300s.
+// Set to 120s to accommodate MPC + OT triple generation + retries.
+export const maxDuration = 120;
 
 export const GET = proxy;
 export const POST = proxy;
