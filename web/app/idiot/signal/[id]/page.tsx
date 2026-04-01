@@ -98,12 +98,19 @@ export default function PurchaseSignal() {
 
   // Fetch genius stats for sidebar
   const geniusAddress = signal?.genius;
+  // Load genius stats lazily (not critical for purchase flow)
+  const [showGeniusStats, setShowGeniusStats] = useState(false);
+  useEffect(() => {
+    // Delay loading genius stats to prioritize purchase-critical data
+    const t = setTimeout(() => setShowGeniusStats(true), 3000);
+    return () => clearTimeout(t);
+  }, []);
   const { signals: geniusSignals } = useActiveSignals(
     undefined,
-    geniusAddress,
+    showGeniusStats ? geniusAddress : undefined,
   );
   const { audits: geniusAudits, aggregateQualityScore } =
-    useAuditHistory(geniusAddress);
+    useAuditHistory(showGeniusStats ? geniusAddress : undefined);
 
   const [notional, setNotional] = useState("");
   const [step, setStep] = useState<PurchaseStep>("idle");
