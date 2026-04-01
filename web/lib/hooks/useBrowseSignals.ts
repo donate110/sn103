@@ -17,13 +17,14 @@ export function useBrowseSignals(sport?: string) {
   const [error, setError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
 
-  const refresh = useCallback(async (silent = false) => {
+  const refresh = useCallback(async (silent = false, bustCache = false) => {
     if (!silent) setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
       if (sport) params.set("sport", sport);
       params.set("limit", "100");
+      if (bustCache) params.set("bust", "1");
 
       const res = await fetch(`/api/idiot/browse?${params}`);
       if (!res.ok) {
@@ -74,5 +75,6 @@ export function useBrowseSignals(sport?: string) {
     };
   }, [refresh]);
 
-  return { signals, loading, error, refresh: () => refresh() };
+  const forceRefresh = useCallback(() => refresh(false, true), [refresh]);
+  return { signals, loading, error, refresh: () => refresh(), forceRefresh };
 }

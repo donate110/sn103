@@ -53,9 +53,10 @@ export async function GET(request: NextRequest) {
       provider,
     );
 
-    // Use cached results if fresh enough
+    // Use cached results if fresh enough (unless bust param forces bypass)
+    const bust = searchParams.has("bust");
     const now = Math.floor(Date.now() / 1000);
-    if (browseCache && Date.now() - browseCache.updatedAt < BROWSE_CACHE_TTL_MS) {
+    if (!bust && browseCache && Date.now() - browseCache.updatedAt < BROWSE_CACHE_TTL_MS) {
       // Filter cached signals (remove newly expired ones)
       const signals = browseCache.signals.filter((s) => {
         if ((s.expires_at_unix as number) < now) return false;

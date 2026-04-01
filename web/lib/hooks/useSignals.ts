@@ -15,7 +15,7 @@ export function useActiveSignals(sport?: string, geniusAddress?: string, include
   const cancelledRef = useRef(false);
   const hasFetchedRef = useRef(false);
 
-  const refresh = useCallback(async (silent = false) => {
+  const refresh = useCallback(async (silent = false, bustCache = false) => {
     if (!silent) setLoading(true);
     setError(null);
     try {
@@ -26,6 +26,7 @@ export function useActiveSignals(sport?: string, geniusAddress?: string, include
         try {
           const params = new URLSearchParams({ address: geniusAddress, limit: "100" });
           if (includeAll) params.set("include_all", "1");
+          if (bustCache) params.set("bust", "1");
           const res = await fetch(`/api/genius/signals?${params}`);
           if (res.ok) {
             const data = await res.json();
@@ -55,6 +56,7 @@ export function useActiveSignals(sport?: string, geniusAddress?: string, include
         try {
           const params = new URLSearchParams({ limit: "100" });
           if (sport) params.set("sport", sport);
+          if (bustCache) params.set("bust", "1");
           const res = await fetch(`/api/idiot/browse?${params}`);
           if (res.ok) {
             const data = await res.json();
@@ -97,10 +99,10 @@ export function useActiveSignals(sport?: string, geniusAddress?: string, include
     }
   }, [sport, geniusAddress, includeAll]);
 
-  /** Force-refresh: invalidates cache first so we get fresh on-chain data. */
+  /** Force-refresh: invalidates client + server cache for immediate on-chain data. */
   const forceRefresh = useCallback(async () => {
     invalidateSignalCache(geniusAddress);
-    return refresh();
+    return refresh(false, true);
   }, [geniusAddress, refresh]);
 
   // Initial fetch + polling (polls are silent - no loading skeleton flash)

@@ -39,10 +39,11 @@ export async function GET(request: NextRequest) {
 
   const checksumAddr = ethers.getAddress(address);
   const cacheKey = checksumAddr.toLowerCase();
+  const bust = searchParams.has("bust"); // Client can force cache bypass after mutations
 
-  // Serve from cache if fresh
+  // Serve from cache if fresh (unless bust param present)
   const cached = geniusCache.get(cacheKey);
-  if (cached && Date.now() - cached.updatedAt < CACHE_TTL_MS) {
+  if (!bust && cached && Date.now() - cached.updatedAt < CACHE_TTL_MS) {
     const now = Math.floor(Date.now() / 1000);
     const filtered = includeAll
       ? cached.signals
