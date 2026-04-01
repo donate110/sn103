@@ -152,7 +152,7 @@ export default function MetricsCharts({ validators }: { validators: { uid: numbe
       const allData = await Promise.allSettled(
         validators.map(async (v) => {
           const res = await fetch(
-            `/api/validators/${v.uid}/v1/admin/metrics/timeseries?hours=${range}&bucket=3600`,
+            `/api/validators/${v.uid}/v1/metrics/timeseries?hours=${range}&bucket=3600`,
             { signal: AbortSignal.timeout(10000) },
           );
           if (!res.ok) return null;

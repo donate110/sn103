@@ -2797,7 +2797,7 @@ async function fetchAttestationData(sinceId?: number): Promise<AttestationEntry[
 
     const results = await Promise.allSettled(
       validators.map((v) =>
-        fetch(`/api/validators/${v.uid}/v1/admin/attestations?limit=${limit}`, {
+        fetch(`/api/validators/${v.uid}/v1/metrics/attestations?limit=${limit}`, {
           signal: AbortSignal.timeout(8000),
         }).then((r) => (r.ok ? r.json() : { attestations: [] }))
       )

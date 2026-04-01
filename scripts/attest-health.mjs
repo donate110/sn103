@@ -220,14 +220,14 @@ async function phaseNodeHealth() {
 // ─────────────────────────────────────────────
 
 async function fetchAdminAttestations(validatorUrl, limit = 100) {
-  const res = await fetchJson(`${validatorUrl}/v1/admin/attestations?limit=${limit}`, { timeout: 10_000 });
+  const res = await fetchJson(`${validatorUrl}/v1/metrics/attestations?limit=${limit}`, { timeout: 10_000 });
   if (!res.ok) return null;
   return res.data;
 }
 
 async function fetchTimeseries(validatorUrl, hours = 168, bucket = 3600) {
   const res = await fetchJson(
-    `${validatorUrl}/v1/admin/metrics/timeseries?hours=${hours}&bucket=${bucket}`,
+    `${validatorUrl}/v1/metrics/timeseries?hours=${hours}&bucket=${bucket}`,
     { timeout: 10_000 },
   );
   if (!res.ok) return null;

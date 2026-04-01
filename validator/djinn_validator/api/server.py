@@ -1483,14 +1483,14 @@ def create_app(
             error=verify_result.error if not verify_result.verified else None,
         )
 
-    @app.get("/v1/admin/attestations", dependencies=[_admin_auth])
+    @app.get("/v1/metrics/attestations")
     async def admin_attestations(limit: int = 50) -> dict:
         """Recent attestation requests with full details."""
         if attestation_log is None:
             return {"attestations": []}
         return {"attestations": attestation_log.recent_attestations(max(1, min(limit, 200)))}
 
-    @app.get("/v1/admin/metrics/timeseries", dependencies=[_admin_auth])
+    @app.get("/v1/metrics/timeseries")
     async def admin_timeseries(hours: int = 168, bucket: int = 3600) -> dict:
         """Time-series metrics for the admin dashboard.
 
