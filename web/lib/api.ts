@@ -387,7 +387,10 @@ export async function checkLinesViaSubnet(
   };
 }
 
-/** Internal: query all validators/miners for line check data. */
+/** Internal: query validators/miners for line check data.
+ * Returns as soon as ANY validator provides available lines,
+ * rather than waiting for all validators to respond.
+ */
 async function _checkViaMinerNetwork(req: CheckRequest): Promise<CheckResponse | null> {
   let validators: ValidatorClient[];
   try {
@@ -396,41 +399,19 @@ async function _checkViaMinerNetwork(req: CheckRequest): Promise<CheckResponse |
     validators = [getValidatorClient()];
   }
 
-  const settled = await Promise.allSettled(
-    validators.map((v) => v.checkLines(req)),
-  );
+  // Race: return as soon as any validator finds available lines.
+  // Don't wait for broken validators (502/503) to time out.
+  const result = await Promise.any(
+    validators.map((v) =>
+      v.checkLines(req).then((r) => {
+        if (r.api_error || r.available_indices.length === 0) {
+          throw new Error("no results from this validator");
+        }
+        console.log("[checkLines] Miner network responded:", r.available_indices.length, "lines available");
+        return r;
+      }),
+    ),
+  ).catch(() => null);
 
-  const responses: CheckResponse[] = [];
-  for (const r of settled) {
-    if (r.status === "fulfilled" && !r.value.api_error) {
-      responses.push(r.value);
-    }
-  }
-  if (responses.length === 0) return null;
-
-  const mergedResults: Map<number, LineResult> = new Map();
-  for (const resp of responses) {
-    for (const lr of resp.results) {
-      const existing = mergedResults.get(lr.index);
-      if (!existing) {
-        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
-      } else if (lr.available && !existing.available) {
-        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
-      } else if (lr.available && existing.available && lr.bookmakers.length > existing.bookmakers.length) {
-        mergedResults.set(lr.index, { ...lr, bookmakers: [...lr.bookmakers] });
-      }
-    }
-  }
-  const mergedArray = req.lines.map((l) =>
-    mergedResults.get(l.index) ?? { index: l.index, available: false, bookmakers: [] },
-  );
-  const mergedIndices = mergedArray.filter((r) => r.available).map((r) => r.index);
-  if (mergedIndices.length === 0) return null;
-
-  console.log("[checkLines] Miner network responded:", mergedIndices.length, "lines available");
-  return {
-    results: mergedArray,
-    available_indices: mergedIndices,
-    response_time_ms: Math.max(...responses.map((r) => r.response_time_ms)),
-  };
+  return result;
 }
