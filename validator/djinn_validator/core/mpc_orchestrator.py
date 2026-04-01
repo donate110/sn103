@@ -291,6 +291,7 @@ class MPCOrchestrator:
         available_indices: set[int],
         local_shares: list[Share] | None = None,
         threshold_override: int | None = None,
+        precomputed_triples: list[Any] | None = None,
     ) -> MPCResult:
         """Run the MPC availability check.
 
@@ -302,6 +303,8 @@ class MPCOrchestrator:
             threshold_override: Per-signal threshold declared at creation time.
                 Overrides the global default to handle signals created during
                 bootstrap with lower thresholds.
+            precomputed_triples: Beaver triples pre-generated at signal creation.
+                If provided, skips the expensive OT setup during purchase.
         """
         from djinn_validator.api.metrics import MPC_DURATION, MPC_ERRORS, MPC_SESSIONS
 
@@ -355,6 +358,7 @@ class MPCOrchestrator:
             available_indices,
             peers,
             threshold=threshold,
+            precomputed_triples=precomputed_triples,
         )
         if result is not None:
             MPC_DURATION.labels(mode="distributed").observe(time.monotonic() - start)
@@ -379,6 +383,7 @@ class MPCOrchestrator:
         available_indices: set[int],
         peers: list[dict[str, Any]],
         threshold: int | None = None,
+        precomputed_triples: list[Any] | None = None,
     ) -> MPCResult | None:
         """Run the distributed MPC protocol via HTTP.
 
@@ -516,11 +521,16 @@ class MPCOrchestrator:
         r_shares = _split_secret_at_points(r, participant_xs, t, p)
         r_share_map = {s.x: s.y for s in r_shares}
 
-        # OT-based Beaver triple generation is the default for 2-party MPC.
-        # Set USE_NETWORK_OT=false to disable and always use the trusted dealer.
-        use_network_ot = os.getenv("USE_NETWORK_OT", "true").lower() not in ("0", "false", "no")
+        # Use pre-computed triples if available (generated at signal creation time).
+        # This skips the expensive OT setup phase entirely.
         pre_generated_triples: list[BeaverTriple] | None = None
-        if use_network_ot and len(peers) == 1:
+        if precomputed_triples and len(precomputed_triples) >= n_gates:
+            log.info("using_precomputed_triples", signal_id=signal_id[:20], count=len(precomputed_triples))
+            pre_generated_triples = precomputed_triples[:n_gates]
+
+        # OT-based Beaver triple generation is the fallback for 2-party MPC.
+        use_network_ot = os.getenv("USE_NETWORK_OT", "true").lower() not in ("0", "false", "no")
+        if pre_generated_triples is None and use_network_ot and len(peers) == 1:
             ot_session_id = f"ot-{signal_id}-{secrets.token_hex(4)}"
             pre_generated_triples = await self._generate_ot_triples_via_network(
                 session_id=ot_session_id,

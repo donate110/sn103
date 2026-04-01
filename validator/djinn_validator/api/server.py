@@ -577,6 +577,14 @@ def create_app(
             # bootstrap may have threshold=2 while the orchestrator default is 7.
             signal_threshold = record.shamir_threshold
             try:
+                # Use pre-computed triples if available (skip OT setup)
+                stored_triples = record.precomputed_triples if hasattr(record, 'precomputed_triples') else []
+                from djinn_validator.core.mpc import BeaverTriple
+                pre_triples = [
+                    BeaverTriple(a=t.a, b=t.b, c=t.c)
+                    for t in stored_triples
+                ] if stored_triples else None
+
                 mpc_result = await asyncio.wait_for(
                     _orchestrator.check_availability(
                         signal_id=signal_id,
@@ -584,6 +592,7 @@ def create_app(
                         available_indices=available_set,
                         local_shares=all_local_index_shares,
                         threshold_override=signal_threshold,
+                        precomputed_triples=pre_triples,
                     ),
                     timeout=mpc_availability_timeout,
                 )
