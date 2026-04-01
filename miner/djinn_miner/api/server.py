@@ -303,9 +303,10 @@ def create_app(
     elif _ticket_env in ("0", "false", "no"):
         _require_notary_ticket = False
     else:
-        # No explicit setting: enforce starting 2026-04-01 00:00 UTC
+        # No explicit setting: enforce starting 2026-05-01 00:00 UTC
+        # (gives validators time to update and start sending tickets)
         import datetime
-        _require_notary_ticket = datetime.datetime.now(datetime.timezone.utc) >= datetime.datetime(2026, 4, 1, tzinfo=datetime.timezone.utc)
+        _require_notary_ticket = datetime.datetime.now(datetime.timezone.utc) >= datetime.datetime(2026, 5, 1, tzinfo=datetime.timezone.utc)
 
     if _require_notary_ticket:
         log.info("notary_ticket_required", msg="Connections without a valid notary ticket will be rejected")
@@ -359,7 +360,6 @@ def create_app(
             await ws.close(code=1008, reason="notary ticket required")
             NOTARY_SESSIONS.labels(status="rejected").inc()
             return
-            log.info("notary_ticket_verified", prover_uid=payload.get("prover_uid"), validator=payload.get("validator"))
 
         await ws.accept()
         NOTARY_SESSIONS.labels(status="connected").inc()

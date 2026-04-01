@@ -37,7 +37,6 @@ from djinn_validator.core.scoring import MinerScorer
 from djinn_validator.core.shares import ShareStore
 from djinn_validator.core.telemetry import TelemetryStore
 from djinn_validator.core.validator_sync import ValidatorSetSyncer
-from djinn_validator.utils.firewall import firewall_loop
 from djinn_validator.utils.watchtower import watch_loop as watchtower_loop
 
 
@@ -710,7 +709,6 @@ async def async_main() -> None:
         asyncio.create_task(run_server(app, config.api_host, config.api_port)),
         asyncio.create_task(mpc_cleanup_loop(mpc_coordinator)),
         asyncio.create_task(watchtower_loop(package_dir=Path(__file__).resolve().parent.parent)),
-        asyncio.create_task(firewall_loop(neuron, config.api_port)),
         asyncio.create_task(_run_bootstrap()),  # Background: ~5 min, doesn't block startup
     ]
     if bt_ok:
