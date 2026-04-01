@@ -10,7 +10,7 @@ import { ADDRESSES, SIGNAL_COMMITMENT_ABI } from "@/lib/contracts";
 
 const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
 const MAX_LIMIT = 100;
-const SCAN_BLOCKS = 200_000;
+const SCAN_BLOCKS = 1_500_000; // ~8.5 days at 2 blocks/sec on Base Sepolia
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
