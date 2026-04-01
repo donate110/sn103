@@ -256,8 +256,12 @@ export default function PurchaseSignal() {
           }
         }
 
-        if (shares.length === 0) {
-          setStepError("Recovery: could not collect key shares from validators. They may have restarted. Your purchase is on-chain but the pick cannot be decrypted right now.");
+        const RECOVERY_MIN_SHARES = 2;
+        if (shares.length < RECOVERY_MIN_SHARES) {
+          setStepError(
+            `Recovery: collected ${shares.length} of ${RECOVERY_MIN_SHARES} required key shares. ` +
+            "Validators may have restarted. Your purchase is on-chain. Refresh the page to retry.",
+          );
           setStep("idle");
           return;
         }
@@ -714,8 +718,18 @@ export default function PurchaseSignal() {
       }
 
       // Step 5: Decrypt the signal
-      console.log(`[purchase] Step 4 (share collection) took ${((performance.now() - t0) / 1000).toFixed(1)}s total, got ${collectedShares.length} shares`);
+      console.log(`[purchase] Step 4 (share collection) took ${((performance.now() - t0) / 1000).toFixed(1)}s total, got ${collectedShares.length} shares (need ${NEEDED_SHARES})`);
       setStep("decrypting");
+
+      if (collectedShares.length < NEEDED_SHARES) {
+        setStepError(
+          `Could only collect ${collectedShares.length} of ${NEEDED_SHARES} required key shares from validators. ` +
+          "Your purchase is recorded on-chain. Refresh the page to retry decryption.",
+        );
+        setStep("idle");
+        purchaseInFlight.current = false;
+        return;
+      }
 
       if (collectedShares.length > 0) {
         try {

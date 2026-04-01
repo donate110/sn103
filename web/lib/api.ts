@@ -322,48 +322,6 @@ function getValidatorClient(): ValidatorClient {
  * results (union of available_indices). The client queries multiple
  * validators for redundancy and merges across validators too.
  *
- * For genius signal creation: races the platform Odds API against the
- * miner network. The platform API is a convenience for finding decoy lines,
- * not a verification source.
- *
- * For purchase verification: use checkLinesViaSubnet() instead, which
- * exclusively uses the decentralized miner network.
- */
-export async function resilientCheckLines(
-  req: CheckRequest,
-): Promise<CheckResponse> {
-  // Race: platform Odds API (fast, ~100ms) vs miner network (slow, 5-30s)
-  const platformPromise = post<CheckResponse>("/api/check-lines", req, 15_000)
-    .then((r) => {
-      if (r.available_indices.length > 0) {
-        console.log("[checkLines] Platform API responded first:", r.available_indices.length, "lines available in", r.response_time_ms, "ms");
-        return r;
-      }
-      return null;
-    })
-    .catch(() => null);
-
-  const minerResult = _checkViaMinerNetwork(req);
-
-  const result = await Promise.any([
-    platformPromise.then((r) => { if (!r) throw new Error("no results"); return r; }),
-    minerResult.then((r) => { if (!r) throw new Error("no results"); return r; }),
-  ]).catch(() => null);
-
-  if (result) return result;
-
-  return {
-    results: req.lines.map((l) => ({
-      index: l.index,
-      available: false,
-      bookmakers: [],
-    })),
-    available_indices: [],
-    response_time_ms: 0,
-    api_error: "No odds data available. Please check your internet connection and try again.",
-  };
-}
-
 /**
  * Check line availability exclusively through the decentralized miner network.
  * Used for purchase verification where the result must come from the subnet,
