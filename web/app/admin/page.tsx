@@ -294,109 +294,116 @@ export default function AdminDashboard() {
     for (const l of labels) stepStatus[l] = "pending";
     setRefreshSteps({ ...stepStatus });
 
-    function track<T>(idx: number, p: Promise<T>): Promise<T> {
-      return p.then(
-        (val) => { stepStatus[labels[idx]] = "done"; done++; setRefreshSteps({ ...stepStatus }); setRefreshStep(done < total ? labels.find((_, i) => stepStatus[labels[i]] === "pending") || `${done}/${total}` : "done"); return val; },
-        (err) => { stepStatus[labels[idx]] = "error"; done++; setRefreshSteps({ ...stepStatus }); setRefreshStep(done < total ? labels.find((_, i) => stepStatus[labels[i]] === "pending") || `${done}/${total}` : "done"); throw err; },
-      );
+    function trackStep(idx: number, status: "done" | "error") {
+      stepStatus[labels[idx]] = status;
+      done++;
+      setRefreshSteps({ ...stepStatus });
+      setRefreshStep(done < total ? labels.find((_, i) => stepStatus[labels[i]] === "pending") || `${done}/${total}` : "done");
     }
 
     // Incremental: pass the last fetch timestamp so we only get new data
     const sinceTs = incremental ? lastFetchTs.current : undefined;
     const now = Math.floor(Date.now() / 1000);
 
-    // Fetch all data in parallel so badge counts are always available
-    const [
-      validatorRes,
-      minerRes,
-      statsRes,
-      errorsRes,
-      networkRes,
-      signalsRes,
-      purchasesRes,
-      auditsRes,
-      attestRes,
-      telemetryRes,
-      feedbackRes,
-      delegatesRes,
-    ] = await Promise.allSettled([
-      track(0, fetchValidatorHealth()),       // 0
-      track(1, fetchMinerHealth()),           // 1
-      track(2, fetchProtocolStats()),         // 2
-      track(3, fetchErrorReports()),          // 3
-      track(4, fetchNetworkActivity((status) => setValidatorFetchStatus(status), sinceTs)),       // 4
-      track(5, fetchRecentSignals(50)),       // 5
-      track(6, fetchRecentPurchases(50)),     // 6
-      track(7, fetchRecentAudits(50)),        // 7
-      track(8, fetchAttestationData(incremental ? 1 : undefined)),       // 8
-      track(9, fetchTelemetry(sinceTs)),             // 9
-      track(10, fetchFeedback(feedbackFilter)),// 10
-      track(11, fetchDelegateNames()),         // 11
+    // Fire all fetches in parallel, updating UI state as each one completes
+    // instead of waiting for all 12 before showing anything
+    await Promise.allSettled([
+      fetchValidatorHealth().then(
+        (val) => { trackStep(0, "done"); setValidators(val as ValidatorHealth[]); },
+        () => { trackStep(0, "error"); },
+      ),
+      fetchMinerHealth().then(
+        (val) => { trackStep(1, "done"); setMiners(val as MinerHealth[]); },
+        () => { trackStep(1, "error"); },
+      ),
+      fetchProtocolStats().then(
+        (val) => { trackStep(2, "done"); setStats(val as SubgraphProtocolStats | null); },
+        () => { trackStep(2, "error"); },
+      ),
+      fetchErrorReports().then(
+        (val) => {
+          trackStep(3, "done");
+          const errData = val as { errors: ErrorReport[]; total: number } | null;
+          if (errData) { setErrorReports(errData.errors); setErrorTotal(errData.total); }
+        },
+        () => { trackStep(3, "error"); },
+      ),
+      fetchNetworkActivity((status) => setValidatorFetchStatus(status), sinceTs).then(
+        (val) => {
+          trackStep(4, "done");
+          const actResult = val as NetworkActivityResult;
+          if (incremental) {
+            setNetworkEvents((prev) => {
+              const existing = new Set(prev.map((e) => `${e.timestamp}-${e.category}-${e.validatorUid}`));
+              const fresh = actResult.events.filter((e) => !existing.has(`${e.timestamp}-${e.category}-${e.validatorUid}`));
+              const merged = [...fresh, ...prev];
+              merged.sort((a, b) => b.timestamp - a.timestamp);
+              return merged.slice(0, 2000);
+            });
+          } else {
+            setNetworkEvents(actResult.events);
+          }
+          setNetworkDiag({ discovered: actResult.validatorsDiscovered, responded: actResult.validatorsResponded, error: actResult.error });
+        },
+        () => { trackStep(4, "error"); },
+      ),
+      fetchRecentSignals(50).then(
+        (val) => { trackStep(5, "done"); setRecentSignals(val as SubgraphRecentSignal[]); },
+        () => { trackStep(5, "error"); },
+      ),
+      fetchRecentPurchases(50).then(
+        (val) => { trackStep(6, "done"); setRecentPurchases(val as SubgraphRecentPurchase[]); },
+        () => { trackStep(6, "error"); },
+      ),
+      fetchRecentAudits(50).then(
+        (val) => { trackStep(7, "done"); setRecentAudits(val as SubgraphRecentAudit[]); },
+        () => { trackStep(7, "error"); },
+      ),
+      fetchAttestationData(incremental ? 1 : undefined).then(
+        (val) => {
+          trackStep(8, "done");
+          const newAttest = val as AttestationEntry[];
+          if (incremental) {
+            setAttestations((prev) => {
+              const existingIds = new Set(prev.map((a) => a.id));
+              const fresh = newAttest.filter((a) => !existingIds.has(a.id));
+              const merged = [...fresh, ...prev];
+              merged.sort((a, b) => b.created_at - a.created_at);
+              return merged.slice(0, 500);
+            });
+          } else {
+            setAttestations(newAttest);
+          }
+        },
+        () => { trackStep(8, "error"); },
+      ),
+      fetchTelemetry(sinceTs).then(
+        (val) => {
+          trackStep(9, "done");
+          const newEvents = val as TelemetryEvent[];
+          if (incremental) {
+            setTelemetryEvents((prev) => {
+              const existing = new Set(prev.map((e) => `${e.id}-${e.sourceUid}`));
+              const fresh = newEvents.filter((e) => !existing.has(`${e.id}-${e.sourceUid}`));
+              const merged = [...fresh, ...prev];
+              merged.sort((a, b) => b.timestamp - a.timestamp);
+              return merged.slice(0, 2000);
+            });
+          } else {
+            setTelemetryEvents(newEvents);
+          }
+        },
+        () => { trackStep(9, "error"); },
+      ),
+      fetchFeedback(feedbackFilter).then(
+        (val) => { trackStep(10, "done"); setFeedback(val as FeedbackEntry[]); },
+        () => { trackStep(10, "error"); },
+      ),
+      fetchDelegateNames().then(
+        (val) => { trackStep(11, "done"); setDelegateNames(val as Record<string, string>); },
+        () => { trackStep(11, "error"); },
+      ),
     ]);
-
-    if (validatorRes.status === "fulfilled") setValidators(validatorRes.value as ValidatorHealth[]);
-    if (minerRes.status === "fulfilled") setMiners(minerRes.value as MinerHealth[]);
-    if (statsRes.status === "fulfilled") setStats(statsRes.value as SubgraphProtocolStats | null);
-    if (errorsRes.status === "fulfilled") {
-      const errData = errorsRes.value as { errors: ErrorReport[]; total: number } | null;
-      if (errData) {
-        setErrorReports(errData.errors);
-        setErrorTotal(errData.total);
-      }
-    }
-    if (networkRes.status === "fulfilled") {
-      const actResult = networkRes.value as NetworkActivityResult;
-      if (incremental) {
-        // Merge new events with existing, dedupe by id+validatorUid
-        setNetworkEvents((prev) => {
-          const existing = new Set(prev.map((e) => `${e.timestamp}-${e.category}-${e.validatorUid}`));
-          const fresh = actResult.events.filter((e) => !existing.has(`${e.timestamp}-${e.category}-${e.validatorUid}`));
-          const merged = [...fresh, ...prev];
-          merged.sort((a, b) => b.timestamp - a.timestamp);
-          return merged.slice(0, 2000);
-        });
-      } else {
-        setNetworkEvents(actResult.events);
-      }
-      setNetworkDiag({ discovered: actResult.validatorsDiscovered, responded: actResult.validatorsResponded, error: actResult.error });
-    }
-    if (signalsRes.status === "fulfilled") setRecentSignals(signalsRes.value as SubgraphRecentSignal[]);
-    if (purchasesRes.status === "fulfilled") setRecentPurchases(purchasesRes.value as SubgraphRecentPurchase[]);
-    if (auditsRes.status === "fulfilled") setRecentAudits(auditsRes.value as SubgraphRecentAudit[]);
-    if (attestRes.status === "fulfilled") {
-      const newAttest = attestRes.value as AttestationEntry[];
-      if (incremental) {
-        setAttestations((prev) => {
-          const existingIds = new Set(prev.map((a) => a.id));
-          const fresh = newAttest.filter((a) => !existingIds.has(a.id));
-          const merged = [...fresh, ...prev];
-          merged.sort((a, b) => b.created_at - a.created_at);
-          return merged.slice(0, 500);
-        });
-      } else {
-        setAttestations(newAttest);
-      }
-    }
-    if (telemetryRes.status === "fulfilled") {
-      const newEvents = telemetryRes.value as TelemetryEvent[];
-      if (incremental) {
-        setTelemetryEvents((prev) => {
-          const existing = new Set(prev.map((e) => `${e.id}-${e.sourceUid}`));
-          const fresh = newEvents.filter((e) => !existing.has(`${e.id}-${e.sourceUid}`));
-          const merged = [...fresh, ...prev];
-          merged.sort((a, b) => b.timestamp - a.timestamp);
-          return merged.slice(0, 2000);
-        });
-      } else {
-        setTelemetryEvents(newEvents);
-      }
-    }
-    if (feedbackRes.status === "fulfilled") {
-      setFeedback(feedbackRes.value as FeedbackEntry[]);
-    }
-    if (delegatesRes.status === "fulfilled") {
-      setDelegateNames(delegatesRes.value as Record<string, string>);
-    }
 
     lastFetchTs.current = now;
     isFirstLoad.current = false;
