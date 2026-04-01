@@ -82,29 +82,40 @@ async function proxy(
   const isPurchaseOrMPC = path.includes("purchase") || path.includes("mpc/");
   const timeoutMs = isPurchaseOrMPC ? 120_000 : 30_000;
 
-  try {
-    const res = await fetch(target, { ...init, signal: AbortSignal.timeout(timeoutMs) });
-    const body = await res.text();
-    return new NextResponse(body, {
-      status: res.status,
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    const errName = err instanceof Error ? err.name : "unknown";
-    console.error(`[proxy] UID ${uid} -> ${target} failed: ${errName}: ${errMsg}`);
-    return NextResponse.json(
-      {
-        error: "Validator unavailable",
-        detail: errName === "TimeoutError" ? "timeout" : errName === "TypeError" ? "connection_refused" : errName,
-        target: target.replace(/\d+\.\d+\.\d+\.\d+/, "x.x.x.x"), // Redact IP
-        timeout_ms: timeoutMs,
-      },
-      { status: 502 },
-    );
+  // Retry once on connection errors (Vercel cold-start or intermittent connectivity)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(target, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+      const body = await res.text();
+      return new NextResponse(body, {
+        status: res.status,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const errName = err instanceof Error ? err.name : "unknown";
+      if (attempt === 0 && errName === "TypeError") {
+        // Connection refused: retry once after brief delay
+        console.warn(`[proxy] UID ${uid} connection refused, retrying in 1s...`);
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      console.error(`[proxy] UID ${uid} -> ${target} failed: ${errName}: ${errMsg}`);
+      return NextResponse.json(
+        {
+          error: "Validator unavailable",
+          detail: errName === "TimeoutError" ? "timeout" : errName === "TypeError" ? "connection_refused" : errName,
+          target: target.replace(/\d+\.\d+\.\d+\.\d+/, "x.x.x.x"),
+          timeout_ms: timeoutMs,
+        },
+        { status: 502 },
+      );
+    }
   }
+  // Should never reach here
+  return NextResponse.json({ error: "Validator unavailable" }, { status: 502 });
 }
 
 // MPC purchase verification takes 30-90s depending on network conditions
