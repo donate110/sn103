@@ -25,6 +25,7 @@ const CHUNK_SIZE = 9_999; // Max blocks per queryFilter call (RPC provider limit
 // Serverless cold starts will re-populate, but warm instances serve instantly.
 let browseCache: { signals: Record<string, unknown>[]; lastBlock: number; updatedAt: number } | null = null;
 const BROWSE_CACHE_TTL_MS = 30_000; // 30 seconds: balances freshness vs RPC load
+const BROWSE_CACHE_HARD_TTL_MS = 300_000; // 5 minutes: full rescan to catch cancellations
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -79,15 +80,17 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Query SignalCommitted events from recent blocks only.
-    // Active signals expire within 7 days max, so scanning 7 days of blocks
-    // (~604800 blocks at 2 blocks/sec on Base Sepolia) covers all active signals.
-    // Using DEPLOY_BLOCK as a floor to avoid scanning before contracts existed.
+    // If we have a stale cache, do an incremental scan from lastBlock + 1
+    // instead of rescanning the full 7-day range. This makes stale-cache
+    // refreshes nearly instant (only a handful of new blocks to scan).
     const geniusFilter = genius ? ethers.getAddress(genius) : null;
     const filter = contract.filters.SignalCommitted(null, geniusFilter);
     const currentBlock = await provider.getBlockNumber();
     const SEVEN_DAYS_BLOCKS = 604_800; // ~7 days at 2 blocks/sec
-    const fromBlock = Math.max(DEPLOY_BLOCK, currentBlock - SEVEN_DAYS_BLOCKS);
+    const fullScanFrom = Math.max(DEPLOY_BLOCK, currentBlock - SEVEN_DAYS_BLOCKS);
+    // Incremental scan if cache exists and isn't too old; full scan otherwise
+    const cacheIsRecent = browseCache !== null && (Date.now() - browseCache.updatedAt < BROWSE_CACHE_HARD_TTL_MS);
+    const fromBlock = (cacheIsRecent && browseCache) ? browseCache.lastBlock + 1 : fullScanFrom;
 
     // Build chunk ranges and query with limited concurrency to avoid RPC rate limits
     const chunkRanges: [number, number][] = [];
@@ -164,8 +167,19 @@ export async function GET(request: NextRequest) {
       if (s) signals.push(s);
     }
 
-    // Update cache with all signals (unfiltered by sport/genius for reuse)
-    browseCache = { signals: [...signals], lastBlock: currentBlock, updatedAt: Date.now() };
+    // Merge with existing cache (incremental) or replace (full scan)
+    if (cacheIsRecent && browseCache) {
+      // Incremental: keep existing signals, add new ones, prune expired
+      const newIds = new Set(signals.map((s) => s.signal_id as string));
+      const kept = browseCache.signals.filter((s) => {
+        if ((s.expires_at_unix as number) < now) return false;
+        if (newIds.has(s.signal_id as string)) return false; // replaced by fresh version
+        return true;
+      });
+      browseCache = { signals: [...kept, ...signals], lastBlock: currentBlock, updatedAt: Date.now() };
+    } else {
+      browseCache = { signals: [...signals], lastBlock: currentBlock, updatedAt: Date.now() };
+    }
 
     // Apply filters for this request
     const filtered = signals.filter((s) => {

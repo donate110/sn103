@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   const base = process.env.NEXT_PUBLIC_SITE_URL || "https://www.djinn.gg";
   const endpoints = [
     "/api/health",
-    "/api/idiot/browse?limit=1",
+    "/api/idiot/browse?limit=100",
     "/api/network/status",
     "/api/validators/discover",
     "/api/odds?sport=basketball_nba",

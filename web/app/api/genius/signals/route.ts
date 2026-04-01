@@ -16,8 +16,9 @@ const CHUNK_SIZE = 9_999;
 const CONCURRENCY = 10;
 
 // Per-address in-memory cache
-const geniusCache = new Map<string, { signals: Record<string, unknown>[]; updatedAt: number }>();
+const geniusCache = new Map<string, { signals: Record<string, unknown>[]; lastBlock: number; updatedAt: number }>();
 const CACHE_TTL_MS = 30_000; // 30 seconds
+const CACHE_HARD_TTL_MS = 300_000; // 5 minutes: full rescan to catch status changes
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -59,9 +60,12 @@ export async function GET(request: NextRequest) {
     const contract = new ethers.Contract(ADDRESSES.signalCommitment, SIGNAL_COMMITMENT_ABI, provider);
 
     // Query SignalCommitted events for this genius (chunked)
+    // Incremental scan if we have a recent cache, full scan otherwise
     const filter = contract.filters.SignalCommitted(null, checksumAddr);
     const currentBlock = await provider.getBlockNumber();
-    const fromBlock = Math.max(0, currentBlock - SCAN_BLOCKS);
+    const fullScanFrom = Math.max(0, currentBlock - SCAN_BLOCKS);
+    const cacheIsRecent = cached && (Date.now() - cached.updatedAt < CACHE_HARD_TTL_MS);
+    const fromBlock = cacheIsRecent ? cached.lastBlock + 1 : fullScanFrom;
     const chunkRanges: [number, number][] = [];
     for (let start = fromBlock; start <= currentBlock; start += CHUNK_SIZE) {
       chunkRanges.push([start, Math.min(start + CHUNK_SIZE - 1, currentBlock)]);
@@ -123,8 +127,15 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Cache all signals (unfiltered)
-    geniusCache.set(cacheKey, { signals: [...signals], updatedAt: Date.now() });
+    // Merge with existing cache (incremental) or replace (full scan)
+    if (cacheIsRecent && cached) {
+      const newIds = new Set(signals.map((s) => s.signal_id as string));
+      const kept = cached.signals.filter((s) => !newIds.has(s.signal_id as string));
+      geniusCache.set(cacheKey, { signals: [...kept, ...signals], lastBlock: currentBlock, updatedAt: Date.now() });
+    } else {
+      geniusCache.set(cacheKey, { signals: [...signals], lastBlock: currentBlock, updatedAt: Date.now() });
+    }
+    const allSignals = geniusCache.get(cacheKey)!.signals;
 
     // Evict stale cache entries (prevent memory leak)
     if (geniusCache.size > 100) {
@@ -136,8 +147,8 @@ export async function GET(request: NextRequest) {
 
     // Filter for response
     const filtered = includeAll
-      ? signals
-      : signals.filter((s) => s.status === "active");
+      ? allSignals
+      : allSignals.filter((s) => s.status === "active");
 
     const paged = filtered.slice(offset, offset + limit);
 
