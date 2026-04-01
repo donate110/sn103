@@ -39,30 +39,35 @@ export async function GET(
       );
     }
 
-    // Query highest-stake validator (most reliable/complete data)
-    const topValidator = validators.sort((a, b) =>
+    // Query validators by stake (highest first), return first non-empty result.
+    const sorted = validators.sort((a, b) =>
       b.totalStake > a.totalStake ? 1 : -1,
-    )[0];
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-
-    const res = await fetch(
-      `http://${topValidator.ip}:${topValidator.port}/v1/miner/${uid}/history?hours=${hours}`,
-      { signal: controller.signal, cache: "no-store" },
     );
-    clearTimeout(timeout);
 
-    if (!res.ok) {
-      return NextResponse.json(
-        { uid, history: [] },
-        { headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" } },
-      );
+    let history: unknown[] = [];
+    for (const v of sorted) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
+        const res = await fetch(
+          `http://${v.ip}:${v.port}/v1/miner/${uid}/history?hours=${hours}`,
+          { signal: controller.signal, cache: "no-store" },
+        );
+        clearTimeout(timeout);
+        if (!res.ok) continue;
+        const data = await res.json();
+        const h = data.history ?? [];
+        if (h.length > 0) {
+          history = h;
+          break;
+        }
+      } catch {
+        continue;
+      }
     }
 
-    const data = await res.json();
     return NextResponse.json(
-      { uid, history: data.history ?? [] },
+      { uid, history },
       { headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600" } },
     );
   } catch (err) {
