@@ -135,7 +135,6 @@ export async function createSessionToken(
 
 export async function verifySessionToken(token: string): Promise<TokenPayload | null> {
   const secret = getSecret();
-  if (!secret) return null;
 
   try {
     if (!token.startsWith("djn_")) return null;
