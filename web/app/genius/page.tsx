@@ -51,10 +51,22 @@ export default function GeniusDashboard() {
     if (recoveryCheckedRef.current) return;
     if (!address || savedLoading || savedSignals.length > 0 || savedLocked) return;
     recoveryCheckedRef.current = true;
+    // Skip if already checked this session
+    const cacheKey = `djinn:recovery_checked:${address}`;
+    const cached = sessionStorage.getItem(cacheKey);
+    if (cached === "none") { setRecoveryState("none"); return; }
+    if (cached === "prompting") { setRecoveryState("prompting"); return; }
     setRecoveryState("checking");
     readRecoveryBlobFromChain(address)
-      .then((blob) => setRecoveryState(blob ? "prompting" : "none"))
-      .catch(() => setRecoveryState("none"));
+      .then((blob) => {
+        const state = blob ? "prompting" : "none";
+        setRecoveryState(state);
+        try { sessionStorage.setItem(cacheKey, state); } catch {}
+      })
+      .catch(() => {
+        setRecoveryState("none");
+        try { sessionStorage.setItem(cacheKey, "none"); } catch {}
+      });
   }, [address, savedLoading, savedSignals.length, savedLocked]);
 
   const handleRecover = useCallback(async () => {
