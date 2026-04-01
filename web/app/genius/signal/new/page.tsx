@@ -366,28 +366,16 @@ export default function CreateSignal() {
           ]),
         ),
       );
-      // Filter to validators that are healthy AND running a compatible version.
-      // Old validators (v0, v0.1.0) pass health checks but have incompatible
-      // MPC implementations that cause distributed protocol failures.
-      // Version 617+ has the x-coordinate fix, signed peer requests, and
-      // correct distributed MPC gate computation.
-      const MIN_COMPATIBLE_VERSION = 617;
+      // Filter to validators that respond healthy.
       const healthyValidators = preflightValidators.filter((_, i) => {
         if (healthChecks[i].status !== "fulfilled") return false;
-        const health = (healthChecks[i] as PromiseFulfilledResult<{ status: string; version?: string | number }>).value;
-        if (health.status !== "ok") return false;
-        const ver = parseInt(String(health.version ?? "0"), 10);
-        return !isNaN(ver) && ver >= MIN_COMPATIBLE_VERSION;
+        const health = (healthChecks[i] as PromiseFulfilledResult<{ status: string }>).value;
+        return health.status === "ok";
       });
       const healthyCount = healthyValidators.length;
       if (healthyCount < SHAMIR_MIN) {
-        const totalHealthy = healthChecks.filter(
-          (r) => r.status === "fulfilled" && (r as PromiseFulfilledResult<{ status: string }>).value.status === "ok",
-        ).length;
         setStepError(
-          totalHealthy > healthyCount
-            ? `${totalHealthy} validators reachable but only ${healthyCount} running compatible software (v${MIN_COMPATIBLE_VERSION}+). Some validators need to update.`
-            : `Only ${healthyCount} validators reachable, need at least ${SHAMIR_MIN}. The network may be down.`,
+          `Only ${healthyCount} validators reachable, need at least ${SHAMIR_MIN}. The network may be down.`,
         );
         setStep("configure");
         return;
