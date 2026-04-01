@@ -299,43 +299,37 @@ async function createOneSignal(idx, wallet, provider, networkConfig, oddsData, a
 // Signal purchase
 // ---------------------------------------------------------------------------
 
+let cycleLimitHit = false; // Track if we've hit the cycle limit for this genius-idiot pair
+
 async function purchaseSignal(signalId, wallet, provider, authHeaders) {
   const start = Date.now();
   const result = { signalId, purchaseMs: 0, success: false, error: null };
 
-  try {
-    // Check if signal is active on chain
-    const sc = new ethers.Contract(CONTRACTS.signalCommitment, SIGNAL_COMMITMENT_ABI, provider);
-    let isActive;
-    try {
-      isActive = await sc.isActive(BigInt(signalId));
-    } catch {
-      isActive = true; // Assume active if check fails (RPC flaky)
-    }
-    if (!isActive) {
-      result.error = "Signal not active on-chain";
-      result.purchaseMs = Date.now() - start;
-      return result;
-    }
+  // Skip if we already know this pair hit the cycle limit
+  if (cycleLimitHit) {
+    result.error = "Skipped: cycle limit reached for this genius-idiot pair";
+    result.purchaseMs = Date.now() - start;
+    log("WARN", `  Skipped (cycle limit already reached)`);
+    return result;
+  }
 
+  try {
     // Get signal details to determine odds
     let odds = 2_000_000n; // Default: 2.0x (even odds)
     try {
+      const sc = new ethers.Contract(CONTRACTS.signalCommitment, SIGNAL_COMMITMENT_ABI, provider);
       const signalData = await sc.getSignal(BigInt(signalId));
-      // Use the decoy lines to extract a realistic odds value
       if (signalData.decoyLines?.length > 0) {
         try {
           const firstLine = JSON.parse(signalData.decoyLines[0]);
           if (firstLine.price && firstLine.price > 1.01) {
             odds = BigInt(Math.round(firstLine.price * 1e6));
           }
-        } catch {} // Ignore parse errors
+        } catch {}
       }
-    } catch {
-      // Use default odds if signal data fetch fails
-    }
+    } catch {}
 
-    // Direct on-chain purchase (bypasses API, which hasn't been deployed yet)
+    // Direct on-chain purchase
     const notional = 10n * 1000000n; // $10 USDC (6 decimals)
     const escrowContract = new ethers.Contract(CONTRACTS.escrow, ESCROW_ABI, wallet);
     const tx = await escrowContract.purchase(BigInt(signalId), notional, odds);
@@ -348,7 +342,15 @@ async function purchaseSignal(signalId, wallet, provider, authHeaders) {
   } catch (err) {
     result.error = err.message?.slice(0, 300) || String(err);
     result.purchaseMs = Date.now() - start;
-    log("FAIL", `  Purchase FAILED: ${result.error.slice(0, 150)}`);
+
+    // Detect cycle limit error (selector 0x75f3fe47 = CycleSignalLimitReached)
+    if (result.error.includes("0x75f3fe47") || result.error.includes("CycleSignalLimit")) {
+      cycleLimitHit = true;
+      result.error = "CycleSignalLimitReached (10 purchases per genius-idiot pair per cycle)";
+      log("WARN", `  Cycle limit reached. Remaining purchases will be skipped.`);
+    } else {
+      log("FAIL", `  Purchase FAILED: ${result.error.slice(0, 150)}`);
+    }
     return result;
   }
 }
