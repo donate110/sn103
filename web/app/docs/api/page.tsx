@@ -161,6 +161,7 @@ const idiotEndpoints: Endpoint[] = [
     params: [
       { name: "signal_id", type: "string", description: "The signal ID to purchase", required: true },
       { name: "notional_usdc", type: "number", description: "Amount in USDC to commit", required: true },
+      { name: "odds_decimal", type: "number", description: "Decimal odds (e.g. 1.91). Defaults to 2.0 if omitted", required: false },
     ],
     response: `{
   "purchase_id": 42,
