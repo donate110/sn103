@@ -590,12 +590,23 @@ class OTTripleGenState:
         self._receivers_ready = True
 
     def _ensure_receivers_ready(self) -> None:
-        """Block until receiver pre-computation is complete."""
+        """Wait until receiver pre-computation is complete.
+
+        Uses short polling instead of thread.join() to avoid blocking
+        the asyncio event loop (thread.join blocks the entire event loop
+        thread, freezing all concurrent request handling).
+        """
         if self._receivers_ready:
             return
         thread = getattr(self, "_receiver_init_thread", None)
         if thread is not None:
-            thread.join(timeout=120)
+            # Poll with short sleeps instead of blocking join.
+            # This runs in sync context but the caller should use
+            # asyncio.to_thread() or run_in_executor() for async handlers.
+            import time as _time
+            deadline = _time.monotonic() + 30  # 30s max, not 120s
+            while thread.is_alive() and _time.monotonic() < deadline:
+                _time.sleep(0.05)  # 50ms polling
         if not self._receivers_ready:
             log.warning("receiver_init_timeout", msg="Receiver pre-computation did not complete in time")
 

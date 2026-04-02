@@ -2596,16 +2596,20 @@ def create_app(
                 raise HTTPException(status_code=503, detail="Too many active OT sessions")
 
             fp, dh_group = _resolve_ot_params(req.field_prime, req.dh_prime)
-            state = OTTripleGenState(
-                session_id=req.session_id,
-                party_role="peer",
-                n_triples=req.n_triples,
-                x_coords=req.x_coords,
-                threshold=req.threshold,
-                prime=fp,
-                dh_group=dh_group,
-            )
-            state.initialize()
+
+        # Initialize outside the lock (CPU-intensive modexp work)
+        state = OTTripleGenState(
+            session_id=req.session_id,
+            party_role="peer",
+            n_triples=req.n_triples,
+            x_coords=req.x_coords,
+            threshold=req.threshold,
+            prime=fp,
+            dh_group=dh_group,
+        )
+        await asyncio.get_event_loop().run_in_executor(None, state.initialize)
+
+        with _ot_lock:
             _ot_states[req.session_id] = state
             _ot_created[req.session_id] = _time.monotonic()
 
@@ -2635,8 +2639,12 @@ def create_app(
         # Deserialize peer's sender public keys
         peer_pks = {int(t): deserialize_dh_public_key(pk_hex) for t, pk_hex in req.peer_sender_pks.items()}
 
-        # Generate this party's receiver choices
-        our_choices = state.generate_receiver_choices(peer_pks)
+        # Generate this party's receiver choices.
+        # Run in thread pool to avoid blocking the event loop (receiver
+        # initialization may need to wait for background modexp thread).
+        our_choices = await asyncio.get_event_loop().run_in_executor(
+            None, state.generate_receiver_choices, peer_pks,
+        )
 
         return OTChoicesResponse(
             session_id=req.session_id,
@@ -2662,7 +2670,11 @@ def create_app(
         peer_choices_deserialized = {int(t): deserialize_choices(c) for t, c in req.peer_choices.items()}
 
         # Process: encrypt OT messages using our sender states
-        transfers, sender_shares = state.process_sender_choices(peer_choices_deserialized)
+        # Run in thread pool to avoid blocking the event loop
+        # (process_sender_choices does CPU-heavy modexp via ProcessPool)
+        transfers, sender_shares = await asyncio.get_event_loop().run_in_executor(
+            None, state.process_sender_choices, peer_choices_deserialized,
+        )
 
         return OTTransfersResponse(
             session_id=req.session_id,
