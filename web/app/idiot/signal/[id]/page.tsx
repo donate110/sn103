@@ -522,6 +522,7 @@ export default function PurchaseSignal() {
       // Don't wait for broken validators to time out.
       type MpcResponse = Awaited<ReturnType<typeof validators[0]["purchaseSignal"]>>;
       let firstAvailable: MpcResponse | null = null;
+      let mpcErrors: Error[] = [];
       try {
         firstAvailable = await Promise.any(
           validators.map((v) =>
@@ -538,14 +539,24 @@ export default function PurchaseSignal() {
             }),
           ),
         );
-      } catch {
-        // All validators failed or returned unavailable
+      } catch (anyErr) {
+        // All validators failed or returned unavailable.
+        // Preserve the actual errors for diagnostics.
+        if (anyErr instanceof AggregateError) {
+          mpcErrors = anyErr.errors as Error[];
+          console.log("[purchase] All validators failed:", mpcErrors.map(
+            (e, i) => `v${i}:${e instanceof Error ? e.message.slice(0, 150) : String(e)}`
+          ));
+        }
       }
 
-      // Build availabilityResults for downstream code compatibility
+      // Build availabilityResults preserving real error messages
       const availabilityResults: PromiseSettledResult<MpcResponse>[] = firstAvailable
         ? [{ status: "fulfilled" as const, value: firstAvailable }]
-        : validators.map(() => ({ status: "rejected" as const, reason: new Error("MPC failed") }));
+        : validators.map((_, i) => ({
+            status: "rejected" as const,
+            reason: mpcErrors[i] instanceof Error ? mpcErrors[i] : new Error("MPC failed"),
+          }));
 
       // Check if any validator confirmed the signal is available.
       // Accept both "available" and "payment_required" as positive signals:
