@@ -322,11 +322,16 @@ async function main() {
   let mpcSuccess = false;
   let collectedShares = [];
 
+  // Sign purchase message (same as browser does) to test signature validation
+  const purchaseMsg = `djinn:purchase:${signalId.toString()}`;
+  const buyerSig = await genius.signMessage(purchaseMsg);
+  console.log(`  Buyer signature length: ${buyerSig.length} chars`);
+
   const purchaseReq = {
-    buyer_address: genius.address, // Same wallet for test (will get GeniusEqualsIdiot)
+    buyer_address: genius.address,
     sportsbook: "",
     available_indices: checkResult.available_indices,
-    buyer_signature: "",
+    buyer_signature: buyerSig,
   };
 
   // Query all healthy validators in parallel
