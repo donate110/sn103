@@ -9,7 +9,7 @@ import { ADDRESSES, COLLATERAL_ABI, AUDIT_ABI } from "@/lib/contracts";
  * for a genius. All data is on-chain and public.
  */
 
-const RPC_URL = process.env.BASE_RPC_URL || process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
+const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);

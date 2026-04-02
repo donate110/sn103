@@ -9,7 +9,7 @@ import { ADDRESSES, AUDIT_ABI } from "@/lib/contracts";
  * No authentication required (public data from on-chain audits).
  */
 
-const RPC_URL = process.env.BASE_RPC_URL || process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
+const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
 
 export async function GET(
   _request: NextRequest,
