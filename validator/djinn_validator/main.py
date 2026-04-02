@@ -767,6 +767,11 @@ async def async_main() -> None:
     except Exception as e:
         log.warning("mpc_cleanup_error", error=str(e))
     try:
+        from djinn_validator.core.ot_network import shutdown_modexp_pool
+        shutdown_modexp_pool()
+    except Exception as e:
+        log.warning("modexp_pool_shutdown_error", error=str(e))
+    try:
         purchase_orch.close()
     except Exception as e:
         log.warning("purchase_orch_close_error", error=str(e))

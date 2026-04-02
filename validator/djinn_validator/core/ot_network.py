@@ -26,6 +26,7 @@ so the coordinator never sees the peer's Shamir polynomial.
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import os
 import secrets
@@ -46,6 +47,14 @@ log = structlog.get_logger()
 
 # Shared process pool for batch modexp. Lazy-initialized on first use.
 _modexp_pool: ProcessPoolExecutor | None = None
+
+
+def shutdown_modexp_pool() -> None:
+    """Shut down the process pool. Call during validator shutdown to avoid orphan workers."""
+    global _modexp_pool
+    if _modexp_pool is not None:
+        _modexp_pool.shutdown(wait=False)
+        _modexp_pool = None
 
 
 def _modexp_worker(args: tuple[int, int, int]) -> int:
@@ -79,6 +88,7 @@ def _batch_modexp(base: int, exponents: list[int], modulus: int) -> list[int]:
                 pass  # Already set or not available
             workers = min(os.cpu_count() or 4, 8)
             _modexp_pool = ProcessPoolExecutor(max_workers=workers)
+            atexit.register(shutdown_modexp_pool)
         args = [(base, e, modulus) for e in exponents]
         return list(_modexp_pool.map(_modexp_worker, args, chunksize=max(1, n // (os.cpu_count() or 4))))
     except Exception:
@@ -242,6 +252,7 @@ class GilboaSenderSetup:
                         pass
                     workers = min(os.cpu_count() or 4, 8)
                     _modexp_pool = ProcessPoolExecutor(max_workers=workers)
+                    atexit.register(shutdown_modexp_pool)
                 args = [(b, dh_secret, dhp) for b in bases_for_modexp]
                 modexp_results = list(_modexp_pool.map(_modexp_worker, args, chunksize=max(1, n // (os.cpu_count() or 4))))
             except Exception:
