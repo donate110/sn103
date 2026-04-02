@@ -35,6 +35,12 @@ export interface PurchaseRequest {
   buyer_signature?: string;
 }
 
+export interface ShareInfoResponse {
+  signal_id: string;
+  share_x: number;
+  shamir_threshold: number;
+}
+
 export interface PurchaseResponse {
   signal_id: string;
   status: string;
@@ -234,6 +240,15 @@ export class ValidatorClient {
 
   async checkLines(req: CheckRequest): Promise<CheckResponse> {
     return post<CheckResponse>(`${this.baseUrl}/v1/check`, req);
+  }
+
+  async shareInfo(signalId: string): Promise<ShareInfoResponse> {
+    if (!SIGNAL_ID_RE.test(signalId)) {
+      throw new Error("Invalid signal ID format");
+    }
+    return get<ShareInfoResponse>(
+      `${this.baseUrl}/v1/signal/${encodeURIComponent(signalId)}/share_info`,
+    );
   }
 
   async health(): Promise<ValidatorHealthResponse> {

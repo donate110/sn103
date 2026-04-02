@@ -242,6 +242,8 @@ export default function PurchaseSignal() {
         if (cancelled) return;
 
         const shares: ShamirShare[] = [];
+        // Query threshold from validators for correct reconstruction
+        let recoveryThreshold = 3;
         for (const result of shareResults) {
           if (
             result.status === "fulfilled" &&
@@ -255,11 +257,19 @@ export default function PurchaseSignal() {
             }
           }
         }
+        // Also query share_info to get actual threshold
+        try {
+          const infoResult = await Promise.any(
+            validators.map((v) =>
+              v.shareInfo(signalId.toString()).then((r) => r.shamir_threshold),
+            ),
+          );
+          if (infoResult >= 2 && infoResult <= 7) recoveryThreshold = infoResult;
+        } catch { /* use default */ }
 
-        const RECOVERY_MIN_SHARES = 2;
-        if (shares.length < RECOVERY_MIN_SHARES) {
+        if (shares.length < recoveryThreshold) {
           setStepError(
-            `Recovery: collected ${shares.length} of ${RECOVERY_MIN_SHARES} required key shares. ` +
+            `Recovery: collected ${shares.length} of ${recoveryThreshold} required key shares. ` +
             "Validators may have restarted. Your purchase is on-chain. Refresh the page to retry.",
           );
           setStep("idle");
@@ -468,6 +478,23 @@ export default function PurchaseSignal() {
         }
       }
 
+      // Query actual Shamir threshold from validators (don't hardcode).
+      // Race all validators, take the first response.
+      let shamirThreshold = 3; // safe default
+      try {
+        const thresholdResult = await Promise.any(
+          validators.map((v) =>
+            v.shareInfo(signalId.toString()).then((r) => r.shamir_threshold),
+          ),
+        );
+        if (thresholdResult >= 2 && thresholdResult <= 7) {
+          shamirThreshold = thresholdResult;
+        }
+      } catch {
+        console.warn("[purchase] Could not query shamir threshold, using default:", shamirThreshold);
+      }
+      console.log("[purchase] shamir_threshold:", shamirThreshold);
+
       const purchaseReq = {
         buyer_address: buyerAddress,
         sportsbook: "",
@@ -673,9 +700,8 @@ export default function PurchaseSignal() {
 
       console.log(`[purchase] Step 3 (on-chain tx) took ${((performance.now() - t0) / 1000).toFixed(1)}s total`);
       // Step 4: Collect key shares from validators (payment now exists on-chain)
-      // Need at least SHAMIR_MIN (2) shares for reconstruction. Skip if we
-      // already got enough from the MPC pre-check.
-      const NEEDED_SHARES = 2;
+      // Need at least shamirThreshold shares for reconstruction.
+      const NEEDED_SHARES = shamirThreshold;
       const SHARE_COLLECTION_TIMEOUT_MS = 30_000;
       if (collectedShares.length < NEEDED_SHARES) {
         setStep("collecting_shares");
