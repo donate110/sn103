@@ -28,7 +28,7 @@ const activeChain = CHAIN_ID === 8453 ? base : baseSepolia;
 // Anvil account #0 — used only in E2E test builds
 const TEST_ACCOUNT = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" as const;
 
-coinbaseWallet.preference = "smartWalletOnly";
+coinbaseWallet.preference = CHAIN_ID === 8453 ? "smartWalletOnly" : "all";
 
 const prodConfig = getDefaultConfig({
   appName: "Djinn",
