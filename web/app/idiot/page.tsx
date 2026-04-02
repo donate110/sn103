@@ -704,6 +704,7 @@ export default function IdiotDashboard() {
                 <Link
                   key={s.signalId}
                   href={`/idiot/signal/${s.signalId}`}
+                  data-testid="signal-card"
                   className={`card block hover:border-idiot-300 active:bg-slate-50 transition-colors${hasOpenAuditSet ? " ring-1 ring-idiot-200" : ""}`}
                 >
                   <div className="flex items-start justify-between">

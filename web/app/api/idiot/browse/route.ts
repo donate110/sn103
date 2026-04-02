@@ -181,8 +181,10 @@ export async function GET(request: NextRequest) {
       browseCache = { signals: [...signals], lastBlock: currentBlock, updatedAt: Date.now() };
     }
 
-    // Apply filters for this request
-    const filtered = signals.filter((s) => {
+    // Apply filters from the full cache (not just newly scanned signals)
+    const allSignals = browseCache?.signals ?? signals;
+    const filtered = allSignals.filter((s) => {
+      if ((s.expires_at_unix as number) < now) return false;
       if (sport && s.sport !== sport) return false;
       if (genius && (s.genius as string).toLowerCase() !== ethers.getAddress(genius).toLowerCase()) return false;
       return true;

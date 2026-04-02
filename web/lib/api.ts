@@ -6,6 +6,12 @@
 // Request / Response types (mirrors Pydantic models)
 // ---------------------------------------------------------------------------
 
+export interface BeaverTripleData {
+  a: string; // Hex-encoded field element
+  b: string;
+  c: string; // c = a * b mod p
+}
+
 export interface StoreShareRequest {
   signal_id: string;
   genius_address: string;
@@ -14,6 +20,7 @@ export interface StoreShareRequest {
   encrypted_key_share: string; // Hex-encoded
   encrypted_index_share: string; // Hex-encoded Shamir share of real index (for MPC)
   shamir_threshold: number; // Declared Shamir reconstruction threshold
+  precomputed_triples?: BeaverTripleData[]; // Pre-computed Beaver triples for fast MPC
 }
 
 export interface StoreShareResponse {

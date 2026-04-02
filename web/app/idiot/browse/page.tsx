@@ -240,6 +240,7 @@ export default function BrowseSignals() {
               <Link
                 key={s.signalId}
                 href={`/idiot/signal/${s.signalId}`}
+                data-testid="signal-card"
                 className="card block hover:border-idiot-300 hover:shadow-md transition-all"
               >
                 <div className="flex items-start justify-between mb-3">

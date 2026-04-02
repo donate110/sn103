@@ -58,6 +58,35 @@ function modPow(base: bigint, exp: bigint, p: bigint): bigint {
 }
 
 // ---------------------------------------------------------------------------
+// Beaver Triples for MPC
+// ---------------------------------------------------------------------------
+
+export interface BeaverTriple {
+  a: bigint;
+  b: bigint;
+  c: bigint; // c = a * b mod p
+}
+
+/**
+ * Generate random Beaver triples for pre-computed MPC gate computation.
+ * Each triple satisfies c = a * b mod p. These are stored with the signal
+ * so the expensive OT setup phase is skipped during purchase.
+ */
+export function generateBeaverTriples(
+  count: number,
+  prime: bigint = BN254_PRIME,
+): BeaverTriple[] {
+  const triples: BeaverTriple[] = [];
+  for (let i = 0; i < count; i++) {
+    const a = getRandomFieldElement(prime);
+    const b = getRandomFieldElement(prime);
+    const c = (a * b) % prime;
+    triples.push({ a, b, c });
+  }
+  return triples;
+}
+
+// ---------------------------------------------------------------------------
 // Shamir Secret Sharing
 // ---------------------------------------------------------------------------
 

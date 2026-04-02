@@ -18,6 +18,7 @@ import {
   deriveMasterSeedTyped,
   deriveSignalKey,
   isMasterSeedCached,
+  generateBeaverTriples,
 } from "@/lib/crypto";
 import { discoverValidatorClients, checkLinesViaSubnet } from "@/lib/api";
 import { useActiveSignals } from "@/lib/hooks/useSignals";
@@ -568,6 +569,17 @@ export default function CreateSignal() {
       const indexBigInt = BigInt(realIndex + 1);
       const indexShares = splitSecret(indexBigInt, nShares, effectiveThreshold);
 
+      // Pre-compute Beaver triples for MPC gate computation at purchase time.
+      // 10 triples covers 10 decoy lines (one gate per available_index check).
+      // Without these, the MPC falls back to OT triple generation over the
+      // network, which takes 30-60s and frequently times out.
+      const triples = generateBeaverTriples(10);
+      const triplesData = triples.map((t) => ({
+        a: t.a.toString(16).padStart(64, "0"),
+        b: t.b.toString(16).padStart(64, "0"),
+        c: t.c.toString(16).padStart(64, "0"),
+      }));
+
       const storePromises = shares.map((share, i) => {
         const validator = validators[i];
         // Send only the individual Shamir share — NEVER the full AES key
@@ -581,6 +593,7 @@ export default function CreateSignal() {
           encrypted_key_share: shareHex,
           encrypted_index_share: indexShareHex,
           shamir_threshold: effectiveThreshold,
+          precomputed_triples: triplesData,
         });
       });
 

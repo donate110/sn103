@@ -6,11 +6,13 @@ const ALLOWED_PATHS = new Set(["health", "v1/signal", "v1/check", "v1/activity",
 const PURCHASE_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/purchase$/;
 const REGISTER_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/register$/;
 const STATUS_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/status$/;
+const SHARE_INFO_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/share_info$/;
+const MPC_DIAG_RE = /^v1\/signal\/[a-zA-Z0-9_-]+\/mpc_diagnostic$/;
 const ATTEST_CREDITS_RE = /^v1\/attest\/credits\/[a-fA-F0-9x]+$/;
 const MINER_SCORES_RE = /^v1\/miner\/\d+\/scores$/;
 
 function isAllowed(path: string): boolean {
-  return ALLOWED_PATHS.has(path) || PURCHASE_RE.test(path) || REGISTER_RE.test(path) || STATUS_RE.test(path) || ATTEST_CREDITS_RE.test(path) || MINER_SCORES_RE.test(path);
+  return ALLOWED_PATHS.has(path) || PURCHASE_RE.test(path) || REGISTER_RE.test(path) || STATUS_RE.test(path) || SHARE_INFO_RE.test(path) || MPC_DIAG_RE.test(path) || ATTEST_CREDITS_RE.test(path) || MINER_SCORES_RE.test(path);
 }
 
 async function resolveValidatorUrl(uid: number): Promise<string | null> {
