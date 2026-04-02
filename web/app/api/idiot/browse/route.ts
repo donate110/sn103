@@ -16,7 +16,7 @@ import { ADDRESSES, SIGNAL_COMMITMENT_ABI } from "@/lib/contracts";
  *   offset     - Pagination offset
  */
 
-const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
+const RPC_URL = process.env.BASE_RPC_URL || process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
 const MAX_LIMIT = 100;
 const DEPLOY_BLOCK = Number(process.env.NEXT_PUBLIC_DEPLOY_BLOCK ?? "0");
 const CHUNK_SIZE = 9_999; // Max blocks per queryFilter call (RPC provider limit)

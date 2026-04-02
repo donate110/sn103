@@ -21,7 +21,7 @@ import {
  */
 
 const RPC_URL =
-  process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
+  process.env.BASE_RPC_URL || process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
 const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "84532");
 
 export async function POST(request: NextRequest) {

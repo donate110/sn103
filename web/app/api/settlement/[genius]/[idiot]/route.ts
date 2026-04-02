@@ -9,7 +9,7 @@ import { ADDRESSES, ACCOUNT_ABI } from "@/lib/contracts";
  * Returns current cycle, signals in cycle, and readiness for settlement.
  */
 
-const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
+const RPC_URL = process.env.BASE_RPC_URL || process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
 
 export async function GET(
   _request: NextRequest,

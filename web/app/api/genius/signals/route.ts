@@ -9,7 +9,7 @@ import { ADDRESSES, SIGNAL_COMMITMENT_ABI } from "@/lib/contracts";
  * Returns field names compatible with the client hooks (max_notional, expires_at_unix, etc).
  */
 
-const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
+const RPC_URL = process.env.BASE_RPC_URL || process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
 const MAX_LIMIT = 100;
 const SCAN_BLOCKS = 1_500_000; // ~8.5 days at 2 blocks/sec on Base Sepolia
 const CHUNK_SIZE = 9_999;
