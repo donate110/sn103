@@ -37,7 +37,9 @@ async function proxy(
   request: NextRequest,
   { params }: { params: { uid: string; path: string[] } },
 ) {
-  if (isRateLimited("validator-uid-proxy", getIp(request))) {
+  // Purchase flow fans out to all validators (check + share_info + purchase
+  // = 20+ requests). Use a generous limit to avoid self-blocking.
+  if (isRateLimited("validator-uid-proxy", getIp(request), 200)) {
     return rateLimitResponse();
   }
 
