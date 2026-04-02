@@ -577,11 +577,12 @@ def create_app(
             # bootstrap may have threshold=2 while the orchestrator default is 7.
             signal_threshold = record.shamir_threshold
             try:
-                # Use pre-computed triples if available (skip OT setup)
+                # Use pre-computed triples if available (skip OT setup).
+                # These are raw (a, b, c) values; the orchestrator will
+                # Shamir-split them at the actual participant x-coordinates.
                 stored_triples = record.precomputed_triples if hasattr(record, 'precomputed_triples') else []
-                from djinn_validator.core.mpc import BeaverTriple
                 pre_triples = [
-                    BeaverTriple(a=t.a, b=t.b, c=t.c)
+                    (t.a, t.b, t.c)
                     for t in stored_triples
                 ] if stored_triples else None
 

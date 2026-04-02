@@ -499,11 +499,23 @@ class MPCOrchestrator:
         r_share_map = {s.x: s.y for s in r_shares}
 
         # Use pre-computed triples if available (generated at signal creation time).
-        # This skips the expensive OT setup phase entirely.
+        # These arrive as raw (a, b, c) tuples and need to be Shamir-split
+        # at the actual participant x-coordinates.
         pre_generated_triples: list[BeaverTriple] | None = None
         if precomputed_triples and len(precomputed_triples) >= n_gates:
             log.info("using_precomputed_triples", signal_id=signal_id[:20], count=len(precomputed_triples))
-            pre_generated_triples = precomputed_triples[:n_gates]
+            split_triples = []
+            for raw in precomputed_triples[:n_gates]:
+                if isinstance(raw, BeaverTriple):
+                    split_triples.append(raw)
+                else:
+                    a_val, b_val, c_val = raw
+                    split_triples.append(BeaverTriple(
+                        a_shares=tuple(_split_secret_at_points(a_val, participant_xs, t, p)),
+                        b_shares=tuple(_split_secret_at_points(b_val, participant_xs, t, p)),
+                        c_shares=tuple(_split_secret_at_points(c_val, participant_xs, t, p)),
+                    ))
+            pre_generated_triples = split_triples
 
         # OT-based Beaver triple generation is the fallback for 2-party MPC.
         use_network_ot = os.getenv("USE_NETWORK_OT", "true").lower() not in ("0", "false", "no")

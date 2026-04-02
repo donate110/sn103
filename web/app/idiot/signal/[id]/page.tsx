@@ -1134,7 +1134,7 @@ export default function PurchaseSignal() {
 
             {linesAvailable === true && isActive && (
               <div className="rounded-lg bg-green-50 border border-green-200 p-3 mb-4">
-                <p className="text-xs text-green-700">Lines confirmed available at sportsbooks. Ready to purchase.</p>
+                <p className="text-xs text-green-700">Sportsbook lines active. You can attempt a purchase.</p>
               </div>
             )}
 
