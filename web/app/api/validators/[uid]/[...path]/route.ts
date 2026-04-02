@@ -64,7 +64,8 @@ async function proxy(
     );
   }
 
-  const target = `${baseUrl}/${path}`;
+  const qs = request.nextUrl.search; // includes leading "?" if present
+  const target = `${baseUrl}/${path}${qs}`;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
