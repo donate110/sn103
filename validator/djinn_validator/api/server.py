@@ -504,8 +504,11 @@ def create_app(
         """
         _validate_signal_id_path(signal_id)
 
-        # Verify buyer owns the claimed address via EIP-191 signature
-        if req.buyer_signature:
+        # Verify buyer owns the claimed address via EIP-191 signature.
+        # Only verify standard EOA signatures (65 bytes / 132 hex chars).
+        # Smart wallet signatures (EIP-1271) are longer and use contract-based
+        # verification which we can't do here. Payment is verified on-chain.
+        if req.buyer_signature and len(req.buyer_signature) <= 132:
             try:
                 from eth_account.messages import encode_defunct
                 from eth_account import Account as EthAccount

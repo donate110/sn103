@@ -17,8 +17,25 @@ export async function GET() {
     const withPermit = reachable.filter((n) => n.isValidator);
     const pool = withPermit.length > 0 ? withPermit : reachable;
 
-    const validators = pool
-      .sort((a, b) => (b.totalStake > a.totalStake ? 1 : b.totalStake < a.totalStake ? -1 : 0))
+    // Health-check validators in parallel (3s timeout) to filter out dead nodes.
+    // This prevents the client from wasting time on 502s during purchase/creation.
+    const sorted = pool.sort((a, b) => (b.totalStake > a.totalStake ? 1 : b.totalStake < a.totalStake ? -1 : 0));
+    const healthResults = await Promise.allSettled(
+      sorted.map(async (n) => {
+        const res = await fetch(`http://${n.ip}:${n.port}/health`, {
+          signal: AbortSignal.timeout(3000),
+        });
+        if (!res.ok) throw new Error(`${res.status}`);
+        return n;
+      }),
+    );
+    const healthy = healthResults
+      .filter((r): r is PromiseFulfilledResult<typeof sorted[0]> => r.status === "fulfilled")
+      .map((r) => r.value);
+    // Fall back to all if health checks fail (e.g., Vercel can't reach validators directly)
+    const finalPool = healthy.length > 0 ? healthy : sorted;
+
+    const validators = finalPool
       .map((n) => ({ uid: n.uid, ip: n.ip, port: n.port, hotkey: n.hotkey, coldkey: n.coldkey, ss58Hotkey: hexToSs58(n.hotkey), stake: n.totalStake.toString(), alphaStake: n.alphaStake.toString(), taoStake: n.taoStake.toString(), incentive: n.incentive, emission: n.emission.toString(), consensus: n.consensus, trust: n.trust, validatorTrust: n.validatorTrust, dividends: n.dividends, rank: n.rank }));
 
     return NextResponse.json({ validators }, {
