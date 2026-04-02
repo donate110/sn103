@@ -480,7 +480,7 @@ export default function PurchaseSignal() {
 
       // Query actual Shamir threshold from validators (don't hardcode).
       // Race all validators, take the first response.
-      let shamirThreshold = 3; // safe default
+      let shamirThreshold = 2; // bootstrap default (SHAMIR_MIN=2)
       try {
         const thresholdResult = await Promise.any(
           validators.map((v) =>
