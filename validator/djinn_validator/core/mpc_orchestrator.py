@@ -184,7 +184,10 @@ class MPCOrchestrator:
                 auth_headers = create_signed_headers(endpoint, body, self._neuron.wallet)
                 headers.update(auth_headers)
             except Exception as e:
-                log.debug("peer_request_signing_failed", error=str(e))
+                log.warning("peer_request_signing_failed", url=url[:80], error=str(e))
+                raise httpx.ConnectError(f"Cannot sign peer request: {e}")
+        elif self._neuron is None:
+            log.warning("peer_request_no_neuron", url=url[:80])
 
         kwargs["headers"] = headers
 
