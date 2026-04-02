@@ -580,11 +580,15 @@ def create_app(
                 # Use pre-computed triples if available (skip OT setup).
                 # These are raw (a, b, c) values; the orchestrator will
                 # Shamir-split them at the actual participant x-coordinates.
-                stored_triples = record.precomputed_triples if hasattr(record, 'precomputed_triples') else []
-                pre_triples = [
-                    (t.a, t.b, t.c)
-                    for t in stored_triples
-                ] if stored_triples else None
+                pre_triples = None
+                try:
+                    stored_triples = record.precomputed_triples if hasattr(record, 'precomputed_triples') else []
+                    pre_triples = [
+                        (t.a, t.b, t.c)
+                        for t in stored_triples
+                    ] if stored_triples else None
+                except Exception as triple_err:
+                    log.warning("precomputed_triples_load_failed", error=str(triple_err))
 
                 mpc_result = await asyncio.wait_for(
                     _orchestrator.check_availability(

@@ -306,12 +306,21 @@ class ShareStore:
         """Retrieve all share records for a signal (may be multiple if shares
         are co-located in the same database, e.g. testnet single-machine setup)."""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT signal_id, genius_address, share_x, share_y, encrypted_key_share, "
-                "encrypted_index_share, stored_at, shamir_threshold "
-                "FROM shares WHERE signal_id = ? ORDER BY share_x",
-                (signal_id,),
-            ).fetchall()
+            # Include precomputed_triples column; fall back without if not migrated
+            try:
+                rows = self._conn.execute(
+                    "SELECT signal_id, genius_address, share_x, share_y, encrypted_key_share, "
+                    "encrypted_index_share, stored_at, shamir_threshold, precomputed_triples "
+                    "FROM shares WHERE signal_id = ? ORDER BY share_x",
+                    (signal_id,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = self._conn.execute(
+                    "SELECT signal_id, genius_address, share_x, share_y, encrypted_key_share, "
+                    "encrypted_index_share, stored_at, shamir_threshold "
+                    "FROM shares WHERE signal_id = ? ORDER BY share_x",
+                    (signal_id,),
+                ).fetchall()
             if not rows:
                 return []
 
@@ -323,8 +332,18 @@ class ShareStore:
                 ).fetchall()
             }
 
-        return [
-            SignalShareRecord(
+        import json as _json
+        records = []
+        for row in rows:
+            triples: list[PrecomputedTriple] = []
+            if len(row) > 8 and row[8]:
+                try:
+                    raw = _json.loads(row[8])
+                    triples = [PrecomputedTriple(a=int(t["a"], 16), b=int(t["b"], 16), c=int(t["c"], 16)) for t in raw]
+                except (ValueError, KeyError, TypeError):
+                    pass
+
+            records.append(SignalShareRecord(
                 signal_id=row[0],
                 genius_address=row[1],
                 share=Share(x=row[2], y=int(row[3])),
@@ -333,9 +352,9 @@ class ShareStore:
                 shamir_threshold=row[7] if len(row) > 7 else 7,
                 stored_at=row[6],
                 released_to=released,
-            )
-            for row in rows
-        ]
+                precomputed_triples=triples,
+            ))
+        return records
 
     def has(self, signal_id: str) -> bool:
         """Check if we hold a share for this signal."""
