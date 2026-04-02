@@ -2416,8 +2416,8 @@ def create_app(
                 "state": breaker._state.name if hasattr(breaker._state, "name") else str(breaker._state),
             }
 
-        # Version cache
-        version_cache = dict(list(_orchestrator._peer_versions.items())[:20])
+        # Version cache (may not exist on all versions)
+        version_cache = dict(list(getattr(_orchestrator, "_peer_versions", {}).items())[:20])
 
         # Try share_x lookup on known good peers (unsigned)
         share_x_results = {}
