@@ -74,8 +74,8 @@ class PurchaseRequest(BaseModel):
     available_indices: list[int] = Field(min_length=1, max_length=10)
     buyer_signature: str = Field(
         default="",
-        max_length=256,
-        description="EIP-191 signature of 'djinn:purchase:{signal_id}' proving buyer_address ownership",
+        max_length=2048,
+        description="EIP-191 or EIP-1271 (smart wallet) signature proving buyer_address ownership",
     )
 
     @field_validator("buyer_address")
