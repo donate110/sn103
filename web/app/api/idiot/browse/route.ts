@@ -16,12 +16,7 @@ import { ADDRESSES, SIGNAL_COMMITMENT_ABI } from "@/lib/contracts";
  *   offset     - Pagination offset
  */
 
-// Event scanning (getLogs) needs large block ranges that Alchemy free tier
-// doesn't support (10-block limit). Use the public RPC for scanning and
-// Alchemy for point queries (isActive, getBalance) which are rate-limited
-// on the public RPC from Vercel's shared IPs.
-const SCAN_RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
-const QUERY_RPC_URL = process.env.BASE_RPC_URL || SCAN_RPC_URL;
+const RPC_URL = process.env.BASE_RPC_URL || process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
 const MAX_LIMIT = 100;
 const DEPLOY_BLOCK = Number(process.env.NEXT_PUBLIC_DEPLOY_BLOCK ?? "0");
 const CHUNK_SIZE = 9_999; // Max blocks per queryFilter call (RPC provider limit)
@@ -52,25 +47,12 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const scanProvider = new ethers.JsonRpcProvider(SCAN_RPC_URL);
-    const queryProvider = QUERY_RPC_URL !== SCAN_RPC_URL
-      ? new ethers.JsonRpcProvider(QUERY_RPC_URL)
-      : scanProvider;
-    // Use public RPC for event scanning (large block ranges)
-    const scanContract = new ethers.Contract(
+    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const contract = new ethers.Contract(
       ADDRESSES.signalCommitment,
       SIGNAL_COMMITMENT_ABI,
-      scanProvider,
+      provider,
     );
-    // Use Alchemy for point queries (isActive) to avoid public RPC rate limits
-    const queryContract = new ethers.Contract(
-      ADDRESSES.signalCommitment,
-      SIGNAL_COMMITMENT_ABI,
-      queryProvider,
-    );
-    // Alias for backward compatibility in cached-results path
-    const contract = scanContract;
-    const provider = scanProvider;
 
     // Use cached results if fresh enough (unless bust param forces bypass)
     const bust = searchParams.has("bust");
@@ -151,7 +133,7 @@ export async function GET(request: NextRequest) {
 
       // Check if still active on-chain (single RPC call, skip getSignal)
       try {
-        const isActive = await queryContract.isActive(signalId);
+        const isActive = await contract.isActive(signalId);
         if (!isActive) return null;
       } catch {
         return null;

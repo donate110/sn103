@@ -20,7 +20,7 @@ import { ADDRESSES, ESCROW_ABI } from "@/lib/contracts";
  */
 
 const RPC_URL =
-  process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
+  process.env.BASE_RPC_URL || process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
 const DEPLOY_BLOCK = Number(process.env.NEXT_PUBLIC_DEPLOY_BLOCK ?? "0");
 const CHUNK_SIZE = 9_999;
 const MAX_LIMIT = 100;
