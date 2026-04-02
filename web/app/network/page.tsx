@@ -23,6 +23,8 @@ interface ValidatorData {
   ip: string;
   port: number;
   stake: string;
+  ss58Hotkey?: string;
+  coldkey?: string;
   validatorTrust: number;
   health: {
     status: string;
@@ -89,7 +91,17 @@ function SortArrow({ active, dir }: { active: boolean; dir: SortDir }) {
 
 // ---------- Tables ----------
 
-function ValidatorTable({ validators }: { validators: ValidatorData[] }) {
+function lookupName(names: Record<string, string>, ss58Hotkey?: string, coldkey?: string): string | null {
+  if (!ss58Hotkey && !coldkey) return null;
+  // The delegate map uses hex keys; ss58Hotkey needs conversion.
+  // But the map may also contain ss58 keys directly. Check both.
+  for (const key of [ss58Hotkey, coldkey]) {
+    if (key && names[key]) return names[key];
+  }
+  return null;
+}
+
+function ValidatorTable({ validators, names }: { validators: ValidatorData[]; names: Record<string, string> }) {
   const router = useRouter();
   const { ref: tableRef, copy, copied } = useCopyTable();
   const getVal = useCallback((v: ValidatorData, key: string): number | string => {
@@ -119,6 +131,7 @@ function ValidatorTable({ validators }: { validators: ValidatorData[] }) {
         <thead>
           <tr className="text-left text-xs text-slate-400 uppercase tracking-wide border-b">
             <Th k="uid">UID</Th>
+            <th className="px-3 py-2">Name</th>
             <Th k="status">Status</Th>
             <Th k="version" align="text-right">Version</Th>
             <Th k="stake" align="text-right">Stake</Th>
@@ -136,6 +149,7 @@ function ValidatorTable({ validators }: { validators: ValidatorData[] }) {
                   {v.uid}
                 </Link>
               </td>
+              <td className="px-3 py-2 text-slate-700 text-xs truncate max-w-[140px]">{lookupName(names, v.ss58Hotkey, v.coldkey) || <span className="text-slate-300">-</span>}</td>
               <td className="px-3 py-2"><StatusBadge status={v.health?.status || "unreachable"} /></td>
               <td className="px-3 py-2 text-right font-mono text-slate-600">{v.health?.version || "-"}</td>
               <td className="px-3 py-2 text-right">{formatStake(v.stake)}</td>
@@ -273,11 +287,16 @@ export default function NetworkPage() {
   const [metric, setMetric] = useState<"incentive" | "emission">("incentive");
   const [showAll, setShowAll] = useState(false);
 
+  const [delegateNames, setDelegateNames] = useState<Record<string, string>>({});
+
   useEffect(() => {
-    fetch("/api/network/status")
-      .then((r) => r.json())
-      .then((json) => {
+    Promise.all([
+      fetch("/api/network/status").then((r) => r.json()),
+      fetch("/api/delegates").then((r) => r.ok ? r.json() : {}).catch(() => ({})),
+    ])
+      .then(([json, names]) => {
         setData(json);
+        setDelegateNames(names);
         if (json.summary?.timestamp) setLastUpdate(new Date(json.summary.timestamp).toLocaleTimeString());
       })
       .finally(() => setLoading(false));
@@ -378,7 +397,7 @@ export default function NetworkPage() {
           Validators <span className="text-sm font-normal text-slate-400">{s.validatorsHealthy}/{s.totalValidators} healthy</span>
         </h2>
         <div className="card p-0 overflow-hidden">
-          <ValidatorTable validators={data.validators} />
+          <ValidatorTable validators={data.validators} names={delegateNames} />
         </div>
       </section>
 

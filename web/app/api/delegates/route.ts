@@ -58,6 +58,7 @@ export async function GET() {
         try {
           const hex = ss58ToHex(ss58);
           map[hex] = entry.name;
+          map[ss58] = entry.name; // Also store ss58 for direct lookup
         } catch { /* skip invalid addresses */ }
       }
     }
@@ -72,6 +73,7 @@ export async function GET() {
           try {
             const hex = ss58ToHex(key);
             if (!map[hex]) map[hex] = v.name;
+            if (!map[key]) map[key] = v.name; // Also store ss58
           } catch { /* skip invalid addresses */ }
         }
       }
