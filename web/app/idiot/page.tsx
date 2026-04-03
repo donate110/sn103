@@ -813,8 +813,8 @@ export default function IdiotDashboard() {
                 </thead>
                 <tbody>
                   {[...purchases].reverse().map((p) => (
-                    <tr key={p.purchaseId} className="border-b border-slate-100">
-                      <td className="py-3">{truncateAddress(p.signalId)}</td>
+                    <tr key={p.purchaseId} className="border-b border-slate-100 cursor-pointer hover:bg-slate-50" onClick={() => window.location.href = `/idiot/signal/${p.signalId}`}>
+                      <td className="py-3 text-idiot-600 underline">{truncateAddress(p.signalId)}</td>
                       <td className="py-3">${formatUsdc(BigInt(p.notional))}</td>
                       <td className="py-3">${formatUsdc(BigInt(p.feePaid))}</td>
                       <td className="py-3">
@@ -838,9 +838,9 @@ export default function IdiotDashboard() {
             {/* Mobile cards */}
             <div className="space-y-3 md:hidden">
               {[...purchases].reverse().map((p) => (
-                <div key={p.purchaseId} className="card">
+                <div key={p.purchaseId} className="card cursor-pointer hover:border-idiot-300 active:bg-slate-50 transition-colors" onClick={() => window.location.href = `/idiot/signal/${p.signalId}`}>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-slate-900">
+                    <span className="text-sm font-medium text-idiot-600 underline">
                       Signal {truncateAddress(p.signalId)}
                     </span>
                     <span className="rounded-full px-2 py-0.5 text-xs bg-slate-100 text-slate-600">
