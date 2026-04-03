@@ -149,6 +149,7 @@ class HealthResponse(BaseModel):
     uptime_seconds: float = 0.0
     capabilities: MinerCapabilities | None = None
     proactive_proof: ProactiveProof | None = None
+    tunnel_url: str | None = None
 
 
 class ReadinessResponse(BaseModel):

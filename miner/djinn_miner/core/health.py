@@ -45,6 +45,7 @@ class HealthTracker:
         self._notary_max_concurrent = 0
         self._notary_active_sessions = 0
         self._proactive_attester: object | None = None
+        self._tunnel_url: str | None = None
 
     def record_ping(self) -> None:
         """Record a health check ping from a validator."""
@@ -178,7 +179,11 @@ class HealthTracker:
             uptime_seconds=round(uptime, 1),
             capabilities=self._collect_capabilities(),
             proactive_proof=proactive,
+            tunnel_url=self._tunnel_url,
         )
+
+    def set_tunnel_url(self, url: str | None) -> None:
+        self._tunnel_url = url
 
     @property
     def ping_count(self) -> int:

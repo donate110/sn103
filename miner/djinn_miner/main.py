@@ -340,6 +340,38 @@ async def async_main() -> None:
     if notary_sidecar.enabled:
         running_tasks.append(asyncio.create_task(proactive.run_loop()))
 
+    # DDoS shield: Cloudflare Tunnel with on-chain commitment
+    try:
+        from djinn_tunnel_shield import MinerShield
+
+        async def _shield_loop() -> None:
+            shield = MinerShield(
+                wallet=neuron.wallet if neuron else None,
+                subtensor=neuron.subtensor if neuron else None,
+                netuid=config.bt_netuid if hasattr(config, "bt_netuid") else 103,
+                port=config.api_port,
+            )
+            # Feed tunnel URL into health response
+            _orig_ping = health_tracker.record_ping
+
+            def _ping_with_shield() -> None:
+                _orig_ping()
+                shield.record_ping()
+
+            health_tracker.record_ping = _ping_with_shield  # type: ignore[method-assign]
+
+            async def _url_updater() -> None:
+                while True:
+                    health_tracker.set_tunnel_url(shield.tunnel_url)
+                    await asyncio.sleep(5)
+
+            await asyncio.gather(shield.run(), _url_updater())
+
+        running_tasks.append(asyncio.create_task(_shield_loop()))
+        log.info("ddos_shield_enabled")
+    except ImportError:
+        log.info("ddos_shield_not_installed", msg="pip install djinn-tunnel-shield to enable DDoS protection")
+
     shutdown_event = asyncio.Event()
 
     def _shutdown(sig: signal.Signals) -> None:

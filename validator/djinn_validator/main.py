@@ -72,6 +72,16 @@ async def epoch_loop(
         settlement_enabled=chain_client is not None and chain_client.can_write,
     )
     consecutive_errors = 0
+
+    # DDoS shield: resolve miner tunnel URLs for fallback routing
+    _shield_resolver = None
+    try:
+        from djinn_tunnel_shield import ShieldResolver
+        _shield_resolver = ShieldResolver(wallet=neuron.wallet if neuron else None)
+        log.info("shield_resolver_enabled")
+    except ImportError:
+        pass  # Shield not installed, direct IP only
+
     # Throttle miner challenges: once every CHALLENGE_INTERVAL_EPOCHS epochs (~10 min)
     CHALLENGE_INTERVAL_EPOCHS = 50  # 50 * 12s = 10 minutes
     ATTESTATION_CHALLENGE_INTERVAL = 100  # 100 * 12s = ~20 min
@@ -154,48 +164,60 @@ async def epoch_loop(
                     log.debug("health_check_skip_non_public_ip", uid=uid, ip=ip)
                     metrics.record_health_check(responded=False)
                     return
-                url = f"http://{ip}:{port}/health"
-                try:
-                    resp = await client.get(url)
-                    responded = resp.status_code == 200
-                    if responded:
-                        try:
-                            data = resp.json()
-                            caps = data.get("capabilities")
-                            if caps and isinstance(caps, dict):
-                                metrics.update_capabilities(
-                                    memory_total_mb=caps.get("memory_total_mb", 0),
-                                    memory_available_mb=caps.get("memory_available_mb", 0),
-                                    cpu_cores=caps.get("cpu_cores", 0),
-                                    cpu_load_1m=caps.get("cpu_load_1m", 0.0),
-                                    tlsn_max_concurrent=caps.get("tlsn_max_concurrent", 0),
-                                    tlsn_active_sessions=caps.get("tlsn_active_sessions", 0),
-                                    notary_max_concurrent=caps.get("notary_max_concurrent", 0),
-                                    notary_active_sessions=caps.get("notary_active_sessions", 0),
-                                    disk_free_gb=caps.get("disk_free_gb", 0.0),
+                urls = [f"http://{ip}:{port}/health"]
+                if _shield_resolver:
+                    urls = _shield_resolver.urls(uid, ip, port, "/health")
+                responded = False
+                for url in urls:
+                    try:
+                        resp = await client.get(url)
+                        if resp.status_code == 200:
+                            responded = True
+                            if _shield_resolver:
+                                _shield_resolver.record_success(uid)
+                            break
+                    except httpx.HTTPError:
+                        if _shield_resolver:
+                            _shield_resolver.record_failure(uid)
+                        continue
+                if responded:
+                    try:
+                        data = resp.json()
+                        caps = data.get("capabilities")
+                        if caps and isinstance(caps, dict):
+                            metrics.update_capabilities(
+                                memory_total_mb=caps.get("memory_total_mb", 0),
+                                memory_available_mb=caps.get("memory_available_mb", 0),
+                                cpu_cores=caps.get("cpu_cores", 0),
+                                cpu_load_1m=caps.get("cpu_load_1m", 0.0),
+                                tlsn_max_concurrent=caps.get("tlsn_max_concurrent", 0),
+                                tlsn_active_sessions=caps.get("tlsn_active_sessions", 0),
+                                notary_max_concurrent=caps.get("notary_max_concurrent", 0),
+                                notary_active_sessions=caps.get("notary_active_sessions", 0),
+                                disk_free_gb=caps.get("disk_free_gb", 0.0),
+                            )
+                        # Cache tunnel URL for DDoS fallback
+                        if _shield_resolver and data.get("tunnel_url"):
+                            _shield_resolver.cache_from_health(uid, data)
+                        # Check proactive proof if present.
+                        # Do NOT set proactive_proof_verified here.
+                        # A malicious miner could fake this health field.
+                        # The flag is only set after background TLSNotary
+                        # verification succeeds in _verify_proactive_proof.
+                        pp = data.get("proactive_proof")
+                        if pp:
+                            bh = pp.get("binary_hash", "")
+                            if bh:
+                                metrics.tlsn_binary_hash = bh
+                            if (
+                                pp.get("proof_age_s", 99999) < 86400
+                                and not metrics.proactive_proof_verified
+                            ):
+                                asyncio.create_task(
+                                    _verify_proactive_proof(ip, port, uid, metrics)
                                 )
-                            # Check proactive proof if present.
-                            # Do NOT set proactive_proof_verified here.
-                            # A malicious miner could fake this health field.
-                            # The flag is only set after background TLSNotary
-                            # verification succeeds in _verify_proactive_proof.
-                            pp = data.get("proactive_proof")
-                            if pp:
-                                # Track binary hash for version-compatible notary pairing
-                                bh = pp.get("binary_hash", "")
-                                if bh:
-                                    metrics.tlsn_binary_hash = bh
-                                if (
-                                    pp.get("proof_age_s", 99999) < 86400
-                                    and not metrics.proactive_proof_verified
-                                ):
-                                    asyncio.create_task(
-                                        _verify_proactive_proof(ip, port, uid, metrics)
-                                    )
-                        except Exception:
-                            pass  # Old miners may not return JSON or capabilities
-                except httpx.HTTPError:
-                    responded = False
+                    except Exception:
+                        pass  # Old miners may not return JSON or capabilities
                 metrics.record_health_check(responded=responded)
 
             async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
