@@ -1984,30 +1984,12 @@ def create_app(
                 "memory_total_mb": m.memory_total_mb,
                 "cpu_cores": m.cpu_cores,
             }
-            # DDoS shield status (if resolver is active)
-            if _shield_resolver:
-                entry = _shield_resolver._miners.get(uid)
-                if entry and entry.tunnel_url:
-                    miner_entry["tunnel_url"] = entry.tunnel_url
-                    miner_entry["tunnel_active"] = entry.use_tunnel
-                    miner_entry["direct_failures"] = entry.consecutive_direct_failures
             miners_out.append(miner_entry)
-
-        # Shield summary
-        shield_stats = None
-        if _shield_resolver:
-            shielded = sum(1 for e in _shield_resolver._miners.values() if e.tunnel_url)
-            tunnel_active = sum(1 for e in _shield_resolver._miners.values() if e.use_tunnel)
-            shield_stats = {
-                "shielded_miners": shielded,
-                "tunnel_active_miners": tunnel_active,
-            }
 
         return {
             "miners": miners_out,
             "validator_uid": getattr(neuron, "uid", None) if neuron else None,
             "miner_count": len(miners_out),
-            "shield": shield_stats,
         }
 
     # ------------------------------------------------------------------
