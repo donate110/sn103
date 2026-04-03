@@ -86,7 +86,19 @@ def _pull(repo: Path, branch: str) -> bool:
 
 
 def _install_deps(package_dir: Path) -> bool:
-    """Run ``uv sync`` in the package directory. Returns True on success."""
+    """Install dependencies. Tries uv sync first, falls back to pip."""
+    # Install djinn-tunnel-shield from local path if available
+    shield_dir = package_dir.parent / "shield"
+    if shield_dir.is_dir():
+        try:
+            r = _run([sys.executable, "-m", "pip", "install", "-q", str(shield_dir)], package_dir)
+            if r.returncode == 0:
+                log.info("watchtower_shield_installed")
+            else:
+                log.warning("watchtower_shield_install_failed", stderr=r.stderr[:300])
+        except Exception as e:
+            log.warning("watchtower_shield_install_error", error=str(e))
+
     try:
         r = _run(["uv", "sync"], package_dir)
         if r.returncode != 0:

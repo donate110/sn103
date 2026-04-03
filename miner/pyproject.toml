@@ -13,11 +13,7 @@ dependencies = [
     "structlog>=24.1,<26",
     "prometheus-client>=0.21.0,<1",
     "websockets>=13.0,<15",
-    "djinn-tunnel-shield",
 ]
-
-[tool.uv.sources]
-djinn-tunnel-shield = { path = "../shield" }
 
 [dependency-groups]
 dev = [
