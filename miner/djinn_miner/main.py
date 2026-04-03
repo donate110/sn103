@@ -364,6 +364,8 @@ async def async_main() -> None:
                 while True:
                     health_tracker.set_tunnel_url(shield.tunnel_url)
                     health_tracker.set_notary_tunnel_url(shield.notary_tunnel_url)
+                    # Tell shield if we're registered (avoid false DDoS detection)
+                    shield.set_registered(health_tracker.bt_connected)
                     await asyncio.sleep(5)
 
             await asyncio.gather(shield.run(), _url_updater())

@@ -97,11 +97,23 @@ class MinerShield:
             log.info("shield_standby", msg="No CLOUDFLARE_TOKEN set. Emergency tunnel will activate on DDoS detection.")
             await self._emergency_loop()
 
+    def set_registered(self, registered: bool) -> None:
+        """Tell the shield whether the miner is registered on the metagraph.
+
+        When not registered, no validators will ping us, so silence is
+        expected and should not trigger DDoS detection.
+        """
+        self._registered = registered
+
     async def _emergency_loop(self) -> None:
         """Monitor for DDoS and activate/deactivate emergency tunnel."""
         tunnel_active = False
 
         while True:
+            # Don't detect DDoS if not registered (no pings expected)
+            if not getattr(self, "_registered", True):
+                self._detector.record_ping()  # Reset silence timer
+
             ddos = self._detector.is_ddos_detected
 
             if ddos and not tunnel_active:
