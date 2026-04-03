@@ -1958,7 +1958,7 @@ def create_app(
         weights, breakdowns = scorer.compute_weights_detailed(is_active_epoch=True)
         miners_out = []
         for uid, m in sorted(scorer._miners.items()):
-            miners_out.append({
+            miner_entry = {
                 "uid": uid,
                 "hotkey": m.hotkey,
                 "status": "ok" if m.health_checks_responded > 0 and m.uptime_score() > 0.5 else "offline",
