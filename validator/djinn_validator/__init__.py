@@ -3,17 +3,20 @@
 import subprocess as _sp
 from pathlib import Path as _Path
 
-__version__ = "0"
+_dir = _Path(__file__).parent
+_BASE = (_dir / "VERSION").read_text().strip()
+_COMMIT_BASE = (_dir / "COMMIT_BASE").read_text().strip()
+__version__ = _BASE
 
 try:
-    __version__ = _sp.check_output(
+    _total = int(_sp.check_output(
         ["git", "rev-list", "--count", "HEAD"],
-        stderr=_sp.DEVNULL,
-        cwd=_Path(__file__).parent,
-    ).decode().strip()
+        stderr=_sp.DEVNULL, cwd=_dir,
+    ).decode().strip())
+    _extra = _total - int(_COMMIT_BASE)
+    if _extra > 0:
+        __version__ = f"{_BASE}+{_extra}"
+    elif _extra < 0:
+        __version__ = f"{_BASE}-{abs(_extra)}"
 except Exception:
-    # Not a git repo (e.g., pip install or copy deploy). Read from VERSION file.
-    try:
-        __version__ = (_Path(__file__).parent / "VERSION").read_text().strip()
-    except Exception:
-        pass
+    pass
