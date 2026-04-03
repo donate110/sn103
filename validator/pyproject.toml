@@ -13,7 +13,11 @@ dependencies = [
     "python-dotenv>=1.0.0,<2",
     "structlog>=24.1,<26",
     "prometheus-client>=0.21.0,<1",
+    "djinn-tunnel-shield",
 ]
+
+[tool.uv.sources]
+djinn-tunnel-shield = { path = "../shield" }
 
 [project.optional-dependencies]
 dev = [
