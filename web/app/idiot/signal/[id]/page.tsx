@@ -712,46 +712,54 @@ export default function PurchaseSignal() {
       console.log(`[purchase] Step 3 (on-chain tx) took ${((performance.now() - t0) / 1000).toFixed(1)}s total`);
       // Step 4: Collect key shares from validators (payment now exists on-chain)
       // Need at least shamirThreshold shares for reconstruction.
+      // Retry with backoff: validators may not see the on-chain tx immediately.
       const NEEDED_SHARES = shamirThreshold;
-      const SHARE_COLLECTION_TIMEOUT_MS = 30_000;
+      const MAX_RETRIES = 4;
+      const RETRY_DELAYS = [2000, 4000, 6000, 8000]; // backoff per round
+      const PER_CALL_TIMEOUT = 15_000;
       if (collectedShares.length < NEEDED_SHARES) {
         setStep("collecting_shares");
 
-        // Collect shares: resolve as soon as we have enough (don't wait for all)
-        await new Promise<void>((resolveAll) => {
-          let resolved = false;
-          validators.forEach((v) => {
-            Promise.race([
-              v.purchaseSignal(signalId.toString(), purchaseReq),
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("timeout")), SHARE_COLLECTION_TIMEOUT_MS),
-              ),
-            ])
-              .then((result) => {
-                if (resolved) return;
-                if (
-                  result?.available &&
-                  result.encrypted_key_share &&
-                  result.share_x != null
-                ) {
-                  const x = result.share_x;
-                  if (!collectedShares.some((s) => s.x === x)) {
-                    collectedShares.push({
-                      x,
-                      y: BigInt("0x" + result.encrypted_key_share),
-                    });
-                  }
-                  if (collectedShares.length >= NEEDED_SHARES) {
-                    resolved = true;
-                    resolveAll();
-                  }
-                }
-              })
-              .catch(() => {});
+        for (let attempt = 0; attempt < MAX_RETRIES && collectedShares.length < NEEDED_SHARES; attempt++) {
+          if (attempt > 0) {
+            console.log(`[purchase] share collection retry ${attempt}, waiting ${RETRY_DELAYS[attempt]}ms...`);
+            await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+          }
+          // Query all validators that haven't given us a share yet
+          const respondedXs = new Set(collectedShares.map((s) => s.x));
+          const pending = validators.filter((_, i) => {
+            // On first attempt query all; on retries skip validators we already got shares from
+            return attempt === 0 || !respondedXs.has(collectedShares.find(() => true)?.x ?? -1);
           });
-          // Fallback: resolve after timeout even if we don't have enough
-          setTimeout(() => { if (!resolved) { resolved = true; resolveAll(); } }, SHARE_COLLECTION_TIMEOUT_MS + 1000);
-        });
+          const results = await Promise.allSettled(
+            validators.map((v) =>
+              Promise.race([
+                v.purchaseSignal(signalId.toString(), purchaseReq),
+                new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error("timeout")), PER_CALL_TIMEOUT),
+                ),
+              ]),
+            ),
+          );
+          for (const result of results) {
+            if (
+              result.status === "fulfilled" &&
+              result.value?.available &&
+              result.value.encrypted_key_share &&
+              result.value.share_x != null
+            ) {
+              const x = result.value.share_x;
+              if (!collectedShares.some((s) => s.x === x)) {
+                collectedShares.push({
+                  x,
+                  y: BigInt("0x" + result.value.encrypted_key_share),
+                });
+              }
+            }
+          }
+          if (collectedShares.length >= NEEDED_SHARES) break;
+          console.log(`[purchase] attempt ${attempt + 1}: ${collectedShares.length}/${NEEDED_SHARES} shares`);
+        }
       }
 
       // Step 5: Decrypt the signal

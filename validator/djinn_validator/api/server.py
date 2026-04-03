@@ -560,58 +560,70 @@ def create_app(
             if purchase.status == PurchaseStatus.FAILED:
                 raise HTTPException(status_code=500, detail="Purchase initiation failed")
 
-            # Run MPC availability check (multi-validator or single-validator fallback)
-            # The MPC checks if realIndex ∈ available_indices. The Shamir shares
-            # of the real index are stored in encrypted_index_share (as big-endian
-            # bytes), NOT in share_y (which holds the AES key share).
-            available_set = set(req.available_indices)
+            # Skip MPC if it already passed for this signal+buyer (share collection
+            # retry after on-chain payment). MPC only needs to run once.
+            mpc_already_passed = (
+                purchase.status == PurchaseStatus.AWAITING_PAYMENT
+                and purchase.mpc_result is not None
+                and purchase.mpc_result.available
+            )
 
-            def _index_share(rec: SignalShareRecord) -> Share:
-                """Extract the real-index Shamir share from a record."""
-                if rec.encrypted_index_share and len(rec.encrypted_index_share) > 0:
-                    return Share(x=rec.share.x, y=int.from_bytes(rec.encrypted_index_share, "big"))
-                # Legacy: no index share stored; fall back to share_y (will give wrong results)
-                return rec.share
+            if mpc_already_passed:
+                mpc_result = purchase.mpc_result
+                log.info("mpc_skipped_already_passed", signal_id=signal_id, buyer=req.buyer_address)
+            else:
+                # Run MPC availability check (multi-validator or single-validator fallback)
+                # The MPC checks if realIndex ∈ available_indices. The Shamir shares
+                # of the real index are stored in encrypted_index_share (as big-endian
+                # bytes), NOT in share_y (which holds the AES key share).
+                available_set = set(req.available_indices)
 
-            local_index_share = _index_share(record)
-            all_local_index_shares = [_index_share(r) for r in all_records]
-            # Use the per-signal threshold declared at creation time, not the
-            # global default. This is critical because signals created during
-            # bootstrap may have threshold=2 while the orchestrator default is 7.
-            signal_threshold = record.shamir_threshold
-            try:
-                # Use pre-computed triples if available (skip OT setup).
-                # These are raw (a, b, c) values; the orchestrator will
-                # Shamir-split them at the actual participant x-coordinates.
-                pre_triples = None
+                def _index_share(rec: SignalShareRecord) -> Share:
+                    """Extract the real-index Shamir share from a record."""
+                    if rec.encrypted_index_share and len(rec.encrypted_index_share) > 0:
+                        return Share(x=rec.share.x, y=int.from_bytes(rec.encrypted_index_share, "big"))
+                    # Legacy: no index share stored; fall back to share_y (will give wrong results)
+                    return rec.share
+
+                local_index_share = _index_share(record)
+                all_local_index_shares = [_index_share(r) for r in all_records]
+                # Use the per-signal threshold declared at creation time, not the
+                # global default. This is critical because signals created during
+                # bootstrap may have threshold=2 while the orchestrator default is 7.
+                signal_threshold = record.shamir_threshold
                 try:
-                    stored_triples = record.precomputed_triples if hasattr(record, 'precomputed_triples') else []
-                    pre_triples = [
-                        (t.a, t.b, t.c)
-                        for t in stored_triples
-                    ] if stored_triples else None
-                except Exception as triple_err:
-                    log.warning("precomputed_triples_load_failed", error=str(triple_err))
+                    # Use pre-computed triples if available (skip OT setup).
+                    # These are raw (a, b, c) values; the orchestrator will
+                    # Shamir-split them at the actual participant x-coordinates.
+                    pre_triples = None
+                    try:
+                        stored_triples = record.precomputed_triples if hasattr(record, 'precomputed_triples') else []
+                        pre_triples = [
+                            (t.a, t.b, t.c)
+                            for t in stored_triples
+                        ] if stored_triples else None
+                    except Exception as triple_err:
+                        log.warning("precomputed_triples_load_failed", error=str(triple_err))
 
-                mpc_result = await asyncio.wait_for(
-                    _orchestrator.check_availability(
-                        signal_id=signal_id,
-                        local_share=local_index_share,
-                        available_indices=available_set,
-                        local_shares=all_local_index_shares,
-                        threshold_override=signal_threshold,
-                        precomputed_triples=pre_triples,
-                    ),
-                    timeout=mpc_availability_timeout,
-                )
-            except TimeoutError:
-                from djinn_validator.api.metrics import MPC_ERRORS
+                    mpc_result = await asyncio.wait_for(
+                        _orchestrator.check_availability(
+                            signal_id=signal_id,
+                            local_share=local_index_share,
+                            available_indices=available_set,
+                            local_shares=all_local_index_shares,
+                            threshold_override=signal_threshold,
+                            precomputed_triples=pre_triples,
+                        ),
+                        timeout=mpc_availability_timeout,
+                    )
+                except TimeoutError:
+                    from djinn_validator.api.metrics import MPC_ERRORS
 
-                MPC_ERRORS.labels(reason="timeout").inc()
-                PURCHASES_PROCESSED.labels(result="error").inc()
-                raise HTTPException(status_code=504, detail="MPC availability check timed out")
+                    MPC_ERRORS.labels(reason="timeout").inc()
+                    PURCHASES_PROCESSED.labels(result="error").inc()
+                    raise HTTPException(status_code=504, detail="MPC availability check timed out")
 
-            purchase_orch.set_mpc_result(signal_id, req.buyer_address, mpc_result)
+                purchase_orch.set_mpc_result(signal_id, req.buyer_address, mpc_result)
 
             if not mpc_result.available:
                 PURCHASES_PROCESSED.labels(result="unavailable").inc()
