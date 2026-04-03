@@ -31,6 +31,10 @@ class ShieldConfig:
     direct_failure_threshold: int = 2  # switch to tunnel after N consecutive direct-IP failures
     direct_probe_interval: float = 300.0  # probe direct IP every 5 min while in tunnel mode
 
+    # Notary sidecar tunnel (named tunnels only, requires CLOUDFLARE_TOKEN)
+    notary_tunnel_enabled: bool = False
+    notary_port: int = 8091  # local port of the TLSNotary sidecar
+
     # Binary management
     cloudflared_path: str = ""  # auto-detect or download if empty
     cloudflared_checksum: str = ""  # SHA256 of expected binary (empty = skip verification)

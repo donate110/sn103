@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "djinn-tunnel-shield"
-version = "0.1.1"
+version = "0.1.2"
 description = "Zero-config DDoS protection for Bittensor miners via Cloudflare Tunnel"
 readme = "README.md"
 license = {text = "MIT"}

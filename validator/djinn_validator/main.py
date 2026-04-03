@@ -183,6 +183,9 @@ async def epoch_loop(
                 if responded:
                     try:
                         data = resp.json()
+                        v = data.get("version", "")
+                        if v:
+                            metrics.reported_version = str(v)
                         caps = data.get("capabilities")
                         if caps and isinstance(caps, dict):
                             metrics.update_capabilities(

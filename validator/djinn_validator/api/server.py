@@ -1962,7 +1962,7 @@ def create_app(
                 "uid": uid,
                 "hotkey": m.hotkey,
                 "status": "ok" if m.health_checks_responded > 0 and m.uptime_score() > 0.5 else "offline",
-                "version": "",  # Not tracked in scorer; health endpoint has it
+                "version": m.reported_version,
                 "uptime": round(m.uptime_score(), 4),
                 "health_checks_total": m.health_checks_total,
                 "health_checks_responded": m.health_checks_responded,

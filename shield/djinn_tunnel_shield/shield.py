@@ -38,14 +38,25 @@ class MinerShield:
             cloudflare_token=os.environ.get("CLOUDFLARE_TOKEN", ""),
         )
         self._tunnel = TunnelManager(self._config, port)
+        self._notary_tunnel: TunnelManager | None = None
+        if self._config.notary_tunnel_enabled and self._config.cloudflare_token:
+            self._notary_tunnel = TunnelManager(self._config, self._config.notary_port)
         self._detector = PingSilenceDetector(self._config)
         self._commitment = CommitmentManager(self._config, wallet, subtensor, netuid)
         self._named_tunnel_url: str | None = os.environ.get("CLOUDFLARE_HOSTNAME")
+        self._notary_tunnel_url: str | None = os.environ.get("CLOUDFLARE_NOTARY_HOSTNAME")
 
     @property
     def tunnel_url(self) -> str | None:
         """Current tunnel URL (for health response)."""
         return self._named_tunnel_url or self._tunnel.url
+
+    @property
+    def notary_tunnel_url(self) -> str | None:
+        """Current notary sidecar tunnel URL (for health response)."""
+        if self._notary_tunnel:
+            return self._notary_tunnel_url or self._notary_tunnel.url
+        return None
 
     def record_ping(self) -> None:
         """Call on every validator health ping."""
@@ -66,11 +77,21 @@ class MinerShield:
                 self._named_tunnel_url = url
             elif self._named_tunnel_url:
                 log.info("shield_using_configured_hostname", url=self._named_tunnel_url)
+            # Start notary tunnel if enabled
+            if self._notary_tunnel:
+                nurl = await self._notary_tunnel.start()
+                if nurl:
+                    self._notary_tunnel_url = nurl
+                    log.info("notary_tunnel_started", url=nurl)
+
             # Start monitoring and commitment in parallel
-            await asyncio.gather(
+            tasks = [
                 self._tunnel.monitor(),
                 self._commitment.commit_loop(lambda: self.tunnel_url),
-            )
+            ]
+            if self._notary_tunnel:
+                tasks.append(self._notary_tunnel.monitor())
+            await asyncio.gather(*tasks)
         else:
             # No token: watch for DDoS, activate quick tunnel on detection
             log.info("shield_standby", msg="No CLOUDFLARE_TOKEN set. Emergency tunnel will activate on DDoS detection.")

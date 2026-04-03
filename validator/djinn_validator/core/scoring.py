@@ -88,6 +88,7 @@ class MinerMetrics:
     notary_active_sessions: int = 0
     disk_free_gb: float = 0.0
     capabilities_reported: bool = False  # True if miner reports capabilities
+    reported_version: str = ""  # Miner's self-reported version from health check
 
     # ── Shared metrics ──
     health_checks_total: int = 0
