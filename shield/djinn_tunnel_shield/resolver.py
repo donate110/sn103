@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 import structlog
 
 from djinn_tunnel_shield.config import ShieldConfig
-from djinn_tunnel_shield.crypto import decrypt_tunnel_url
+from djinn_tunnel_shield.crypto import parse_commitment
 
 log = structlog.get_logger()
 
@@ -85,31 +85,23 @@ class ShieldResolver:
         entry.tunnel_source = "commitment"
 
     def sync_commitments(self, subtensor: object, netuid: int) -> int:
-        """Read and decrypt tunnel commitments from the chain.
+        """Read tunnel commitments from the chain.
 
         Returns the number of tunnel URLs discovered.
         """
-        if not self._wallet:
-            return 0
-
         count = 0
         try:
             metagraph = subtensor.metagraph(netuid)
-            validator_ss58 = self._wallet.hotkey.ss58_address
-            validator_private = self._wallet.hotkey.private_key
 
             for uid in range(metagraph.n.item()):
                 if metagraph.validator_permit[uid].item():
                     continue  # Skip validators, only miners have tunnels
                 try:
-                    commitment = subtensor.get_commitment(metagraph.hotkeys[uid], netuid)
+                    commitment = subtensor.get_commitment(netuid, uid)
                     if not commitment:
                         continue
-                    data = commitment if isinstance(commitment, bytes) else commitment.encode()
-                    url = decrypt_tunnel_url(
-                        data, validator_ss58, validator_private,
-                        max_age=self._config.commitment_max_age,
-                    )
+                    data = commitment if isinstance(commitment, bytes) else str(commitment)
+                    url = parse_commitment(data, max_age=self._config.commitment_max_age)
                     if url:
                         self.cache_from_commitment(uid, url)
                         count += 1
