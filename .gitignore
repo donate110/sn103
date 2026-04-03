@@ -206,6 +206,7 @@ miner/data/
 # Playwright
 web/playwright-report/
 web/test-results/
+web/e2e/ux/.vercel-session.json
 
 # Next.js build cache (root-level)
 .next/
