@@ -26,6 +26,7 @@ if (!PRIVATE_KEY) {
   console.error("Set E2E_TEST_PRIVATE_KEY or E2E_GENIUS_KEY");
   process.exit(1);
 }
+const BUYER_KEY = process.env.E2E_BUYER_PRIVATE_KEY || "";
 
 const args = process.argv.slice(2);
 const NUM_SIGNALS = parseInt(args.find((a, i) => args[i - 1] === "--signals") || "5");
@@ -285,8 +286,40 @@ async function main() {
   console.log(`\n=== STEP 5: Purchase ${NUM_PURCHASES} signals (on-chain only, no MPC) ===`);
   const purchaseTimings = [];
 
-  // Purchase using the same wallet (it already has escrow balance)
-  console.log(`  Buying with: ${wallet.address} (escrow: ${ethers.formatUnits(escrowBal, 6)} USDC)`);
+  // Use a separate buyer wallet to avoid GeniusEqualsIdiot revert
+  let buyerWallet = wallet;
+  let buyerEscrow = escrow;
+  if (BUYER_KEY) {
+    buyerWallet = new ethers.Wallet(BUYER_KEY, provider);
+    buyerEscrow = new ethers.Contract(ADDRESSES.escrow, ESCROW_ABI, buyerWallet);
+    const buyerBal = await escrow.getBalance(buyerWallet.address);
+    console.log(`  Buyer wallet: ${buyerWallet.address} (escrow: ${ethers.formatUnits(buyerBal, 6)} USDC)`);
+
+    // Auto-fund buyer if needed
+    if (buyerBal < ethers.parseUnits("100", 6)) {
+      console.log("  Funding buyer wallet...");
+      try {
+        const ethBuyerBal = await provider.getBalance(buyerWallet.address);
+        if (ethBuyerBal < ethers.parseEther("0.0002")) {
+          const ethTx = await wallet.sendTransaction({ to: buyerWallet.address, value: ethers.parseEther("0.0005") });
+          await ethTx.wait();
+        }
+        const mintTx = await usdc.mint(buyerWallet.address, ethers.parseUnits("1000", 6));
+        await mintTx.wait();
+        const buyerUsdc = new ethers.Contract(ADDRESSES.usdc, USDC_ABI, buyerWallet);
+        const appTx = await buyerUsdc.approve(ADDRESSES.escrow, ethers.MaxUint256);
+        await appTx.wait();
+        const depTx = await buyerEscrow.deposit(ethers.parseUnits("500", 6));
+        await depTx.wait();
+        console.log("  Buyer funded: 500 USDC in escrow");
+      } catch (err) {
+        console.log(`  Buyer funding failed: ${err.message?.slice(0, 80)}`);
+      }
+    }
+  } else {
+    console.log(`  No E2E_BUYER_PRIVATE_KEY set, using same wallet (will get GeniusEqualsIdiot)`);
+    console.log(`  Buying with: ${wallet.address} (escrow: ${ethers.formatUnits(escrowBal, 6)} USDC)`);
+  }
 
   for (let i = 0; i < Math.min(createdSignals.length, NUM_PURCHASES); i++) {
     const sigId = BigInt(createdSignals[i]);
@@ -295,7 +328,7 @@ async function main() {
 
     const t = timer();
     try {
-      const tx = await escrow.purchase(sigId, notional, odds);
+      const tx = await buyerEscrow.purchase(sigId, notional, odds);
       const sendMs = t();
       const receipt = await tx.wait();
       const confirmMs = t();
