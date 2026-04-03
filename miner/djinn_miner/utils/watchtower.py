@@ -103,6 +103,7 @@ def _remote_sha(repo: Path, branch: str) -> str | None:
 def _pull(repo: Path, branch: str) -> bool:
     """Pull the latest code. Returns True on success."""
     try:
+        _run(["git", "fetch", "--tags", "origin"], repo)
         r = _run(["git", "pull", "origin", branch], repo)
         if r.returncode != 0:
             log.error("watchtower_pull_failed", stderr=r.stderr[:500])
