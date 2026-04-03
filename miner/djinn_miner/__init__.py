@@ -3,21 +3,22 @@
 import subprocess as _sp
 from pathlib import Path as _Path
 
-_dir = _Path(__file__).parent
-_OURS = int((_dir / "VERSION").read_text().strip())  # Our commit count at release
-__version__ = str(_OURS)
+__version__ = "0"
 
 try:
-    _total = int(_sp.check_output(
-        ["git", "rev-list", "--count", "HEAD"],
-        stderr=_sp.DEVNULL, cwd=_dir,
-    ).decode().strip())
-    _extra = _total - _OURS
-    if _extra > 0:
-        __version__ = f"{_OURS}+{_extra}"
-    elif _extra == 0:
-        __version__ = str(_OURS)
-    else:
-        __version__ = str(_total)
+    # Find the latest release tag (e.g. v985) and count commits since it
+    _desc = _sp.check_output(
+        ["git", "describe", "--tags", "--match", "v[0-9]*", "--long"],
+        stderr=_sp.DEVNULL,
+        cwd=_Path(__file__).parent,
+    ).decode().strip()
+    # Format: v985-3-gabcdef (tag, commits since, hash)
+    _parts = _desc.rsplit("-", 2)
+    _tag = _parts[0].lstrip("v")
+    _extra = int(_parts[1])
+    __version__ = _tag if _extra == 0 else f"{_tag}+{_extra}"
 except Exception:
-    pass
+    try:
+        __version__ = (_Path(__file__).parent / "VERSION").read_text().strip()
+    except Exception:
+        pass
