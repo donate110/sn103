@@ -524,36 +524,29 @@ def create_app(
                 except (TimeoutError, asyncio.TimeoutError):
                     result = tlsn_module.TLSNProofResult(success=False, error=f"local notary timeout ({_local_notary_port})")
 
-            # Spawn a fresh ephemeral notary if the first attempt failed.
-            # Ephemeral notaries get clean MPC state every time.
-            if not result.success:
-                spawned = await _spawn_ephemeral_notary()
-                if spawned is not None:
-                    eph_proc, eph_port = spawned
-                    try:
-                        log.info(
-                            "attest_trying_ephemeral_notary",
-                            url=request.url,
-                            prior_error=result.error[:200] if result.error else "",
-                            eph_port=eph_port,
-                        )
-                        result = await asyncio.wait_for(
-                            tlsn_module.generate_proof(
-                                request.url,
-                                notary_host="127.0.0.1",
-                                notary_port=eph_port,
-                                timeout=180.0,
-                            ),
-                            timeout=195.0,
-                        )
-                        if result.success:
-                            log.info("attest_ephemeral_notary_succeeded", url=request.url)
-                    finally:
-                        eph_proc.kill()
-                        try:
-                            await eph_proc.wait()
-                        except Exception:
-                            pass
+            # If the first attempt failed (peer timeout or sidecar error),
+            # fall back to the local sidecar. Avoid spawning ephemeral notaries
+            # which leak processes and eat CPU when not properly cleaned up.
+            if not result.success and _using_peer:
+                _local_notary_port = int(os.getenv("NOTARY_PORT", "8091"))
+                log.info(
+                    "attest_fallback_to_local_sidecar",
+                    url=request.url,
+                    prior_error=result.error[:200] if result.error else "",
+                    port=_local_notary_port,
+                )
+                try:
+                    result = await asyncio.wait_for(
+                        tlsn_module.generate_proof(
+                            request.url,
+                            notary_host="127.0.0.1",
+                            notary_port=_local_notary_port,
+                            timeout=60.0,
+                        ),
+                        timeout=75.0,
+                    )
+                except (TimeoutError, asyncio.TimeoutError):
+                    result = tlsn_module.TLSNProofResult(success=False, error="local sidecar fallback timeout")
         except TimeoutError:
             ATTESTATION_REQUESTS.labels(status="error").inc()
             ATTESTATION_DURATION.observe(time.perf_counter() - start)
