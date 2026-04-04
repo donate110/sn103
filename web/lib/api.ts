@@ -325,12 +325,9 @@ export async function discoverValidatorClients(): Promise<ValidatorClient[]> {
     if (!res.ok) throw new Error(`Discovery failed: ${res.status}`);
     const { validators } = await res.json() as { validators: { uid: number; ip?: string; port?: number }[] };
     if (validators.length === 0) throw new Error("No validators discovered");
-    // Use direct validator URLs (bypasses Vercel proxy, faster MPC).
-    // Falls back to proxy if IP/port unavailable.
+    // Always use the Next.js API proxy for browser connections.
+    // Direct IP connections are blocked by CSP (mixed content, raw HTTP on HTTPS page).
     const clients = validators.map((v) => {
-      if (v.ip && v.port) {
-        return new ValidatorClient(`http://${v.ip}:${v.port}`);
-      }
       return new ValidatorClient(`/api/validators/${v.uid}`);
     });
     _discoveryCache = { clients, ts: Date.now() };
