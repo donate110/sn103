@@ -117,6 +117,20 @@ async def generate_proof(
         port = _LOCAL_PORT
         log.info("tlsn_using_local_notary_default", port=port)
 
+    # Fast check: can we reach the notary? Fail immediately if not.
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=3.0,
+        )
+        writer.close()
+        await writer.wait_closed()
+    except (TimeoutError, asyncio.TimeoutError, OSError, ConnectionRefusedError) as e:
+        log.warning("tlsn_notary_unreachable", host=host, port=port, error=str(e))
+        return TLSNProofResult(
+            success=False,
+            error=f"notary unreachable at {host}:{port} ({type(e).__name__})",
+        )
+
     # Resolve redirects and probe response size. The prover can't follow
     # redirects, and knowing the size lets us right-size the MPC circuit.
     preflight_content_length: int | None = None
