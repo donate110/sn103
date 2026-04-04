@@ -16,6 +16,12 @@ const IncentiveChart = dynamic(() => import("@/components/network/IncentiveChart
   loading: () => <div className="h-80 bg-slate-50 rounded-lg animate-pulse" />,
 });
 
+// Lazy-load scoring matrix (heavy, fetches own data)
+const ScoringMatrix = dynamic(() => import("@/components/network/ScoringMatrix"), {
+  ssr: false,
+  loading: () => <div className="h-40 bg-slate-50 rounded-lg animate-pulse" />,
+});
+
 // ---------- Types ----------
 
 interface ValidatorData {
@@ -378,6 +384,17 @@ export default function NetworkPage() {
             metric={metric}
             showAll={showAll}
           />
+        </div>
+      </section>
+
+      {/* Scoring Matrix */}
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold text-slate-900 mb-3">Scoring Matrix</h2>
+        <p className="text-sm text-slate-500 mb-3">
+          Each cell shows how a validator (row) scores a miner (column). Color = weight relative to that validator&apos;s median.
+        </p>
+        <div className="card p-4 overflow-hidden">
+          <ScoringMatrix />
         </div>
       </section>
 
