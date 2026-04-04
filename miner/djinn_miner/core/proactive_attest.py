@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -113,14 +114,10 @@ class ProactiveAttester:
         log.info("proactive_attest_starting", url=PROACTIVE_URL)
         start = time.time()
 
-        # Spawn ephemeral notary to avoid colliding with the main sidecar
-        ephemeral = await self._spawn_ephemeral_notary()
-        if ephemeral is None:
-            # Fall back to shared sidecar if ephemeral spawn fails
-            notary_port = self._notary_port
-            ephemeral_proc = None
-        else:
-            ephemeral_proc, notary_port = ephemeral
+        # Use the main sidecar directly (it supports concurrent sessions).
+        # Ephemeral notaries are slow to spawn (~30s overhead).
+        notary_port = self._notary_port or int(os.getenv("NOTARY_PORT", "8091"))
+        ephemeral_proc = None
 
         try:
             result = await tlsn_module.generate_proof(
