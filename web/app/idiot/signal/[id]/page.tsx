@@ -725,12 +725,7 @@ export default function PurchaseSignal() {
             console.log(`[purchase] share collection retry ${attempt}, waiting ${RETRY_DELAYS[attempt]}ms...`);
             await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
           }
-          // Query all validators that haven't given us a share yet
-          const respondedXs = new Set(collectedShares.map((s) => s.x));
-          const pending = validators.filter((_, i) => {
-            // On first attempt query all; on retries skip validators we already got shares from
-            return attempt === 0 || !respondedXs.has(collectedShares.find(() => true)?.x ?? -1);
-          });
+          // Query all validators (those that already released shares return them again via is_payment_consumed)
           const results = await Promise.allSettled(
             validators.map((v) =>
               Promise.race([
