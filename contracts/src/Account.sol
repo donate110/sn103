@@ -66,8 +66,12 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     /// @dev pairKey => batchId => purchaseIds
     mapping(bytes32 => mapping(uint256 => uint256[])) private _auditBatches;
 
-    /// @dev Reduced gap: 43 original - 6 new mappings = 37
-    uint256[37] private __gap;
+    /// @notice Whether v1 cycle data has been migrated into the v2 queue for a pair
+    /// @dev Set to true after lazy migration copies _accounts[key].purchaseIds into _pairPurchaseIds
+    mapping(bytes32 => bool) private _v1Migrated;
+
+    /// @dev Reduced gap: 43 original - 7 new mappings = 36
+    uint256[36] private __gap;
 
     // ─── Events ─────────────────────────────────────────────────────
 
@@ -82,6 +86,9 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
 
     /// @notice Emitted when an authorized caller is added or removed
     event AuthorizedCallerSet(address indexed caller, bool authorized);
+
+    /// @notice Emitted when v1 cycle data is lazily migrated into the v2 queue
+    event V1PairMigrated(address indexed genius, address indexed idiot, uint256 purchaseCount, uint256 resolvedCount);
 
     /// @notice Emitted when the pauser address is updated
     event PauserUpdated(address indexed newPauser);
@@ -136,6 +143,7 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
         _validatePair(genius, idiot);
 
         bytes32 key = _pairKey(genius, idiot);
+        _ensureMigrated(key, genius, idiot);
 
         if (_purchaseRecorded[key][purchaseId]) {
             revert PurchaseAlreadyRecorded(genius, idiot, purchaseId);
@@ -163,6 +171,7 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
         if (outcome == Outcome.Pending) revert InvalidOutcome();
 
         bytes32 key = _pairKey(genius, idiot);
+        _ensureMigrated(key, genius, idiot);
 
         if (!_purchaseRecorded[key][purchaseId]) {
             revert PurchaseNotFound(genius, idiot, purchaseId);
@@ -194,6 +203,7 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
         if (purchaseIds.length == 0) revert EmptyBatch();
 
         bytes32 key = _pairKey(genius, idiot);
+        _ensureMigrated(key, genius, idiot);
 
         for (uint256 i; i < purchaseIds.length; ++i) {
             uint256 pid = purchaseIds[i];
@@ -229,21 +239,33 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     }
 
     // ─── View Functions (v2 Queue API) ──────────────────────────────
+    // All views account for unmigrated v1 data by checking both storages.
 
     /// @notice Returns the queue state summary for a Genius-Idiot pair
     function getQueueState(address genius, address idiot) external view returns (PairQueueState memory) {
         bytes32 key = _pairKey(genius, idiot);
+        (uint256 total, uint256 resolved) = _effectiveCounts(key);
         return PairQueueState({
-            totalPurchases: _pairPurchaseIds[key].length,
-            resolvedCount: _resolvedCount[key],
+            totalPurchases: total,
+            resolvedCount: resolved,
             auditedCount: _auditedCount[key],
             auditBatchCount: _auditBatchCount[key]
         });
     }
 
-    /// @notice Returns all purchase IDs for a pair
+    /// @notice Returns all purchase IDs for a pair (includes unmigrated v1 data)
     function getPairPurchaseIds(address genius, address idiot) external view returns (uint256[] memory) {
-        return _pairPurchaseIds[_pairKey(genius, idiot)];
+        bytes32 key = _pairKey(genius, idiot);
+        if (_v1Migrated[key] || _accounts[key].purchaseIds.length == 0) {
+            return _pairPurchaseIds[key];
+        }
+        // Merge: v1 data first, then any v2 data
+        uint256[] memory v1 = _accounts[key].purchaseIds;
+        uint256[] memory v2 = _pairPurchaseIds[key];
+        uint256[] memory merged = new uint256[](v1.length + v2.length);
+        for (uint256 i; i < v1.length; ++i) merged[i] = v1[i];
+        for (uint256 i; i < v2.length; ++i) merged[v1.length + i] = v2[i];
+        return merged;
     }
 
     /// @notice Returns the outcome for a specific purchase
@@ -272,8 +294,6 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     }
 
     // ─── Legacy View Functions (backwards compatibility) ────────────
-    // These map old cycle-based concepts onto the queue model.
-    // currentCycle = auditBatchCount, signalCount = unaudited count, etc.
 
     function getCurrentCycle(address genius, address idiot) external view returns (uint256) {
         return _auditBatchCount[_pairKey(genius, idiot)];
@@ -281,27 +301,79 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
 
     function isAuditReady(address genius, address idiot) external view returns (bool) {
         bytes32 key = _pairKey(genius, idiot);
-        uint256 unauditedResolved = _resolvedCount[key] - _auditedCount[key];
-        return unauditedResolved >= 10;
+        (uint256 total, uint256 resolved) = _effectiveCounts(key);
+        uint256 unauditedResolved = resolved - _auditedCount[key];
+        return total > 0 && unauditedResolved >= 10;
     }
 
     function getAccountState(address genius, address idiot) external view returns (AccountState memory) {
         bytes32 key = _pairKey(genius, idiot);
+        (uint256 total,) = _effectiveCounts(key);
+        uint256[] memory ids = this.getPairPurchaseIds(genius, idiot);
         return AccountState({
             currentCycle: _auditBatchCount[key],
-            signalCount: _pairPurchaseIds[key].length - _auditedCount[key],
+            signalCount: total - _auditedCount[key],
             outcomeBalance: 0,
-            purchaseIds: _pairPurchaseIds[key],
+            purchaseIds: ids,
             settled: false
         });
     }
 
     function getSignalCount(address genius, address idiot) external view returns (uint256) {
         bytes32 key = _pairKey(genius, idiot);
-        return _pairPurchaseIds[key].length - _auditedCount[key];
+        (uint256 total,) = _effectiveCounts(key);
+        return total - _auditedCount[key];
+    }
+
+    /// @dev Returns (totalPurchases, resolvedCount) accounting for unmigrated v1 data.
+    function _effectiveCounts(bytes32 key) internal view returns (uint256 total, uint256 resolved) {
+        total = _pairPurchaseIds[key].length;
+        resolved = _resolvedCount[key];
+
+        if (!_v1Migrated[key]) {
+            uint256 v1Len = _accounts[key].purchaseIds.length;
+            if (v1Len > 0) {
+                total += v1Len;
+                for (uint256 i; i < v1Len; ++i) {
+                    if (_outcomes[key][_accounts[key].purchaseIds[i]] != Outcome.Pending) {
+                        resolved++;
+                    }
+                }
+            }
+        }
     }
 
     // ─── Internal Functions ─────────────────────────────────────────
+
+    /// @dev Lazily migrates v1 cycle data into the v2 queue on first access.
+    ///      Copies purchaseIds from _accounts[key] to _pairPurchaseIds[key],
+    ///      counts resolved outcomes, and marks the pair as active.
+    ///      Costs gas on first interaction per pair; subsequent calls are a no-op.
+    function _ensureMigrated(bytes32 key, address genius, address idiot) internal {
+        if (_v1Migrated[key]) return;
+        _v1Migrated[key] = true;
+
+        AccountState storage oldAcct = _accounts[key];
+        uint256 len = oldAcct.purchaseIds.length;
+        if (len == 0) return;
+
+        uint256 resolved;
+        for (uint256 i; i < len; ++i) {
+            uint256 pid = oldAcct.purchaseIds[i];
+            _pairPurchaseIds[key].push(pid);
+            if (_outcomes[key][pid] != Outcome.Pending) {
+                resolved++;
+            }
+        }
+        _resolvedCount[key] += resolved;
+
+        if (!_pairIsActive[key]) {
+            _pairIsActive[key] = true;
+            activePairCount++;
+        }
+
+        emit V1PairMigrated(genius, idiot, len, resolved);
+    }
 
     /// @dev Computes the storage key for a Genius-Idiot pair
     function _pairKey(address genius, address idiot) internal pure returns (bytes32) {

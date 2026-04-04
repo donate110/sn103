@@ -273,6 +273,87 @@ contract ForkUpgradeTest is Test {
         assertEq(escrow.batchClaimable(genius, idiot, 0), 500e6);
     }
 
+    // ─── Test 10: Lazy migration of v1 pair data ─────────────────
+
+    function test_fullUpgrade_lazyMigrationOfExistingPair() public {
+        // BEFORE upgrade: create v1 data using the existing genius wallet
+        // The E2E test genius (0x68fc) has 10 purchases with our buyer
+        // We know from earlier diagnostics: signalCount=10, cycle=0, auditReady=true
+
+        address genius = 0x68fc8eeC9E5551d4c93a89b6d861f0a05e0A2A1d;
+        address buyer = 0xa01C91f04C37d049D5887fd4D7B08AeEFc8Ca434;
+
+        // Read v1 state before upgrade
+        uint256 v1SignalCount = account.getSignalCount(genius, buyer);
+
+        // Upgrade
+        _upgradeAll();
+
+        // AFTER upgrade: v1 data should be visible through v2 views
+        // without any explicit migration call
+        PairQueueState memory qs = account.getQueueState(genius, buyer);
+        assertEq(qs.totalPurchases, v1SignalCount, "V1 purchases should be visible");
+
+        uint256[] memory ids = account.getPairPurchaseIds(genius, buyer);
+        assertEq(ids.length, v1SignalCount, "V1 purchase IDs should be returned");
+
+        // signalCount should reflect v1 data
+        assertEq(account.getSignalCount(genius, buyer), v1SignalCount, "Legacy signalCount should match");
+
+        // Now trigger lazy migration by recording a new purchase
+        vm.prank(ESCROW_PROXY);
+        account.recordPurchase(genius, buyer, 888888);
+
+        // After migration, the new purchase should be appended to v1 data
+        qs = account.getQueueState(genius, buyer);
+        assertEq(qs.totalPurchases, v1SignalCount + 1, "V1 + new purchase");
+
+        ids = account.getPairPurchaseIds(genius, buyer);
+        assertEq(ids.length, v1SignalCount + 1, "All IDs including new one");
+        assertEq(ids[ids.length - 1], 888888, "New purchase is last");
+    }
+
+    // ─── Test 11: V1 pair with outcomes migrates resolved count ──
+
+    function test_fullUpgrade_migratedResolvedCount() public {
+        // Create a fresh v1 pair with some outcomes before upgrade
+        address genius = makeAddr("v1Genius");
+        address idiot = makeAddr("v1Idiot");
+
+        // Record 3 purchases and 2 outcomes via authorized callers (v1 contracts)
+        vm.startPrank(ESCROW_PROXY);
+        account.recordPurchase(genius, idiot, 500001);
+        account.recordPurchase(genius, idiot, 500002);
+        account.recordPurchase(genius, idiot, 500003);
+        account.recordOutcome(genius, idiot, 500001, Outcome.Favorable);
+        account.recordOutcome(genius, idiot, 500002, Outcome.Unfavorable);
+        // 500003 left Pending
+        vm.stopPrank();
+
+        // Upgrade
+        _upgradeAll();
+
+        // View functions should see 3 purchases, 2 resolved (before migration)
+        PairQueueState memory qs = account.getQueueState(genius, idiot);
+        assertEq(qs.totalPurchases, 3, "3 v1 purchases visible");
+        assertEq(qs.resolvedCount, 2, "2 resolved visible");
+
+        // Trigger lazy migration via a new purchase
+        vm.prank(ESCROW_PROXY);
+        account.recordPurchase(genius, idiot, 500004);
+
+        qs = account.getQueueState(genius, idiot);
+        assertEq(qs.totalPurchases, 4, "3 v1 + 1 v2");
+        assertEq(qs.resolvedCount, 2, "Still 2 resolved (new one is pending)");
+
+        // Resolve the old pending one through v2
+        vm.prank(ESCROW_PROXY);
+        account.recordOutcome(genius, idiot, 500003, Outcome.Void);
+
+        qs = account.getQueueState(genius, idiot);
+        assertEq(qs.resolvedCount, 3, "Now 3 resolved");
+    }
+
     // ─── Helper: upgrade all 4 contracts ────────────────────────
 
     function _upgradeAll() internal {
