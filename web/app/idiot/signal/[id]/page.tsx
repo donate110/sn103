@@ -375,6 +375,74 @@ export default function PurchaseSignal() {
       return;
     }
 
+    // If a purchase is already on-chain (retry after partial share collection),
+    // skip directly to share collection instead of re-sending the on-chain tx.
+    const pending = loadPendingPurchase();
+    if (pending && pending.signalId === signalId.toString() && pending.buyer === buyerAddress) {
+      setStepError(null);
+      try {
+        setStep("recovering");
+        const validators = await discoverValidatorClients();
+        const purchaseReq = {
+          buyer_address: buyerAddress,
+          sportsbook: "",
+          available_indices: [] as number[],
+          buyer_signature: "",
+        };
+
+        // Query threshold: try to get it from the first validator's purchase response
+        let threshold = 3; // default (most signals use 2 or 3)
+
+        const shares: ShamirShare[] = [];
+        for (let attempt = 0; attempt < 4 && shares.length < threshold; attempt++) {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, 3000));
+          const results = await Promise.allSettled(
+            validators.map((v) =>
+              Promise.race([
+                v.purchaseSignal(signalId.toString(), purchaseReq),
+                new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 15000)),
+              ]),
+            ),
+          );
+          for (const result of results) {
+            if (result.status === "fulfilled" && result.value?.available && result.value.encrypted_key_share && result.value.share_x != null) {
+              const x = result.value.share_x;
+              if (!shares.some((s) => s.x === x)) {
+                shares.push({ x, y: BigInt("0x" + result.value.encrypted_key_share) });
+              }
+            }
+          }
+          console.log(`[retry] attempt ${attempt + 1}: ${shares.length}/${threshold} shares`);
+        }
+
+        if (shares.length >= threshold) {
+          setStep("decrypting");
+          try {
+            const reconstructedBigInt = reconstructSecret(shares);
+            const keyBytes = bigIntToKey(reconstructedBigInt);
+            const blobBytes = signal.encryptedBlob.startsWith("0x") ? signal.encryptedBlob.slice(2) : signal.encryptedBlob;
+            const blobStr = new TextDecoder().decode(fromHex(blobBytes));
+            const colonIdx = blobStr.indexOf(":");
+            if (colonIdx === -1) throw new Error("Invalid encrypted blob format");
+            const plaintext = await decrypt(blobStr.slice(colonIdx + 1), blobStr.slice(0, colonIdx), keyBytes);
+            const parsed = JSON.parse(plaintext);
+            setDecryptedPick(parsed);
+            clearPendingPurchase();
+          } catch (decErr) {
+            setStepError(`Decryption failed: ${decErr instanceof Error ? decErr.message : String(decErr)}`);
+          }
+        } else {
+          setStepError(`Collected ${shares.length} of ${threshold} shares. Some validators may be slow. Try again in a moment.`);
+        }
+        setStep("idle");
+      } catch (err) {
+        setStepError(`Recovery failed: ${err instanceof Error ? err.message : String(err)}`);
+        setStep("idle");
+      }
+      purchaseInFlight.current = false;
+      return;
+    }
+
     setStepError(null);
 
     try {
