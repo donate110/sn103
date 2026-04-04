@@ -163,10 +163,10 @@ def update_firewall(validator_ips: set[str], api_port: int) -> bool:
                "comment", UFW_TAG])
         log.info("firewall_added_validator_ip", ip=ip, port=api_port)
 
-    # Ensure blanket deny on the API port (after allow rules)
-    # First remove any blanket allow that might exist
+    # Ensure blanket deny on the API port is AFTER all allow rules.
+    # Delete and re-add to guarantee ordering (ufw appends new rules at the end).
     _run(["ufw", "delete", "allow", f"{api_port}/tcp"])
-    # Add deny (idempotent)
+    _run(["ufw", "delete", "deny", f"{api_port}/tcp"])
     _run(["ufw", "deny", f"{api_port}/tcp", "comment", f"{UFW_TAG}-deny"])
 
     # Enable (idempotent, --force skips interactive prompt)
