@@ -250,25 +250,24 @@ contract PausableTest is Test {
         audit.unpause();
     }
 
-    function test_audit_trigger_reverts_whenPaused() public {
-        audit.pause();
-
-        vm.expectRevert(Pausable.EnforcedPause.selector);
-        audit.trigger(genius, idiot);
-    }
-
     function test_audit_settle_reverts_whenPaused() public {
         audit.pause();
 
+        uint256[] memory pids = new uint256[](10);
+        for (uint256 i; i < 10; i++) pids[i] = i;
+
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        audit.settle(genius, idiot);
+        audit.settle(genius, idiot, pids);
     }
 
     function test_audit_earlyExit_reverts_whenPaused() public {
         audit.pause();
 
+        uint256[] memory pids = new uint256[](1);
+        pids[0] = 0;
+
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        audit.earlyExit(genius, idiot);
+        audit.earlyExit(genius, idiot, pids);
     }
 
     // ─── Cross-contract pause isolation

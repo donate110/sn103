@@ -69,6 +69,12 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     /// @notice Address authorized to pause this contract in emergencies
     address public pauser;
 
+    // ─── v2 Storage (appended for UUPS compatibility) ───────────
+
+    /// @notice Claimable fees per audit batch: genius -> idiot -> batchId -> amount
+    /// @dev Written by Audit contract at settlement time. Replaces feePool for v2 batches.
+    mapping(address => mapping(address => mapping(uint256 => uint256))) public batchClaimable;
+
     // -------------------------------------------------------------------------
     // Events
     // -------------------------------------------------------------------------
@@ -129,7 +135,6 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     error OutcomeAlreadySet(uint256 purchaseId, Outcome current);
     error InvalidOutcome(Outcome outcome);
     error NotPauserOrOwner(address caller);
-    error GeniusEqualsIdiot(address addr);
     error LengthMismatch();
     error BatchTooLarge(uint256 provided, uint256 max);
     error CannotRescueUsdc();
@@ -329,7 +334,6 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         Signal memory sig = signalCommitment.getSignal(signalId);
         if (sig.status != SignalStatus.Active) revert SignalNotActive(signalId);
         if (block.timestamp >= sig.expiresAt) revert SignalExpired(signalId);
-        if (sig.genius == msg.sender) revert GeniusEqualsIdiot(msg.sender);
         if (hasPurchased[signalId][msg.sender]) revert AlreadyPurchased(signalId, msg.sender);
         if (sig.minNotional > 0 && notional < sig.minNotional) {
             revert NotionalTooSmall(notional, sig.minNotional);
@@ -377,8 +381,8 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         _purchasesBySignal[signalId].push(purchaseId);
         hasPurchased[signalId][msg.sender] = true;
 
-        uint256 cycle = account.getCurrentCycle(sig.genius, msg.sender);
-        feePool[sig.genius][msg.sender][cycle] += usdcPaid;
+        // v2: No feePool write. Fees are computed at settlement time from Purchase records.
+        // The feePool mapping is kept for storage compatibility but no longer written to.
 
         // --- Interactions: external calls after state is finalized ---
         if (creditUsed > 0) {
@@ -398,73 +402,62 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
     // Genius fee claim
     // -------------------------------------------------------------------------
 
-    /// @notice Claim earned fees from a settled audit cycle. Only the Genius can claim.
-    ///         Transfers the remaining feePool balance for the given genius-idiot-cycle to the Genius.
-    /// @param idiot The Idiot address for the pair
-    /// @param cycle The settled audit cycle to claim from
-    function claimFees(address idiot, uint256 cycle) external whenNotPaused nonReentrant {
-        if (auditContract == address(0)) revert ContractNotSet("Audit");
-
-        // Verify the cycle is settled by querying the Audit contract
-        (, , , , uint256 settledAt) = IAudit(auditContract).auditResults(msg.sender, idiot, cycle);
-        if (settledAt == 0) revert CycleNotSettled(msg.sender, idiot, cycle);
-
-        // Enforce fee claim delay: fees cannot be claimed until 48h after settlement
-        uint256 claimableAt = settledAt + FEE_CLAIM_DELAY;
-        if (block.timestamp < claimableAt) {
-            revert ClaimTooEarly(msg.sender, idiot, cycle, claimableAt);
-        }
-
-        uint256 amount = feePool[msg.sender][idiot][cycle];
-        if (amount == 0) revert NoFeesToClaim(msg.sender, idiot, cycle);
-
-        feePool[msg.sender][idiot][cycle] = 0;
-        usdc.safeTransfer(msg.sender, amount);
-
-        emit FeesClaimed(msg.sender, idiot, cycle, amount);
-    }
-
-    /// @notice Reduce the fee pool after Tranche A damages. Called by Audit during
-    ///         negative settlement to prevent genius from claiming fees that were
-    ///         effectively refunded to the idiot via collateral slash.
+    /// @notice Record claimable fees for a settled audit batch. Called by Audit contract.
     /// @param genius The Genius address
     /// @param idiot The Idiot address
-    /// @param cycle The settlement cycle
-    /// @param amount Amount to reduce (capped at current pool balance)
-    function reduceFeePool(address genius, address idiot, uint256 cycle, uint256 amount) external whenNotPaused nonReentrant {
+    /// @param batchId The audit batch ID
+    /// @param amount The net claimable amount (total fees minus Tranche A damages)
+    function recordBatchClaimable(address genius, address idiot, uint256 batchId, uint256 amount) external whenNotPaused {
         if (msg.sender != auditContract) revert Unauthorized();
-        uint256 pool = feePool[genius][idiot][cycle];
-        if (amount >= pool) {
-            feePool[genius][idiot][cycle] = 0;
-        } else {
-            feePool[genius][idiot][cycle] = pool - amount;
-        }
+        batchClaimable[genius][idiot][batchId] = amount;
     }
 
-    /// @notice Batch claim fees from multiple settled idiot-cycle pairs.
+    /// @notice Claim earned fees from a settled audit batch. Only the Genius can claim.
+    /// @param idiot The Idiot address for the pair
+    /// @param batchId The settled audit batch to claim from
+    function claimFees(address idiot, uint256 batchId) external whenNotPaused nonReentrant {
+        if (auditContract == address(0)) revert ContractNotSet("Audit");
+
+        (, , , , uint256 settledAt) = IAudit(auditContract).auditResults(msg.sender, idiot, batchId);
+        if (settledAt == 0) revert CycleNotSettled(msg.sender, idiot, batchId);
+
+        uint256 claimableAt = settledAt + FEE_CLAIM_DELAY;
+        if (block.timestamp < claimableAt) {
+            revert ClaimTooEarly(msg.sender, idiot, batchId, claimableAt);
+        }
+
+        uint256 amount = batchClaimable[msg.sender][idiot][batchId];
+        if (amount == 0) revert NoFeesToClaim(msg.sender, idiot, batchId);
+
+        batchClaimable[msg.sender][idiot][batchId] = 0;
+        usdc.safeTransfer(msg.sender, amount);
+
+        emit FeesClaimed(msg.sender, idiot, batchId, amount);
+    }
+
+    /// @notice Batch claim fees from multiple settled idiot-batch pairs.
     /// @param idiots Array of Idiot addresses
-    /// @param cycles Array of cycle numbers (must match idiots length)
-    function claimFeesBatch(address[] calldata idiots, uint256[] calldata cycles) external whenNotPaused nonReentrant {
+    /// @param batchIds Array of batch IDs (must match idiots length)
+    function claimFeesBatch(address[] calldata idiots, uint256[] calldata batchIds) external whenNotPaused nonReentrant {
         if (idiots.length > 100) revert BatchTooLarge(idiots.length, 100);
         if (auditContract == address(0)) revert ContractNotSet("Audit");
-        if (idiots.length != cycles.length) revert LengthMismatch();
+        if (idiots.length != batchIds.length) revert LengthMismatch();
 
         uint256 total;
         for (uint256 i; i < idiots.length; ++i) {
-            (, , , , uint256 settledAt) = IAudit(auditContract).auditResults(msg.sender, idiots[i], cycles[i]);
-            if (settledAt == 0) revert CycleNotSettled(msg.sender, idiots[i], cycles[i]);
+            (, , , , uint256 settledAt) = IAudit(auditContract).auditResults(msg.sender, idiots[i], batchIds[i]);
+            if (settledAt == 0) revert CycleNotSettled(msg.sender, idiots[i], batchIds[i]);
 
-            // Enforce fee claim delay: fees cannot be claimed until 48h after settlement
             uint256 claimableAt = settledAt + FEE_CLAIM_DELAY;
             if (block.timestamp < claimableAt) {
-                revert ClaimTooEarly(msg.sender, idiots[i], cycles[i], claimableAt);
+                revert ClaimTooEarly(msg.sender, idiots[i], batchIds[i], claimableAt);
             }
 
-            uint256 amount = feePool[msg.sender][idiots[i]][cycles[i]];
+            uint256 amount = batchClaimable[msg.sender][idiots[i]][batchIds[i]];
             if (amount > 0) {
-                feePool[msg.sender][idiots[i]][cycles[i]] = 0;
+                batchClaimable[msg.sender][idiots[i]][batchIds[i]] = 0;
                 total += amount;
-                emit FeesClaimed(msg.sender, idiots[i], cycles[i], amount);
+                emit FeesClaimed(msg.sender, idiots[i], batchIds[i], amount);
             }
         }
 
@@ -576,6 +569,6 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
         revert("disabled");
     }
 
-    /// @dev Reserved storage gap for future upgrades.
-    uint256[35] private __gap;
+    /// @dev Reserved storage gap for future upgrades. (was 35, -1 for batchClaimable = 34)
+    uint256[34] private __gap;
 }

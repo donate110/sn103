@@ -46,11 +46,19 @@ struct Purchase {
     uint256 purchasedAt;
 }
 
-/// @notice State of a Genius-Idiot account pair
+/// @notice State of a Genius-Idiot account pair (legacy, kept for UUPS storage compatibility)
 struct AccountState {
     uint256 currentCycle;
     uint256 signalCount;
     int256 outcomeBalance;
     uint256[] purchaseIds;
     bool settled;
+}
+
+/// @notice Summary of a Genius-Idiot pair's queue state
+struct PairQueueState {
+    uint256 totalPurchases;
+    uint256 resolvedCount;
+    uint256 auditedCount;
+    uint256 auditBatchCount;
 }

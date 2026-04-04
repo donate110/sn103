@@ -268,29 +268,32 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
 
     // ─── Early Exit Requests ────────────────────────────────────
 
-    /// @notice Request early exit for a Genius-Idiot pair before 10 signals.
-    ///         Either party can request. Validators then vote on the score.
+    /// @notice Request early exit for a Genius-Idiot pair.
+    ///         Either party can request. In v2 (queue model), early exit is triggered
+    ///         directly via Audit.earlyExit() with the specific purchaseIds.
+    ///         This function records the intent for off-chain validator coordination.
     /// @param genius The Genius address
     /// @param idiot The Idiot address
-    function requestEarlyExit(address genius, address idiot) external whenNotPaused {
+    /// @param purchaseIds The specific purchases to request early exit for
+    function requestEarlyExit(address genius, address idiot, uint256[] calldata purchaseIds) external whenNotPaused {
         if (msg.sender != genius && msg.sender != idiot) {
             revert NotPartyToAudit(msg.sender, genius, idiot);
         }
-        if (address(account) == address(0)) revert ContractNotSet("Account");
+        if (purchaseIds.length == 0) revert NoPurchases(genius, idiot);
 
-        uint256 signalCount = account.getSignalCount(genius, idiot);
-        if (signalCount == 0) revert NoPurchases(genius, idiot);
+        bytes32 batchKey = keccak256(abi.encode(genius, idiot, keccak256(abi.encode(purchaseIds))));
 
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        bytes32 cycleKey = _cycleKey(genius, idiot, cycle);
+        if (finalized[batchKey]) revert CycleAlreadyFinalized(batchKey);
+        if (earlyExitRequested[batchKey]) revert EarlyExitAlreadyRequested(batchKey);
 
-        if (finalized[cycleKey]) revert CycleAlreadyFinalized(cycleKey);
-        if (earlyExitRequested[cycleKey]) revert EarlyExitAlreadyRequested(cycleKey);
+        earlyExitRequested[batchKey] = true;
+        earlyExitRequestedBy[batchKey] = msg.sender;
 
-        earlyExitRequested[cycleKey] = true;
-        earlyExitRequestedBy[cycleKey] = msg.sender;
-
-        emit EarlyExitRequested(genius, idiot, cycle, msg.sender);
+        uint256 batchCount = 0;
+        if (address(account) != address(0)) {
+            batchCount = account.getAuditBatchCount(genius, idiot);
+        }
+        emit EarlyExitRequested(genius, idiot, batchCount, msg.sender);
     }
 
     // ─── Validator Set Sync ─────────────────────────────────────
@@ -358,80 +361,78 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
 
     // ─── Voting ─────────────────────────────────────────────────
 
-    /// @notice Submit a vote for the aggregate quality score of a Genius-Idiot cycle.
-    ///         Validators compute the score off-chain using MPC (checking real pick
-    ///         outcomes without revealing which line is real) and submit their result.
-    ///         When 2/3+ validators agree, settlement is triggered automatically.
+    /// @notice Submit a vote for the aggregate quality score of a batch of purchases.
+    ///         Validators compute the score off-chain using MPC and submit their result
+    ///         along with the specific purchaseIds they're voting on.
+    ///         When 2/3+ validators agree on the same batch + score, settlement fires.
     /// @param genius The Genius address
     /// @param idiot The Idiot address
+    /// @param purchaseIds The specific purchases being audited (deterministic: oldest resolved unaudited)
     /// @param qualityScore The USDC-denominated quality score (6 decimals, can be negative)
-    /// @param totalNotional The non-void notional for the cycle (USDC, 6 decimals).
-    ///        Validators exclude void outcomes when computing this value.
+    /// @param totalNotional The non-void notional for the batch (USDC, 6 decimals)
+    /// @param isEarlyExit Whether this is an early exit (< 10 purchases, Credits-only damages)
     function submitVote(
         address genius,
         address idiot,
+        uint256[] calldata purchaseIds,
         int256 qualityScore,
-        uint256 totalNotional
+        uint256 totalNotional,
+        bool isEarlyExit
     ) external whenNotPaused nonReentrant {
         if (!isValidator[msg.sender]) revert NotValidator(msg.sender);
         if (address(audit) == address(0)) revert ContractNotSet("Audit");
-        if (address(account) == address(0)) revert ContractNotSet("Account");
 
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        bytes32 cycleKey = _cycleKey(genius, idiot, cycle);
+        // Batch key is derived from the hash of purchaseIds. Validators voting on
+        // different sets of purchases naturally go to different keys.
+        bytes32 batchKey = keccak256(abi.encode(genius, idiot, keccak256(abi.encode(purchaseIds))));
 
-        if (finalized[cycleKey]) revert CycleAlreadyFinalized(cycleKey);
-        if (hasVoted[cycleKey][msg.sender]) revert AlreadyVoted(msg.sender, cycleKey);
+        if (finalized[batchKey]) revert CycleAlreadyFinalized(batchKey);
+        if (hasVoted[batchKey][msg.sender]) revert AlreadyVoted(msg.sender, batchKey);
 
-        // If validator set changed since snapshot, reset the cycle for re-voting.
-        // Clear hasVoted so validators can re-vote. Old voteCounts become stale
-        // because the new snapshot will use a different syncNonce in the scoreHash (CF-01).
-        if (cycleSyncNonce[cycleKey] != 0 && syncNonce != cycleSyncNonce[cycleKey]) {
+        // If validator set changed since snapshot, reset for re-voting.
+        if (cycleSyncNonce[batchKey] != 0 && syncNonce != cycleSyncNonce[batchKey]) {
             for (uint256 i = 0; i < validators.length; i++) {
-                delete hasVoted[cycleKey][validators[i]];
-                delete votedScore[cycleKey][validators[i]];
+                delete hasVoted[batchKey][validators[i]];
+                delete votedScore[batchKey][validators[i]];
             }
-            cycleValidatorSnapshot[cycleKey] = 0;
-            cycleSyncNonce[cycleKey] = 0;
+            cycleValidatorSnapshot[batchKey] = 0;
+            cycleSyncNonce[batchKey] = 0;
         }
 
-        // Snapshot validator count and sync nonce on first vote for this cycle
-        if (cycleValidatorSnapshot[cycleKey] == 0) {
+        // Snapshot validator count on first vote for this batch
+        if (cycleValidatorSnapshot[batchKey] == 0) {
             if (validators.length == 0) revert EmptyValidatorSet();
-            cycleValidatorSnapshot[cycleKey] = validators.length;
-            cycleSyncNonce[cycleKey] = syncNonce;
+            cycleValidatorSnapshot[batchKey] = validators.length;
+            cycleSyncNonce[batchKey] = syncNonce;
         }
 
-        // Record vote
-        hasVoted[cycleKey][msg.sender] = true;
-        votedScore[cycleKey][msg.sender] = qualityScore;
+        hasVoted[batchKey][msg.sender] = true;
+        votedScore[batchKey][msg.sender] = qualityScore;
 
-        // Hash score, notional, AND sync nonce so stale votes from a previous
-        // validator set are automatically invalidated (CF-01).
-        bytes32 scoreHash = keccak256(abi.encode(qualityScore, totalNotional, cycleSyncNonce[cycleKey]));
-        uint256 newCount = voteCounts[cycleKey][scoreHash] + 1;
-        voteCounts[cycleKey][scoreHash] = newCount;
+        bytes32 scoreHash = keccak256(abi.encode(qualityScore, totalNotional, isEarlyExit, cycleSyncNonce[batchKey]));
+        uint256 newCount = voteCounts[batchKey][scoreHash] + 1;
+        voteCounts[batchKey][scoreHash] = newCount;
 
-        emit VoteSubmitted(genius, idiot, cycle, msg.sender, qualityScore);
+        // Use batch count as a cycle-equivalent for the event
+        uint256 batchCount = 0;
+        if (address(account) != address(0)) {
+            batchCount = account.getAuditBatchCount(genius, idiot);
+        }
+        emit VoteSubmitted(genius, idiot, batchCount, msg.sender, qualityScore);
 
-        // Check quorum using the snapshot (prevents manipulation via add/remove mid-vote)
-        uint256 totalValidators = cycleValidatorSnapshot[cycleKey];
+        uint256 totalValidators = cycleValidatorSnapshot[batchKey];
         uint256 threshold = (totalValidators * QUORUM_NUMERATOR + QUORUM_DENOMINATOR - 1)
             / QUORUM_DENOMINATOR;
 
         if (newCount >= threshold) {
-            finalized[cycleKey] = true;
+            finalized[batchKey] = true;
 
-            emit QuorumReached(genius, idiot, cycle, qualityScore, newCount, totalValidators);
-
-            // Prefer full settlement when audit-ready, even if early exit was requested.
-            // Early exit flag set at signal 5 should not force Credits-only at signal 10.
-            bool isEarlyExit = earlyExitRequested[cycleKey] && !account.isAuditReady(genius, idiot);
+            emit QuorumReached(genius, idiot, batchCount, qualityScore, newCount, totalValidators);
 
             if (isEarlyExit) {
-                audit.earlyExitByVote(genius, idiot, qualityScore, totalNotional);
+                audit.earlyExitByVote(genius, idiot, purchaseIds, qualityScore, totalNotional);
             } else {
-                audit.settleByVote(genius, idiot, qualityScore, totalNotional);
+                audit.settleByVote(genius, idiot, purchaseIds, qualityScore, totalNotional);
             }
         }
     }
@@ -453,27 +454,31 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
             / QUORUM_DENOMINATOR;
     }
 
-    /// @notice Get the quorum threshold for a specific cycle (using snapshot)
-    /// @param genius The Genius address
-    /// @param idiot The Idiot address
-    /// @param cycle The audit cycle number
+    /// @notice Get the quorum threshold for a specific batch (using snapshot)
+    /// @param batchKey The batch key (hash of genius, idiot, purchaseIds hash)
     /// @return threshold Number of matching votes needed (0 if no votes cast yet)
-    function cycleQuorumThreshold(address genius, address idiot, uint256 cycle)
+    function batchQuorumThreshold(bytes32 batchKey)
         external
         view
         returns (uint256 threshold)
     {
-        bytes32 cycleKey = _cycleKey(genius, idiot, cycle);
-        uint256 snapshot = cycleValidatorSnapshot[cycleKey];
+        uint256 snapshot = cycleValidatorSnapshot[batchKey];
         if (snapshot == 0) return 0;
         return (snapshot * QUORUM_NUMERATOR + QUORUM_DENOMINATOR - 1) / QUORUM_DENOMINATOR;
     }
 
-    /// @notice Check if a cycle has been finalized
-    /// @param genius The Genius address
-    /// @param idiot The Idiot address
-    /// @param cycle The audit cycle number
+    /// @notice Check if a batch has been finalized
+    /// @param batchKey The batch key
     /// @return True if finalized
+    function isBatchFinalized(bytes32 batchKey)
+        external
+        view
+        returns (bool)
+    {
+        return finalized[batchKey];
+    }
+
+    /// @notice Legacy: check if a cycle has been finalized (kept for backwards compat)
     function isCycleFinalized(address genius, address idiot, uint256 cycle)
         external
         view
@@ -482,23 +487,13 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
         return finalized[_cycleKey(genius, idiot, cycle)];
     }
 
-    /// @notice Get the vote count for a specific score in a cycle
-    /// @param genius The Genius address
-    /// @param idiot The Idiot address
-    /// @param cycle The audit cycle number
-    /// @param qualityScore The score to count votes for
-    /// @param totalNotional The non-void notional to count votes for
-    /// @return count Number of validators who voted for this score
-    function getVoteCount(
-        address genius,
-        address idiot,
-        uint256 cycle,
-        int256 qualityScore,
-        uint256 totalNotional
-    ) external view returns (uint256 count) {
-        bytes32 cycleKey = _cycleKey(genius, idiot, cycle);
-        bytes32 scoreHash = keccak256(abi.encode(qualityScore, totalNotional, cycleSyncNonce[cycleKey]));
-        return voteCounts[cycleKey][scoreHash];
+    /// @notice Compute the batch key for a set of purchaseIds
+    function computeBatchKey(address genius, address idiot, uint256[] calldata purchaseIds)
+        external
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(genius, idiot, keccak256(abi.encode(purchaseIds))));
     }
 
     /// @notice Get the full list of registered validators
@@ -520,32 +515,39 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
 
     // ─── Stuck Cycle Recovery ────────────────────────────────────
 
-    /// @notice Reset a stuck voting cycle. Owner-only for recovery when a cycle
-    ///         cannot reach quorum (e.g., settlement reverted after partial voting,
-    ///         or validator set changed mid-vote leaving old voters blocked).
-    ///         Clears finalization, snapshot, and all per-validator vote state so
-    ///         validators can re-vote from scratch.
-    /// @param genius The Genius address
-    /// @param idiot The Idiot address
-    /// @param cycle The cycle number to reset
+    /// @notice Reset a stuck voting batch. Owner-only for recovery.
+    /// @param batchKey The batch key to reset
+    function resetBatch(bytes32 batchKey) external onlyOwner {
+        if (finalized[batchKey]) revert CycleAlreadyFinalized(batchKey);
+
+        cycleValidatorSnapshot[batchKey] = 0;
+        cycleSyncNonce[batchKey] = 0;
+
+        for (uint256 i = 0; i < validators.length; i++) {
+            delete hasVoted[batchKey][validators[i]];
+            delete votedScore[batchKey][validators[i]];
+        }
+
+        delete earlyExitRequested[batchKey];
+        delete earlyExitRequestedBy[batchKey];
+
+        // Emit with zero addresses since we only have the batch key
+        emit CycleReset(address(0), address(0), 0);
+    }
+
+    /// @notice Legacy: reset by cycle number (kept for backwards compat)
     function resetCycle(address genius, address idiot, uint256 cycle) external onlyOwner {
         bytes32 cycleKey = _cycleKey(genius, idiot, cycle);
-        // Only allow resetting non-finalized cycles (finalized cycles are already settled)
         if (finalized[cycleKey]) revert CycleAlreadyFinalized(cycleKey);
 
-        // Clear snapshot so a fresh snapshot is taken on the next vote
         cycleValidatorSnapshot[cycleKey] = 0;
         cycleSyncNonce[cycleKey] = 0;
 
-        // Clear hasVoted for all current validators so they can re-vote.
-        // Old voteCounts entries become stale but are harmless since the
-        // snapshot reset means quorum is recalculated from scratch.
         for (uint256 i = 0; i < validators.length; i++) {
             delete hasVoted[cycleKey][validators[i]];
             delete votedScore[cycleKey][validators[i]];
         }
 
-        // Clear early exit request state for this cycle
         delete earlyExitRequested[cycleKey];
         delete earlyExitRequestedBy[cycleKey];
 

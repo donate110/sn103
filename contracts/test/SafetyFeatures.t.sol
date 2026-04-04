@@ -6,6 +6,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {MockUSDC} from "./MockUSDC.sol";
 import {Account as DjinnAccount} from "../src/Account.sol";
+import {Outcome} from "../src/interfaces/IDjinn.sol";
 import {CreditLedger} from "../src/CreditLedger.sol";
 import {SignalCommitment} from "../src/SignalCommitment.sol";
 import {Collateral} from "../src/Collateral.sol";
@@ -121,57 +122,49 @@ contract SafetyFeaturesTest is Test {
         assertEq(account.activePairCount(), 2);
     }
 
-    function test_activePairCount_decrementsOnSettleAudit() public {
+    function test_activePairCount_decrementsOnMarkBatchAudited() public {
         account.setAuthorizedCaller(owner, true);
         account.recordPurchase(genius, idiot, 1);
+        account.recordOutcome(genius, idiot, 1, Outcome.Favorable);
         assertEq(account.activePairCount(), 1);
 
-        account.settleAudit(genius, idiot);
+        uint256[] memory pids = new uint256[](1);
+        pids[0] = 1;
+        account.markBatchAudited(genius, idiot, pids);
+        // All purchases audited, pair no longer active
         assertEq(account.activePairCount(), 0);
     }
 
     function test_activePairCount_fullCycleTwoSettlements() public {
         account.setAuthorizedCaller(owner, true);
         account.recordPurchase(genius, idiot, 1);
+        account.recordOutcome(genius, idiot, 1, Outcome.Favorable);
         account.recordPurchase(genius2, idiot2, 2);
+        account.recordOutcome(genius2, idiot2, 2, Outcome.Favorable);
         assertEq(account.activePairCount(), 2);
 
-        account.settleAudit(genius, idiot);
+        uint256[] memory pids1 = new uint256[](1);
+        pids1[0] = 1;
+        account.markBatchAudited(genius, idiot, pids1);
         assertEq(account.activePairCount(), 1);
 
-        account.settleAudit(genius2, idiot2);
+        uint256[] memory pids2 = new uint256[](1);
+        pids2[0] = 2;
+        account.markBatchAudited(genius2, idiot2, pids2);
         assertEq(account.activePairCount(), 0);
     }
 
-    function test_activePairCount_noUnderflowOnSettleWithZeroSignals() public {
-        account.setAuthorizedCaller(owner, true);
-        // Record and settle to get to a clean state
-        account.recordPurchase(genius, idiot, 1);
-        account.settleAudit(genius, idiot);
-        assertEq(account.activePairCount(), 0);
-
-        // Settle again on new cycle (signalCount is 0) — should not underflow
-        account.settleAudit(genius, idiot);
-        assertEq(account.activePairCount(), 0);
-    }
-
-    function test_activePairCount_decrementsOnStartNewCycle() public {
+    function test_activePairCount_reincrementsAfterAudit() public {
         account.setAuthorizedCaller(owner, true);
         account.recordPurchase(genius, idiot, 1);
-        assertEq(account.activePairCount(), 1);
+        account.recordOutcome(genius, idiot, 1, Outcome.Favorable);
 
-        account.setSettled(genius, idiot, true);
-        account.startNewCycle(genius, idiot);
-        assertEq(account.activePairCount(), 0);
-    }
-
-    function test_activePairCount_reincrementsAfterNewCycle() public {
-        account.setAuthorizedCaller(owner, true);
-        account.recordPurchase(genius, idiot, 1);
-        account.settleAudit(genius, idiot);
+        uint256[] memory pids = new uint256[](1);
+        pids[0] = 1;
+        account.markBatchAudited(genius, idiot, pids);
         assertEq(account.activePairCount(), 0);
 
-        // New purchase in new cycle
+        // New purchase after audit
         account.recordPurchase(genius, idiot, 10);
         assertEq(account.activePairCount(), 1);
     }
@@ -411,7 +404,9 @@ contract SafetyFeaturesTest is Test {
         audit.transferOwnership(address(timelock));
 
         // Direct forceSettle from old owner fails
+        uint256[] memory pids = new uint256[](1);
+        pids[0] = 0;
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, owner));
-        audit.forceSettle(genius, idiot, 0);
+        audit.forceSettle(genius, idiot, pids, 0);
     }
 }

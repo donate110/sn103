@@ -5,67 +5,80 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {AccountState, Outcome} from "./interfaces/IDjinn.sol";
+import {AccountState, PairQueueState, Outcome} from "./interfaces/IDjinn.sol";
 
-/// @title Account
-/// @notice Tracks the relationship state between a Genius-Idiot pair across audit cycles.
-///         Per the whitepaper, after 10 signals between a pair an audit occurs.
-///         This contract records signal counts, purchase IDs, outcomes, and cycle progression.
-/// @dev The (genius, idiot) pair is the primary key. Each pair progresses through independent
-///      audit cycles of 10 signals each.
+/// @title Account (v2 — Queue-based audits)
+/// @notice Tracks all purchases between a Genius-Idiot pair in an append-only queue.
+///         Purchases accumulate without limit. When 10+ have resolved outcomes,
+///         validators can audit any batch of 10. The pair is never blocked from trading.
+/// @dev UUPS upgrade from v1 (cycle-based). All v1 storage slots are preserved in place;
+///      new queue-based storage is appended after the __gap.
 contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPSUpgradeable {
-    // ─── Constants
-    // ──────────────────────────────────────────────────────
+    // ─── Legacy Storage (v1, preserved for UUPS layout compatibility) ───
+    // DO NOT reorder, remove, or insert above these. New storage goes after __gap.
 
-    /// @notice Number of signals required before an audit can be triggered.
-    /// @dev INVARIANT: Must remain <= 20 to ensure settlement gas costs stay within block
-    ///      limits. _resetCycle iterates over all purchaseIds in the cycle, and the ZK
-    ///      circuit supports a maximum of 20 public signal slots. Increasing beyond 20
-    ///      would require a circuit recompilation and gas analysis.
-    uint256 public constant SIGNALS_PER_CYCLE = 10;
-
-    // ─── Storage
-    // ────────────────────────────────────────────────────────
-
-    /// @dev keccak256(genius, idiot) => AccountState
+    /// @dev v1: keccak256(genius, idiot) => AccountState (no longer written to)
     mapping(bytes32 => AccountState) private _accounts;
 
-    /// @dev keccak256(genius, idiot) => whether the account has been initialized
+    /// @dev v1: keccak256(genius, idiot) => whether the account has been initialized
     mapping(bytes32 => bool) private _initialized;
 
-    /// @dev keccak256(genius, idiot) => purchaseId => Outcome
+    /// @dev keccak256(genius, idiot) => purchaseId => Outcome (STILL USED in v2)
     mapping(bytes32 => mapping(uint256 => Outcome)) private _outcomes;
 
-    /// @dev keccak256(genius, idiot) => purchaseId => whether recorded in current cycle
+    /// @dev keccak256(genius, idiot) => purchaseId => whether recorded (STILL USED in v2)
     mapping(bytes32 => mapping(uint256 => bool)) private _purchaseRecorded;
 
-    /// @dev address => whether it can call mutating functions
+    /// @dev address => whether it can call mutating functions (STILL USED in v2)
     mapping(address => bool) public authorizedCallers;
 
-    /// @notice Count of genius-idiot pairs with an active (unsettled) audit cycle
-    /// @dev Incremented when signalCount goes 0→1; decremented on settleAudit/startNewCycle
+    /// @notice Count of genius-idiot pairs with unaudited purchases
     uint256 public activePairCount;
 
-    /// @dev Tracks whether a pair is currently counted in activePairCount (prevents double-decrement)
+    /// @dev Tracks whether a pair is currently counted in activePairCount
     mapping(bytes32 => bool) private _pairIsActive;
 
     /// @notice Address authorized to pause this contract in emergencies
     address public pauser;
 
-    // ─── Events
-    // ─────────────────────────────────────────────────────────
+    // ─── Legacy storage gap (v1 used uint256[43]) ───────────────────
+    // We consume slots from __gap for new v2 storage. Original gap was 43 slots.
+    // New v2 storage uses 6 slots, leaving 37 in the gap.
+
+    // ─── Queue-based Storage (v2) ───────────────────────────────────
+
+    /// @notice All purchase IDs for a (genius, idiot) pair, in order of recording
+    mapping(bytes32 => uint256[]) private _pairPurchaseIds;
+
+    /// @notice Whether a purchase has been included in a completed audit batch
+    mapping(uint256 => bool) private _purchaseAudited;
+
+    /// @notice Number of resolved (non-Pending) outcomes per pair
+    mapping(bytes32 => uint256) private _resolvedCount;
+
+    /// @notice Number of audited purchases per pair
+    mapping(bytes32 => uint256) private _auditedCount;
+
+    /// @notice Number of completed audit batches per pair
+    mapping(bytes32 => uint256) private _auditBatchCount;
+
+    /// @notice Purchase IDs for each completed audit batch
+    /// @dev pairKey => batchId => purchaseIds
+    mapping(bytes32 => mapping(uint256 => uint256[])) private _auditBatches;
+
+    /// @dev Reduced gap: 43 original - 6 new mappings = 37
+    uint256[37] private __gap;
+
+    // ─── Events ─────────────────────────────────────────────────────
 
     /// @notice Emitted when a purchase is recorded for a Genius-Idiot pair
-    event PurchaseRecorded(address indexed genius, address indexed idiot, uint256 purchaseId, uint256 signalCount);
+    event PurchaseRecorded(address indexed genius, address indexed idiot, uint256 purchaseId, uint256 totalPurchases);
 
     /// @notice Emitted when an outcome is recorded for a purchase
     event OutcomeRecorded(address indexed genius, address indexed idiot, uint256 purchaseId, Outcome outcome);
 
-    /// @notice Emitted when a new audit cycle begins for a pair
-    event NewCycleStarted(address indexed genius, address indexed idiot, uint256 newCycle);
-
-    /// @notice Emitted when the settled flag is changed for a pair
-    event SettledChanged(address indexed genius, address indexed idiot, bool settled);
+    /// @notice Emitted when an audit batch is completed
+    event AuditBatchCompleted(address indexed genius, address indexed idiot, uint256 batchId, uint256 purchaseCount);
 
     /// @notice Emitted when an authorized caller is added or removed
     event AuthorizedCallerSet(address indexed caller, bool authorized);
@@ -73,49 +86,25 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     /// @notice Emitted when the pauser address is updated
     event PauserUpdated(address indexed newPauser);
 
-    // ─── Errors
-    // ─────────────────────────────────────────────────────────
+    // ─── Errors ─────────────────────────────────────────────────────
 
-    /// @notice Caller is not authorized to call this function
     error CallerNotAuthorized(address caller);
-
-    /// @notice Genius address must not be zero
     error ZeroGeniusAddress();
-
-    /// @notice Idiot address must not be zero
     error ZeroIdiotAddress();
 
-    /// @notice Genius and Idiot addresses must be different
-    error GeniusEqualsIdiot(address addr);
-
-    /// @notice Signal count for this cycle has already reached the maximum
-    error CycleSignalLimitReached(address genius, address idiot, uint256 limit);
-
-    /// @notice Purchase ID has already been recorded for this pair
     error PurchaseAlreadyRecorded(address genius, address idiot, uint256 purchaseId);
-
-    /// @notice Purchase ID was not recorded in this account
     error PurchaseNotFound(address genius, address idiot, uint256 purchaseId);
-
-    /// @notice Outcome has already been recorded for this purchase
     error OutcomeAlreadyRecorded(address genius, address idiot, uint256 purchaseId);
-
-    /// @notice Cannot record Pending as an outcome
     error InvalidOutcome();
-
-    /// @notice Address must not be zero
     error ZeroAddress();
-
-    /// @notice Current cycle must be settled before starting a new one
-    error CycleNotSettled(address genius, address idiot, uint256 cycle);
-
-    /// @notice Caller is not the pauser or the owner
     error NotPauserOrOwner(address caller);
+    error PurchaseAlreadyAudited(uint256 purchaseId);
+    error PurchaseNotResolved(uint256 purchaseId);
+    error PurchaseNotInPair(uint256 purchaseId);
+    error EmptyBatch();
 
-    // ─── Modifiers
-    // ──────────────────────────────────────────────────────
+    // ─── Modifiers ──────────────────────────────────────────────────
 
-    /// @dev Reverts if the caller is not an authorized contract
     modifier onlyAuthorized() {
         if (!authorizedCallers[msg.sender]) {
             revert CallerNotAuthorized(msg.sender);
@@ -123,8 +112,7 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
         _;
     }
 
-    // ─── Constructor / Initializer
-    // ────────────────────────────────────────────────────
+    // ─── Constructor / Initializer ──────────────────────────────────
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -138,54 +126,43 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
         __Pausable_init();
     }
 
-    // ─── External Functions
-    // ─────────────────────────────────────────────
+    // ─── External Functions ─────────────────────────────────────────
 
-    /// @notice Record a purchase for a Genius-Idiot pair
+    /// @notice Record a purchase for a Genius-Idiot pair. No limit on purchases.
     /// @param genius The Genius address
     /// @param idiot The Idiot (buyer) address
     /// @param purchaseId The unique purchase identifier
     function recordPurchase(address genius, address idiot, uint256 purchaseId) external onlyAuthorized whenNotPaused {
         _validatePair(genius, idiot);
 
-        bytes32 key = _accountKey(genius, idiot);
-        AccountState storage acct = _accounts[key];
-
-        if (!_initialized[key]) {
-            _initialized[key] = true;
-        }
-
-        if (acct.signalCount >= SIGNALS_PER_CYCLE) {
-            revert CycleSignalLimitReached(genius, idiot, SIGNALS_PER_CYCLE);
-        }
+        bytes32 key = _pairKey(genius, idiot);
 
         if (_purchaseRecorded[key][purchaseId]) {
             revert PurchaseAlreadyRecorded(genius, idiot, purchaseId);
         }
 
-        // Track new active pair (first purchase in this cycle)
+        // Track active pair (has unaudited purchases)
         if (!_pairIsActive[key]) {
             _pairIsActive[key] = true;
             activePairCount++;
         }
 
         _purchaseRecorded[key][purchaseId] = true;
-        acct.signalCount++;
-        acct.purchaseIds.push(purchaseId);
+        _pairPurchaseIds[key].push(purchaseId);
 
-        emit PurchaseRecorded(genius, idiot, purchaseId, acct.signalCount);
+        emit PurchaseRecorded(genius, idiot, purchaseId, _pairPurchaseIds[key].length);
     }
 
-    /// @notice Record the outcome of a specific purchase within an account
+    /// @notice Record the outcome of a specific purchase
     /// @param genius The Genius address
     /// @param idiot The Idiot (buyer) address
     /// @param purchaseId The purchase to record an outcome for
-    /// @param outcome The outcome (Favorable, Unfavorable, or Void — not Pending)
+    /// @param outcome The outcome (Favorable, Unfavorable, or Void)
     function recordOutcome(address genius, address idiot, uint256 purchaseId, Outcome outcome) external onlyAuthorized whenNotPaused {
         _validatePair(genius, idiot);
         if (outcome == Outcome.Pending) revert InvalidOutcome();
 
-        bytes32 key = _accountKey(genius, idiot);
+        bytes32 key = _pairKey(genius, idiot);
 
         if (!_purchaseRecorded[key][purchaseId]) {
             revert PurchaseNotFound(genius, idiot, purchaseId);
@@ -196,54 +173,50 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
         }
 
         _outcomes[key][purchaseId] = outcome;
-
-        // Update quality score: +1 for Favorable, -1 for Unfavorable, 0 for Void
-        if (outcome == Outcome.Favorable) {
-            _accounts[key].outcomeBalance++;
-        } else if (outcome == Outcome.Unfavorable) {
-            _accounts[key].outcomeBalance--;
-        }
+        _resolvedCount[key]++;
 
         emit OutcomeRecorded(genius, idiot, purchaseId, outcome);
     }
 
-    /// @notice Start a new audit cycle for a Genius-Idiot pair
+    /// @notice Mark a batch of purchases as audited. Called by the Audit contract
+    ///         after settlement completes. Validates all purchases belong to the pair,
+    ///         are resolved, and haven't been audited before.
     /// @param genius The Genius address
-    /// @param idiot The Idiot (buyer) address
-    function startNewCycle(address genius, address idiot) external onlyAuthorized whenNotPaused {
+    /// @param idiot The Idiot address
+    /// @param purchaseIds The purchases to mark as audited
+    /// @return batchId The assigned audit batch ID
+    function markBatchAudited(
+        address genius,
+        address idiot,
+        uint256[] calldata purchaseIds
+    ) external onlyAuthorized whenNotPaused returns (uint256 batchId) {
         _validatePair(genius, idiot);
-        bytes32 key = _accountKey(genius, idiot);
-        AccountState storage acct = _accounts[key];
-        if (!acct.settled) {
-            revert CycleNotSettled(genius, idiot, acct.currentCycle);
+        if (purchaseIds.length == 0) revert EmptyBatch();
+
+        bytes32 key = _pairKey(genius, idiot);
+
+        for (uint256 i; i < purchaseIds.length; ++i) {
+            uint256 pid = purchaseIds[i];
+            if (!_purchaseRecorded[key][pid]) revert PurchaseNotInPair(pid);
+            if (_outcomes[key][pid] == Outcome.Pending) revert PurchaseNotResolved(pid);
+            if (_purchaseAudited[pid]) revert PurchaseAlreadyAudited(pid);
+
+            _purchaseAudited[pid] = true;
         }
-        _resetCycle(key);
-        emit NewCycleStarted(genius, idiot, _accounts[key].currentCycle);
-    }
 
-    /// @notice Set the settled flag for a Genius-Idiot pair
-    /// @param genius The Genius address
-    /// @param idiot The Idiot (buyer) address
-    /// @param settled Whether the current cycle has been settled
-    function setSettled(address genius, address idiot, bool settled) external onlyAuthorized whenNotPaused {
-        _validatePair(genius, idiot);
+        _auditedCount[key] += purchaseIds.length;
 
-        bytes32 key = _accountKey(genius, idiot);
-        _accounts[key].settled = settled;
+        batchId = _auditBatchCount[key];
+        _auditBatches[key][batchId] = purchaseIds;
+        _auditBatchCount[key] = batchId + 1;
 
-        emit SettledChanged(genius, idiot, settled);
-    }
+        // If all purchases are now audited, pair is no longer active
+        if (_auditedCount[key] == _pairPurchaseIds[key].length && _pairIsActive[key]) {
+            _pairIsActive[key] = false;
+            activePairCount--;
+        }
 
-    /// @notice Settle an audit for a Genius-Idiot pair: marks as settled and starts a new cycle
-    /// @param genius The Genius address
-    /// @param idiot The Idiot (buyer) address
-    function settleAudit(address genius, address idiot) external onlyAuthorized whenNotPaused {
-        _validatePair(genius, idiot);
-        bytes32 key = _accountKey(genius, idiot);
-        _accounts[key].settled = true;
-        emit SettledChanged(genius, idiot, true);
-        _resetCycle(key);
-        emit NewCycleStarted(genius, idiot, _accounts[key].currentCycle);
+        emit AuditBatchCompleted(genius, idiot, batchId, purchaseIds.length);
     }
 
     /// @notice Authorize or deauthorize a contract to call mutating functions
@@ -252,92 +225,86 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     function setAuthorizedCaller(address caller, bool authorized) external onlyOwner {
         if (caller == address(0)) revert ZeroAddress();
         authorizedCallers[caller] = authorized;
-
         emit AuthorizedCallerSet(caller, authorized);
     }
 
-    // ─── View Functions
-    // ─────────────────────────────────────────────────
+    // ─── View Functions (v2 Queue API) ──────────────────────────────
 
-    /// @notice Returns the full account state for a Genius-Idiot pair
-    /// @param genius The Genius address
-    /// @param idiot The Idiot (buyer) address
-    /// @return state The AccountState struct for this pair
-    function getAccountState(address genius, address idiot) external view returns (AccountState memory state) {
-        return _accounts[_accountKey(genius, idiot)];
+    /// @notice Returns the queue state summary for a Genius-Idiot pair
+    function getQueueState(address genius, address idiot) external view returns (PairQueueState memory) {
+        bytes32 key = _pairKey(genius, idiot);
+        return PairQueueState({
+            totalPurchases: _pairPurchaseIds[key].length,
+            resolvedCount: _resolvedCount[key],
+            auditedCount: _auditedCount[key],
+            auditBatchCount: _auditBatchCount[key]
+        });
     }
 
-    /// @notice Returns the current audit cycle for a Genius-Idiot pair
-    /// @param genius The Genius address
-    /// @param idiot The Idiot (buyer) address
-    /// @return cycle The current cycle number
-    function getCurrentCycle(address genius, address idiot) external view returns (uint256 cycle) {
-        return _accounts[_accountKey(genius, idiot)].currentCycle;
+    /// @notice Returns all purchase IDs for a pair
+    function getPairPurchaseIds(address genius, address idiot) external view returns (uint256[] memory) {
+        return _pairPurchaseIds[_pairKey(genius, idiot)];
     }
 
-    /// @notice Check whether a Genius-Idiot pair is ready for an audit
-    /// @param genius The Genius address
-    /// @param idiot The Idiot (buyer) address
-    /// @return ready True if signalCount >= SIGNALS_PER_CYCLE for the current cycle
-    function isAuditReady(address genius, address idiot) external view returns (bool ready) {
-        return _accounts[_accountKey(genius, idiot)].signalCount >= SIGNALS_PER_CYCLE;
+    /// @notice Returns the outcome for a specific purchase
+    function getOutcome(address genius, address idiot, uint256 purchaseId) external view returns (Outcome) {
+        return _outcomes[_pairKey(genius, idiot)][purchaseId];
     }
 
-    /// @notice Returns the signal count for the current cycle of a Genius-Idiot pair
-    /// @param genius The Genius address
-    /// @param idiot The Idiot (buyer) address
-    /// @return count The number of signals recorded in the current cycle
-    function getSignalCount(address genius, address idiot) external view returns (uint256 count) {
-        return _accounts[_accountKey(genius, idiot)].signalCount;
+    /// @notice Whether a purchase has been recorded for this pair
+    function isPurchaseRecorded(address genius, address idiot, uint256 purchaseId) external view returns (bool) {
+        return _purchaseRecorded[_pairKey(genius, idiot)][purchaseId];
     }
 
-    /// @notice Returns the purchase IDs for the current cycle of a Genius-Idiot pair
-    /// @param genius The Genius address
-    /// @param idiot The Idiot (buyer) address
-    /// @return ids Array of purchase IDs in the current cycle
-    function getPurchaseIds(address genius, address idiot) external view returns (uint256[] memory ids) {
-        return _accounts[_accountKey(genius, idiot)].purchaseIds;
+    /// @notice Whether a purchase has been audited
+    function isPurchaseAudited(uint256 purchaseId) external view returns (bool) {
+        return _purchaseAudited[purchaseId];
     }
 
-    /// @notice Returns the recorded outcome for a specific purchase within a pair
-    /// @param genius The Genius address
-    /// @param idiot The Idiot (buyer) address
-    /// @param purchaseId The purchase to look up
-    /// @return outcome The outcome recorded for this purchase
-    function getOutcome(address genius, address idiot, uint256 purchaseId) external view returns (Outcome outcome) {
-        return _outcomes[_accountKey(genius, idiot)][purchaseId];
+    /// @notice Returns the purchase IDs for a specific audit batch
+    function getAuditBatch(address genius, address idiot, uint256 batchId) external view returns (uint256[] memory) {
+        return _auditBatches[_pairKey(genius, idiot)][batchId];
     }
 
-    // ─── Internal Functions
-    // ─────────────────────────────────────────────
-
-    /// @dev Resets cycle state: clears outcomes, purchase records, increments cycle, zeros counters
-    function _resetCycle(bytes32 key) internal {
-        AccountState storage acct = _accounts[key];
-
-        // Decrement active pair count (guarded by flag to prevent double-decrement)
-        if (_pairIsActive[key]) {
-            _pairIsActive[key] = false;
-            activePairCount--;
-        }
-
-        // Clear purchase recorded flags and stale outcomes for the current cycle
-        uint256 len = acct.purchaseIds.length;
-        for (uint256 i; i < len;) {
-            delete _outcomes[key][acct.purchaseIds[i]];
-            delete _purchaseRecorded[key][acct.purchaseIds[i]];
-            unchecked { ++i; }
-        }
-
-        acct.currentCycle++;
-        acct.signalCount = 0;
-        acct.outcomeBalance = 0;
-        delete acct.purchaseIds;
-        acct.settled = false;
+    /// @notice Returns the number of completed audit batches for a pair
+    function getAuditBatchCount(address genius, address idiot) external view returns (uint256) {
+        return _auditBatchCount[_pairKey(genius, idiot)];
     }
+
+    // ─── Legacy View Functions (backwards compatibility) ────────────
+    // These map old cycle-based concepts onto the queue model.
+    // currentCycle = auditBatchCount, signalCount = unaudited count, etc.
+
+    function getCurrentCycle(address genius, address idiot) external view returns (uint256) {
+        return _auditBatchCount[_pairKey(genius, idiot)];
+    }
+
+    function isAuditReady(address genius, address idiot) external view returns (bool) {
+        bytes32 key = _pairKey(genius, idiot);
+        uint256 unauditedResolved = _resolvedCount[key] - _auditedCount[key];
+        return unauditedResolved >= 10;
+    }
+
+    function getAccountState(address genius, address idiot) external view returns (AccountState memory) {
+        bytes32 key = _pairKey(genius, idiot);
+        return AccountState({
+            currentCycle: _auditBatchCount[key],
+            signalCount: _pairPurchaseIds[key].length - _auditedCount[key],
+            outcomeBalance: 0,
+            purchaseIds: _pairPurchaseIds[key],
+            settled: false
+        });
+    }
+
+    function getSignalCount(address genius, address idiot) external view returns (uint256) {
+        bytes32 key = _pairKey(genius, idiot);
+        return _pairPurchaseIds[key].length - _auditedCount[key];
+    }
+
+    // ─── Internal Functions ─────────────────────────────────────────
 
     /// @dev Computes the storage key for a Genius-Idiot pair
-    function _accountKey(address genius, address idiot) internal pure returns (bytes32 key) {
+    function _pairKey(address genius, address idiot) internal pure returns (bytes32) {
         return keccak256(abi.encode(genius, idiot));
     }
 
@@ -345,39 +312,27 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     function _validatePair(address genius, address idiot) internal pure {
         if (genius == address(0)) revert ZeroGeniusAddress();
         if (idiot == address(0)) revert ZeroIdiotAddress();
-        if (genius == idiot) revert GeniusEqualsIdiot(genius);
     }
 
-    // ─── Emergency Pause
-    // ──────────────────────────────────────────────────────
+    // ─── Emergency Pause ────────────────────────────────────────────
 
-    /// @notice Set the emergency pauser address
-    /// @param _pauser New pauser address (address(0) to disable)
     function setPauser(address _pauser) external onlyOwner {
         pauser = _pauser;
         emit PauserUpdated(_pauser);
     }
 
-    /// @notice Pause the contract
     function pause() external {
         if (msg.sender != pauser && msg.sender != owner()) revert NotPauserOrOwner(msg.sender);
         _pause();
     }
 
-    /// @notice Unpause the contract
     function unpause() external onlyOwner {
         _unpause();
     }
 
-    /// @dev Owner can authorize upgrades only when paused.
-    ///      Account holds no USDC — no balance guard needed.
     function _authorizeUpgrade(address) internal override onlyOwner whenPaused {}
 
-    /// @dev Disabled to prevent accidental permanent bricking of upgradeable proxy.
     function renounceOwnership() public pure override {
         revert("disabled");
     }
-
-    /// @dev Reserved storage gap for future upgrades.
-    uint256[43] private __gap;
 }

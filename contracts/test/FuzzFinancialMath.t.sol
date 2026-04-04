@@ -124,6 +124,14 @@ contract FuzzFinancialMathTest is Test {
         vm.stopPrank();
     }
 
+    /// @dev Build a sequential purchaseId array [0..n-1]
+    function _buildPurchaseIds(uint256 n) internal pure returns (uint256[] memory pids) {
+        pids = new uint256[](n);
+        for (uint256 i; i < n; i++) {
+            pids[i] = i;
+        }
+    }
+
     /// @dev Sets up a full 10-signal cycle with uniform parameters and specified outcomes.
     ///      Returns the total USDC fees paid and total notional for non-void purchases.
     function _setupFullCycle(
@@ -176,7 +184,7 @@ contract FuzzFinancialMathTest is Test {
         uint256 protocolFeeExtra = (10 * notional * 50) / 10_000;
         _depositGeniusCollateral(protocolFeeExtra);
 
-        int256 score = audit.computeScore(genius, idiot);
+        int256 score = audit.computeScore(genius, idiot, _buildPurchaseIds(10));
 
         // Score must be strictly positive since all signals favorable with odds > 1.0
         assertTrue(score > 0, "All favorable: score must be positive");
@@ -199,7 +207,7 @@ contract FuzzFinancialMathTest is Test {
 
         _setupFullCycle(notional, DEFAULT_ODDS, sla, outcomes);
 
-        int256 score = audit.computeScore(genius, idiot);
+        int256 score = audit.computeScore(genius, idiot, _buildPurchaseIds(10));
 
         // Score must be strictly negative since all signals unfavorable with sla >= 100%
         assertTrue(score < 0, "All unfavorable: score must be negative");
@@ -221,7 +229,7 @@ contract FuzzFinancialMathTest is Test {
 
         _setupFullCycle(notional, DEFAULT_ODDS, DEFAULT_SLA, outcomes);
 
-        int256 score = audit.computeScore(genius, idiot);
+        int256 score = audit.computeScore(genius, idiot, _buildPurchaseIds(10));
         assertEq(score, 0, "All void: score must be zero");
     }
 
@@ -247,7 +255,7 @@ contract FuzzFinancialMathTest is Test {
 
         _setupFullCycle(notional, odds, sla, outcomes);
 
-        int256 score = audit.computeScore(genius, idiot);
+        int256 score = audit.computeScore(genius, idiot, _buildPurchaseIds(10));
 
         // Match contract's per-iteration division to avoid rounding discrepancies
         int256 singleGain = int256(notional) * (int256(odds) - 1e6) / 1e6;
@@ -269,7 +277,7 @@ contract FuzzFinancialMathTest is Test {
 
         _setupFullCycle(notional, odds, DEFAULT_SLA, outcomes);
 
-        int256 score = audit.computeScore(genius, idiot);
+        int256 score = audit.computeScore(genius, idiot, _buildPurchaseIds(10));
 
         // gain per signal = notional * 10_000 / 1_000_000 = notional / 100
         // Match contract's per-iteration division
@@ -295,7 +303,7 @@ contract FuzzFinancialMathTest is Test {
 
         _setupFullCycle(notional, odds, DEFAULT_SLA, outcomes);
 
-        int256 score = audit.computeScore(genius, idiot);
+        int256 score = audit.computeScore(genius, idiot, _buildPurchaseIds(10));
 
         // gain per signal = notional * (1_000_000_000 - 1_000_000) / 1_000_000 = notional * 999
         int256 singleGain = int256(notional) * (int256(odds) - 1e6) / 1e6;
@@ -316,7 +324,7 @@ contract FuzzFinancialMathTest is Test {
 
         _setupFullCycle(notional, DEFAULT_ODDS, sla, outcomes);
 
-        int256 score = audit.computeScore(genius, idiot);
+        int256 score = audit.computeScore(genius, idiot, _buildPurchaseIds(10));
 
         // loss per signal = notional * 30_000 / 10_000 = notional * 3
         int256 singleLoss = int256(notional) * int256(sla) / int256(10_000);
@@ -453,7 +461,7 @@ contract FuzzFinancialMathTest is Test {
 
         // Early exit as the idiot
         vm.prank(idiot);
-        audit.earlyExit(genius, idiot);
+        audit.earlyExit(genius, idiot, _buildPurchaseIds(5));
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertGt(result.protocolFee, 0, "Early exit: protocol fee charged");
@@ -482,7 +490,7 @@ contract FuzzFinancialMathTest is Test {
         uint256 protocolFeeExtra = (10 * notional * 50) / 10_000;
         _depositGeniusCollateral(protocolFeeExtra);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, _buildPurchaseIds(10));
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertTrue(result.qualityScore > 0, "Score must be positive");
@@ -506,7 +514,7 @@ contract FuzzFinancialMathTest is Test {
         uint256 extra = (10 * notional * (sla + 50)) / 10_000;
         _depositGeniusCollateral(extra);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, _buildPurchaseIds(10));
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertLe(result.trancheA, totalUsdcFeesPaid, "TrancheA must be capped at USDC fees paid");
@@ -559,7 +567,7 @@ contract FuzzFinancialMathTest is Test {
         uint256 extra = (10 * notional * (sla + 50)) / 10_000;
         _depositGeniusCollateral(extra);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, _buildPurchaseIds(10));
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertTrue(result.qualityScore < 0, "Score must be negative for this test");
@@ -586,7 +594,7 @@ contract FuzzFinancialMathTest is Test {
         uint256 extra = (10 * notional * (sla + 50)) / 10_000;
         _depositGeniusCollateral(extra);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, _buildPurchaseIds(10));
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertTrue(result.qualityScore < 0, "Score must be negative");
