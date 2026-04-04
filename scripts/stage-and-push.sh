@@ -163,9 +163,9 @@ else
   fail "Miner notary port not bound to 0.0.0.0:8091"
 fi
 
-# Test 9: No crash-loops (restarts in last 60s)
+# Test 9: No crash-loops
 VRESTARTS=$(ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no ${JUMP} ${VALIDATOR_BOX} \
-  "pm2 show djinn-validator 2>/dev/null | grep 'unstable restarts' | awk '{print \$4}'" 2>/dev/null || echo "0")
+  "pm2 jlist 2>/dev/null | python3 -c \"import sys,json; procs=json.load(sys.stdin); v=[p for p in procs if p['name']=='djinn-validator']; print(v[0]['pm2_env']['unstable_restarts'] if v else 0)\"" 2>/dev/null || echo "0")
 if [ "${VRESTARTS:-0}" = "0" ]; then
   pass "Validator: 0 unstable restarts"
 else
