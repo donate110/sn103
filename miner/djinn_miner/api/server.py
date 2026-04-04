@@ -509,10 +509,20 @@ def create_app(
                     timeout=60.0,
                 )
             else:
-                # No peer assigned: skip the main sidecar (port 7047) entirely.
-                # It accumulates stale MPC state and hangs for 150s before
-                # failing. Go straight to ephemeral notary.
-                result = tlsn_module.TLSNProofResult(success=False, error="no peer, using ephemeral")
+                # No peer assigned: use our own local sidecar as notary.
+                _local_notary_port = int(os.getenv("NOTARY_PORT", "8091"))
+                try:
+                    result = await asyncio.wait_for(
+                        tlsn_module.generate_proof(
+                            request.url,
+                            notary_host="127.0.0.1",
+                            notary_port=_local_notary_port,
+                            timeout=60.0,
+                        ),
+                        timeout=75.0,
+                    )
+                except (TimeoutError, asyncio.TimeoutError):
+                    result = tlsn_module.TLSNProofResult(success=False, error=f"local notary timeout ({_local_notary_port})")
 
             # Spawn a fresh ephemeral notary if the first attempt failed.
             # Ephemeral notaries get clean MPC state every time.
