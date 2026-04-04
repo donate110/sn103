@@ -323,9 +323,16 @@ export async function discoverValidatorClients(): Promise<ValidatorClient[]> {
   try {
     const res = await fetch("/api/validators/discover");
     if (!res.ok) throw new Error(`Discovery failed: ${res.status}`);
-    const { validators } = await res.json() as { validators: { uid: number }[] };
+    const { validators } = await res.json() as { validators: { uid: number; ip?: string; port?: number }[] };
     if (validators.length === 0) throw new Error("No validators discovered");
-    const clients = validators.map((v) => new ValidatorClient(`/api/validators/${v.uid}`));
+    // Use direct validator URLs (bypasses Vercel proxy, faster MPC).
+    // Falls back to proxy if IP/port unavailable.
+    const clients = validators.map((v) => {
+      if (v.ip && v.port) {
+        return new ValidatorClient(`http://${v.ip}:${v.port}`);
+      }
+      return new ValidatorClient(`/api/validators/${v.uid}`);
+    });
     _discoveryCache = { clients, ts: Date.now() };
     return clients;
   } catch {
