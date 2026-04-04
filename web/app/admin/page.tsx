@@ -1882,7 +1882,7 @@ function ProtocolActivityTab({
                   ? "bg-green-100 text-green-700"
                   : "bg-red-100 text-red-700"
             }
-            title={`Cycle ${a.cycle} \u2014 ${truncAddr(a.genius.id)} / ${truncAddr(a.idiot.id)}`}
+            title={`Batch ${a.cycle} \u2014 ${truncAddr(a.genius.id)} / ${truncAddr(a.idiot.id)}`}
             subtitle={`A: ${formatUsdc(BigInt(a.trancheA))} | B: ${formatUsdc(BigInt(a.trancheB))} | Fee: ${formatUsdc(BigInt(a.protocolFee))}`}
             timestamp={Number(a.settledAt)}
             txHash={a.settledAtTx}

@@ -286,7 +286,7 @@ async function main() {
   console.log(`\n=== STEP 5: Purchase ${NUM_PURCHASES} signals (on-chain only, no MPC) ===`);
   const purchaseTimings = [];
 
-  // Use a separate buyer wallet to avoid GeniusEqualsIdiot revert
+  // Use a separate buyer wallet (self-purchase now allowed, but a distinct buyer is more realistic)
   let buyerWallet = wallet;
   let buyerEscrow = escrow;
   if (BUYER_KEY) {
@@ -317,7 +317,7 @@ async function main() {
       }
     }
   } else {
-    console.log(`  No E2E_BUYER_PRIVATE_KEY set, using same wallet (will get GeniusEqualsIdiot)`);
+    console.log(`  No E2E_BUYER_PRIVATE_KEY set, using same wallet (self-purchase)`);
     console.log(`  Buying with: ${wallet.address} (escrow: ${ethers.formatUnits(escrowBal, 6)} USDC)`);
   }
 

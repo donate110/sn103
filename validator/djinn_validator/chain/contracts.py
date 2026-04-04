@@ -171,9 +171,63 @@ ACCOUNT_ABI = [
         "stateMutability": "view",
         "type": "function",
     },
+    # --- v2 queue-based functions ---
+    {
+        "inputs": [
+            {"name": "genius", "type": "address"},
+            {"name": "idiot", "type": "address"},
+        ],
+        "name": "getAuditBatchCount",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [
+            {"name": "genius", "type": "address"},
+            {"name": "idiot", "type": "address"},
+        ],
+        "name": "getPairPurchaseIds",
+        "outputs": [{"name": "", "type": "uint256[]"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [
+            {"name": "genius", "type": "address"},
+            {"name": "idiot", "type": "address"},
+        ],
+        "name": "getQueueState",
+        "outputs": [
+            {"name": "totalPurchases", "type": "uint256"},
+            {"name": "resolvedCount", "type": "uint256"},
+            {"name": "auditedCount", "type": "uint256"},
+            {"name": "auditBatchCount", "type": "uint256"},
+        ],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "purchaseId", "type": "uint256"}],
+        "name": "isPurchaseAudited",
+        "outputs": [{"name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [
+            {"name": "genius", "type": "address"},
+            {"name": "idiot", "type": "address"},
+            {"name": "purchaseIds", "type": "uint256[]"},
+        ],
+        "name": "markBatchAudited",
+        "outputs": [{"name": "batchId", "type": "uint256"}],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
 ]
 
-OUTCOME_VOTING_ABI = [
+OUTCOME_VOTING_ABI_V1 = [
     {
         "inputs": [
             {"name": "genius", "type": "address"},
@@ -186,6 +240,26 @@ OUTCOME_VOTING_ABI = [
         "stateMutability": "nonpayable",
         "type": "function",
     },
+]
+
+OUTCOME_VOTING_ABI_V2 = [
+    {
+        "inputs": [
+            {"name": "genius", "type": "address"},
+            {"name": "idiot", "type": "address"},
+            {"name": "purchaseIds", "type": "uint256[]"},
+            {"name": "qualityScore", "type": "int256"},
+            {"name": "totalNotional", "type": "uint256"},
+            {"name": "isEarlyExit", "type": "bool"},
+        ],
+        "name": "submitVote",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+]
+
+OUTCOME_VOTING_ABI = OUTCOME_VOTING_ABI_V1 + [
     {
         "inputs": [
             {"name": "genius", "type": "address"},
@@ -285,6 +359,12 @@ class ChainClient:
         self._w3 = self._create_provider(self._rpc_urls[0])
         self._setup_contracts()
 
+        # Contract version: 1 = cycle-based, 2 = queue-based
+        # Detected lazily on first relevant call (see detect_contract_version)
+        self._contract_version: int = 0  # 0 = unknown/not yet detected
+        self._version_detect_epoch: int = 0  # epoch at last detection
+        self._VERSION_RECHECK_INTERVAL: int = 100  # re-detect every N epochs
+
         # Transaction signing (optional — required for settlement writes)
         self._private_key = private_key
         self._validator_address: str | None = None
@@ -311,6 +391,7 @@ class ChainClient:
         self._signal: AsyncContract | None = None
         self._account: AsyncContract | None = None
         self._outcome_voting: AsyncContract | None = None
+        self._outcome_voting_v2: AsyncContract | None = None
         for label, addr, abi, attr in [
             ("escrow", self._escrow_address, ESCROW_ABI, "_escrow"),
             ("signal", self._signal_address, SIGNAL_COMMITMENT_ABI, "_signal"),
@@ -329,6 +410,19 @@ class ChainClient:
                     )
                 except ValueError:
                     log.error("invalid_contract_address", contract=label, address=addr)
+
+        # Build the v2 OutcomeVoting contract reference (different submitVote ABI)
+        if self._outcome_voting_address:
+            try:
+                self._outcome_voting_v2 = self._w3.eth.contract(
+                    address=self._w3.to_checksum_address(self._outcome_voting_address),
+                    abi=OUTCOME_VOTING_ABI_V2 + [
+                        entry for entry in OUTCOME_VOTING_ABI
+                        if entry.get("name") != "submitVote"
+                    ],
+                )
+            except ValueError:
+                pass
 
     def _rotate_rpc(self) -> bool:
         """Switch to the next RPC URL. Returns True if a different URL was selected."""
@@ -685,11 +779,61 @@ class ChainClient:
         return result
 
     # ------------------------------------------------------------------
+    # Contract version detection
+    # ------------------------------------------------------------------
+
+    @property
+    def contract_version(self) -> int:
+        """Current detected contract version (0 = not yet detected)."""
+        return self._contract_version
+
+    async def detect_contract_version(self, epoch: int = 0) -> int:
+        """Detect whether contracts are v1 (cycle-based) or v2 (queue-based).
+
+        Tries calling Account.getAuditBatchCount(ZERO, ZERO). If it succeeds,
+        the contract is v2. If it reverts, the contract is v1.
+
+        Re-detects every _VERSION_RECHECK_INTERVAL epochs so a mid-run
+        proxy upgrade is picked up without a restart.
+        """
+        if (
+            self._contract_version != 0
+            and epoch - self._version_detect_epoch < self._VERSION_RECHECK_INTERVAL
+        ):
+            return self._contract_version
+
+        if self._account is None:
+            log.warning("version_detect_no_account_contract")
+            self._contract_version = 1
+            return 1
+
+        zero = "0x" + "0" * 40
+        try:
+            zero_addr = self._w3.to_checksum_address(zero)
+            await self._with_failover(
+                lambda: self._account.functions.getAuditBatchCount(  # type: ignore[union-attr]
+                    zero_addr, zero_addr,
+                ).call()
+            )
+            # Call succeeded: v2 contract
+            if self._contract_version != 2:
+                log.info("contract_version_detected", version=2, epoch=epoch)
+            self._contract_version = 2
+        except Exception:
+            # Reverted or function not found: v1 contract
+            if self._contract_version != 1:
+                log.info("contract_version_detected", version=1, epoch=epoch)
+            self._contract_version = 1
+
+        self._version_detect_epoch = epoch
+        return self._contract_version
+
+    # ------------------------------------------------------------------
     # Account read helpers for quality score computation
     # ------------------------------------------------------------------
 
     async def get_current_cycle(self, genius: str, idiot: str) -> int:
-        """Get the current audit cycle for a Genius-Idiot pair."""
+        """Get the current audit cycle for a Genius-Idiot pair (v1 only)."""
         if self._account is None:
             return 0
         try:
@@ -703,7 +847,7 @@ class ChainClient:
             return 0
 
     async def get_signal_count(self, genius: str, idiot: str) -> int:
-        """Get the signal count in the current cycle for a Genius-Idiot pair."""
+        """Get the signal count in the current cycle for a Genius-Idiot pair (v1 only)."""
         if self._account is None:
             return 0
         try:
@@ -717,7 +861,7 @@ class ChainClient:
             return 0
 
     async def get_purchase_ids(self, genius: str, idiot: str) -> list[int]:
-        """Get all purchase IDs for the current cycle of a Genius-Idiot pair."""
+        """Get all purchase IDs for the current cycle of a Genius-Idiot pair (v1 only)."""
         if self._account is None:
             return []
         try:
@@ -731,6 +875,94 @@ class ChainClient:
             return []
 
     # ------------------------------------------------------------------
+    # Account v2 queue-based read helpers
+    # ------------------------------------------------------------------
+
+    async def get_audit_batch_count(self, genius: str, idiot: str) -> int:
+        """Get the number of completed audit batches for a pair (v2 only)."""
+        if self._account is None:
+            return 0
+        try:
+            genius_addr = self._w3.to_checksum_address(genius)
+            idiot_addr = self._w3.to_checksum_address(idiot)
+            return await self._with_failover(
+                lambda: self._account.functions.getAuditBatchCount(  # type: ignore[union-attr]
+                    genius_addr, idiot_addr,
+                ).call()
+            )
+        except Exception as e:
+            log.error("get_audit_batch_count_failed", genius=genius, idiot=idiot, err=str(e))
+            return 0
+
+    async def get_pair_purchase_ids(self, genius: str, idiot: str) -> list[int]:
+        """Get all purchase IDs for a genius-idiot pair (v2 only, full queue)."""
+        if self._account is None:
+            return []
+        try:
+            genius_addr = self._w3.to_checksum_address(genius)
+            idiot_addr = self._w3.to_checksum_address(idiot)
+            return await self._with_failover(
+                lambda: self._account.functions.getPairPurchaseIds(  # type: ignore[union-attr]
+                    genius_addr, idiot_addr,
+                ).call()
+            )
+        except Exception as e:
+            log.error("get_pair_purchase_ids_failed", genius=genius, idiot=idiot, err=str(e))
+            return []
+
+    async def get_queue_state(
+        self, genius: str, idiot: str,
+    ) -> tuple[int, int, int, int]:
+        """Get queue state for a pair (v2 only).
+
+        Returns (totalPurchases, resolvedCount, auditedCount, auditBatchCount).
+        """
+        if self._account is None:
+            return (0, 0, 0, 0)
+        try:
+            genius_addr = self._w3.to_checksum_address(genius)
+            idiot_addr = self._w3.to_checksum_address(idiot)
+            result = await self._with_failover(
+                lambda: self._account.functions.getQueueState(  # type: ignore[union-attr]
+                    genius_addr, idiot_addr,
+                ).call()
+            )
+            return (int(result[0]), int(result[1]), int(result[2]), int(result[3]))
+        except Exception as e:
+            log.error("get_queue_state_failed", genius=genius, idiot=idiot, err=str(e))
+            return (0, 0, 0, 0)
+
+    async def is_purchase_audited(self, purchase_id: int) -> bool:
+        """Check if a purchase has already been audited (v2 only)."""
+        if self._account is None:
+            return False
+        try:
+            return await self._with_failover(
+                lambda: self._account.functions.isPurchaseAudited(  # type: ignore[union-attr]
+                    purchase_id,
+                ).call()
+            )
+        except Exception as e:
+            log.error("is_purchase_audited_failed", purchase_id=purchase_id, err=str(e))
+            return False
+
+    async def mark_batch_audited(
+        self, genius: str, idiot: str, purchase_ids: list[int],
+    ) -> str:
+        """Mark a batch of purchases as audited on-chain (v2 only). Returns tx hash."""
+        if self._account is None:
+            raise RuntimeError("Account contract not configured")
+
+        genius_addr = self._w3.to_checksum_address(genius)
+        idiot_addr = self._w3.to_checksum_address(idiot)
+
+        return await self._send_tx(
+            self._account, "markBatchAudited",
+            genius_addr, idiot_addr, purchase_ids,
+            gas_limit=500_000,
+        )
+
+    # ------------------------------------------------------------------
     # OutcomeVoting write methods
     # ------------------------------------------------------------------
 
@@ -740,14 +972,34 @@ class ChainClient:
         idiot: str,
         quality_score: int,
         total_notional: int,
+        purchase_ids: list[int] | None = None,
+        is_early_exit: bool = False,
     ) -> str:
-        """Submit a quality score vote to OutcomeVoting. Returns tx hash."""
-        if self._outcome_voting is None:
-            raise RuntimeError("OutcomeVoting contract not configured")
+        """Submit a quality score vote to OutcomeVoting. Returns tx hash.
 
+        Automatically selects v1 or v2 call based on contract_version:
+        - v1: submitVote(genius, idiot, qualityScore, totalNotional)
+        - v2: submitVote(genius, idiot, purchaseIds, qualityScore, totalNotional, isEarlyExit)
+
+        If purchase_ids is provided and contract_version == 2, uses the v2 signature.
+        Falls back to v1 if version is 1 or unknown.
+        """
         genius_addr = self._w3.to_checksum_address(genius)
         idiot_addr = self._w3.to_checksum_address(idiot)
 
+        if self._contract_version == 2 and purchase_ids is not None:
+            if self._outcome_voting_v2 is None:
+                raise RuntimeError("OutcomeVoting v2 contract not configured")
+            return await self._send_tx(
+                self._outcome_voting_v2, "submitVote",
+                genius_addr, idiot_addr, purchase_ids,
+                quality_score, total_notional, is_early_exit,
+                gas_limit=300_000,
+            )
+
+        # v1 path (or version unknown, safe fallback)
+        if self._outcome_voting is None:
+            raise RuntimeError("OutcomeVoting contract not configured")
         return await self._send_tx(
             self._outcome_voting, "submitVote",
             genius_addr, idiot_addr, quality_score, total_notional,

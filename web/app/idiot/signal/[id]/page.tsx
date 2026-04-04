@@ -1109,7 +1109,7 @@ export default function PurchaseSignal() {
                 </p>
                 <p className="text-[11px] text-slate-400 mt-0.5">
                   Genius has {formatBps(signal.slaMultiplierBps)} of your notional locked as collateral,
-                  settled based on audited performance across a cycle of signals.
+                  settled based on audited performance across a batch of signals.
                 </p>
               </div>
               <div>
@@ -1385,7 +1385,7 @@ export default function PurchaseSignal() {
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-400 pt-1 border-t border-slate-200">
-                      Collateral is settled based on the Genius&apos;s audited quality score across a cycle of signals, not on any single pick.
+                      Collateral is settled based on the Genius&apos;s audited quality score across a batch of signals, not on any single pick.
                       {" "}Any Djinn Credits in your account are applied automatically to reduce the USDC portion of the fee.
                     </p>
                   </div>

@@ -123,7 +123,7 @@ export default function IdiotDashboard() {
   const geniusesWithOpenAuditSets = useMemo(() => {
     const set = new Set<string>();
     for (const rel of myRelationships) {
-      if (rel.signalCount > 0 && rel.signalCount < 10) {
+      if (rel.signalCount > 0 && !rel.isAuditReady) {
         set.add(rel.genius.toLowerCase());
       }
     }
@@ -905,7 +905,7 @@ export default function IdiotDashboard() {
               </svg>
             </div>
             <p className="text-slate-500 mb-1">No settlements yet</p>
-            <p className="text-xs text-slate-400">Settlements happen after every 10 signals in a Genius-Idiot pair are resolved.</p>
+            <p className="text-xs text-slate-400">Settlements happen once enough signals in a Genius-Idiot pair are resolved by validator consensus.</p>
           </div>
         ) : (
           <>
@@ -914,7 +914,7 @@ export default function IdiotDashboard() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-slate-500 border-b border-slate-200">
-                    <th className="pb-3 font-medium">Cycle</th>
+                    <th className="pb-3 font-medium">Batch</th>
                     <th className="pb-3 font-medium">Genius</th>
                     <th className="pb-3 font-medium">Result</th>
                     <th className="pb-3 font-medium">Payout</th>
@@ -962,7 +962,7 @@ export default function IdiotDashboard() {
                 <div key={i} className="card">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-slate-900">
-                      Cycle {a.cycle.toString()} &middot; {truncateAddress(a.genius)}
+                      Batch {a.cycle.toString()} &middot; {truncateAddress(a.genius)}
                     </span>
                     {a.isEarlyExit ? (
                       <span className="rounded-full px-2 py-0.5 text-xs bg-yellow-100 text-yellow-700">Early Exit</span>
@@ -1054,13 +1054,21 @@ function RelationshipsSection({ address }: { address: string | undefined }) {
                       Genius: {truncateAddress(rel.genius)}
                     </p>
                     <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
-                      <span>Cycle {rel.currentCycle}</span>
-                      <span>
-                        {rel.signalCount} / 10 signals
-                      </span>
-                      <span className={rel.qualityScore >= 0 ? "text-green-600" : "text-red-500"}>
-                        QS: {rel.qualityScore >= 0 ? "+" : ""}{rel.qualityScore}
-                      </span>
+                      {rel.contractVersion === 2 ? (
+                        <>
+                          <span>{rel.signalCount} purchases</span>
+                          <span>{rel.resolvedCount ?? 0} resolved</span>
+                          <span>{rel.auditedCount ?? 0} audited</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Cycle {rel.currentCycle}</span>
+                          <span>{rel.signalCount} / 10 signals</span>
+                          <span className={rel.qualityScore >= 0 ? "text-green-600" : "text-red-500"}>
+                            QS: {rel.qualityScore >= 0 ? "+" : ""}{rel.qualityScore}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0 ml-4">
@@ -1084,12 +1092,18 @@ function RelationshipsSection({ address }: { address: string | undefined }) {
                         )}
                       </>
                     )}
-                    <div className="w-20 bg-slate-100 rounded-full h-1.5">
-                      <div
-                        className="bg-idiot-500 h-1.5 rounded-full transition-all"
-                        style={{ width: `${(rel.signalCount / 10) * 100}%` }}
-                      />
-                    </div>
+                    {rel.contractVersion === 2 ? (
+                      <div className="text-xs text-slate-400 w-20 text-right">
+                        {rel.currentCycle} batches
+                      </div>
+                    ) : (
+                      <div className="w-20 bg-slate-100 rounded-full h-1.5">
+                        <div
+                          className="bg-idiot-500 h-1.5 rounded-full transition-all"
+                          style={{ width: `${(rel.signalCount / 10) * 100}%` }}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
                 {isExiting && exitError && (

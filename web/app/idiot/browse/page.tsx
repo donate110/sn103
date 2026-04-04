@@ -35,7 +35,7 @@ export default function BrowseSignals() {
   const geniusesWithOpenAuditSets = useMemo(() => {
     const set = new Set<string>();
     for (const rel of relationships) {
-      if (rel.signalCount > 0 && rel.signalCount < 10) {
+      if (rel.signalCount > 0 && !rel.isAuditReady) {
         set.add(rel.genius.toLowerCase());
       }
     }

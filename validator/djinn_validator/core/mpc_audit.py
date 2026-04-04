@@ -38,6 +38,7 @@ class AuditResult:
     losses: int
     voids: int
     n: int
+    purchase_ids: list[int] | None = None  # v2: on-chain purchase IDs in this batch
 
 
 def _compute_signal_quality(
@@ -160,6 +161,11 @@ def batch_settle_audit_set(
         n=n,
     )
 
+    # Collect purchase IDs for v2 vote submission
+    batch_purchase_ids: list[int] | None = None
+    if audit_set.version == 2:
+        batch_purchase_ids = audit_set.resolved_purchase_ids
+
     return AuditResult(
         genius=audit_set.genius_address,
         idiot=audit_set.idiot_address,
@@ -170,4 +176,5 @@ def batch_settle_audit_set(
         losses=losses,
         voids=voids,
         n=n,
+        purchase_ids=batch_purchase_ids,
     )

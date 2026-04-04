@@ -74,7 +74,7 @@ export default function HowItWorks() {
         </Step>
 
         <Step number="4" title="MPC settlement" color="slate">
-          After every 10 signals between a Genius-Idiot pair, validators compute an
+          Once enough signals between a Genius-Idiot pair have resolved outcomes, validators compute an
           aggregate <Tooltip term="Quality Score" /> using
           secure <Tooltip term="MPC">multi-party computation</Tooltip>. Each validator
           independently calculates the score from the encrypted data and submits their result

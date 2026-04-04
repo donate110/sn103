@@ -52,7 +52,7 @@ const REVERT_PATTERNS: [RegExp, string][] = [
   [/OddsOutOfRange/i, "Odds are out of the valid range"],
   [/ZeroAmount/i, "Amount cannot be zero"],
   [/ContractNotSet/i, "Protocol contract not configured (contact admin)"],
-  [/CycleSignalLimitReached/i, "You've reached the signal purchase limit for this genius this cycle (10 max)"],
+  [/CycleSignalLimitReached/i, "You've reached the signal purchase limit for this genius (10 max per audit batch)"],
   [/InsufficientFreeCollateral/i, "Genius does not have enough free collateral for this signal"],
   [/Not genius/i, "Only the signal creator can perform this action"],
   [/Transfer amount exceeds allowance/i, "USDC approval needed, please approve the transfer first"],
@@ -872,7 +872,7 @@ export function useWithdrawCollateral() {
 }
 
 // ---------------------------------------------------------------------------
-// Early exit hook — either party can trigger before 10 signals
+// Early exit hook — either party can trigger before a full audit batch
 // ---------------------------------------------------------------------------
 
 export function useEarlyExit() {

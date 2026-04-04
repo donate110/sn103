@@ -390,7 +390,7 @@ async function main() {
 
   if (!mpcSuccess) {
     console.log("\nPURCHASE WOULD FAIL. MPC check returned unavailable.");
-    console.log("Note: using same wallet as genius (GeniusEqualsIdiot is expected for on-chain purchase).");
+    console.log("Note: using same wallet as genius (self-purchase is now allowed).");
     console.log("The MPC check itself determines if the protocol works.");
   } else {
     console.log("\nPURCHASE FLOW WORKS! MPC returned available.");

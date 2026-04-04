@@ -102,60 +102,22 @@ async def bootstrap_audit_sets(
 
     log.info("audit_bootstrap_pairs_found", count=len(pairs))
 
-    # Step 3: For each pair, load current cycle purchase data
+    # Detect contract version to decide which read path to use
+    contract_version = await chain_client.detect_contract_version()
+    log.info("audit_bootstrap_contract_version", version=contract_version)
+
+    # Step 3: For each pair, load purchase data (v1: cycle-based, v2: queue-based)
     populated = 0
     for genius, idiot in pairs:
         try:
-            cycle = await chain_client.get_current_cycle(genius, idiot)
-            count = await chain_client.get_signal_count(genius, idiot)
-            if count == 0:
-                continue
-
-            purchase_ids = await chain_client.get_purchase_ids(genius, idiot)
-            if not purchase_ids:
-                continue
-
-            # Load each purchase and populate the audit set
-            for pid in purchase_ids:
-                try:
-                    purchase = await chain_client.get_purchase(pid)
-                    if purchase is None:
-                        continue
-
-                    signal_id = str(purchase["signalId"])
-                    notional = int(purchase["notional"])
-                    odds = int(purchase["odds"])
-
-                    # Get SLA from the signal commitment
-                    signal = await chain_client.get_signal(int(signal_id))
-                    sla_bps = int(signal["slaMultiplierBps"]) if signal and isinstance(signal, dict) else 10_000
-
-                    audit_set_store.add_signal(
-                        genius=genius,
-                        idiot=idiot,
-                        cycle=cycle,
-                        signal_id=signal_id,
-                        notional=notional,
-                        odds=odds,
-                        sla_bps=sla_bps,
-                    )
-                except Exception as e:
-                    log.debug(
-                        "audit_bootstrap_purchase_skip",
-                        purchase_id=pid,
-                        err=str(e)[:100],
-                    )
-                    continue
-
-            populated += 1
-            log.info(
-                "audit_bootstrap_pair_loaded",
-                genius=genius[:10],
-                idiot=idiot[:10],
-                cycle=cycle,
-                signals=count,
-                purchases=len(purchase_ids),
-            )
+            if contract_version == 2:
+                populated += await _bootstrap_pair_v2(
+                    chain_client, audit_set_store, genius, idiot,
+                )
+            else:
+                populated += await _bootstrap_pair_v1(
+                    chain_client, audit_set_store, genius, idiot,
+                )
 
             # Small delay between pairs
             await asyncio.sleep(0.2)
@@ -185,6 +147,129 @@ async def bootstrap_audit_sets(
         ready_for_settlement=len(ready),
     )
     return populated
+
+
+async def _bootstrap_pair_v1(
+    chain_client: "ChainClient",
+    audit_set_store: "AuditSetStore",
+    genius: str,
+    idiot: str,
+) -> int:
+    """Bootstrap a single pair using v1 cycle-based reads. Returns 1 on success, 0 on skip."""
+    cycle = await chain_client.get_current_cycle(genius, idiot)
+    count = await chain_client.get_signal_count(genius, idiot)
+    if count == 0:
+        return 0
+
+    purchase_ids = await chain_client.get_purchase_ids(genius, idiot)
+    if not purchase_ids:
+        return 0
+
+    for pid in purchase_ids:
+        try:
+            purchase = await chain_client.get_purchase(pid)
+            if purchase is None:
+                continue
+
+            signal_id = str(purchase["signalId"])
+            notional = int(purchase["notional"])
+            odds = int(purchase["odds"])
+
+            signal = await chain_client.get_signal(int(signal_id))
+            sla_bps = int(signal["slaMultiplierBps"]) if signal and isinstance(signal, dict) else 10_000
+
+            audit_set_store.add_signal(
+                genius=genius,
+                idiot=idiot,
+                cycle=cycle,
+                signal_id=signal_id,
+                notional=notional,
+                odds=odds,
+                sla_bps=sla_bps,
+                purchase_id=pid,
+            )
+        except Exception as e:
+            log.debug("audit_bootstrap_purchase_skip", purchase_id=pid, err=str(e)[:100])
+            continue
+
+    log.info(
+        "audit_bootstrap_pair_loaded",
+        genius=genius[:10],
+        idiot=idiot[:10],
+        cycle=cycle,
+        signals=count,
+        purchases=len(purchase_ids),
+        version=1,
+    )
+    return 1
+
+
+async def _bootstrap_pair_v2(
+    chain_client: "ChainClient",
+    audit_set_store: "AuditSetStore",
+    genius: str,
+    idiot: str,
+) -> int:
+    """Bootstrap a single pair using v2 queue-based reads. Returns 1 on success, 0 on skip."""
+    total_purchases, resolved_count, audited_count, batch_count = await chain_client.get_queue_state(
+        genius, idiot,
+    )
+    unaudited_resolved = resolved_count - audited_count
+    if total_purchases == 0 or unaudited_resolved <= 0:
+        return 0
+
+    purchase_ids = await chain_client.get_pair_purchase_ids(genius, idiot)
+    if not purchase_ids:
+        return 0
+
+    # Filter to unaudited purchases only
+    loaded = 0
+    for pid in purchase_ids:
+        try:
+            already_audited = await chain_client.is_purchase_audited(pid)
+            if already_audited:
+                continue
+
+            purchase = await chain_client.get_purchase(pid)
+            if purchase is None:
+                continue
+
+            signal_id = str(purchase["signalId"])
+            notional = int(purchase["notional"])
+            odds = int(purchase["odds"])
+
+            signal = await chain_client.get_signal(int(signal_id))
+            sla_bps = int(signal["slaMultiplierBps"]) if signal and isinstance(signal, dict) else 10_000
+
+            # v2: use batch_count as the "cycle" identifier for the current batch
+            audit_set_store.add_signal(
+                genius=genius,
+                idiot=idiot,
+                cycle=batch_count,
+                signal_id=signal_id,
+                notional=notional,
+                odds=odds,
+                sla_bps=sla_bps,
+                purchase_id=pid,
+            )
+            loaded += 1
+        except Exception as e:
+            log.debug("audit_bootstrap_purchase_skip", purchase_id=pid, err=str(e)[:100])
+            continue
+
+    if loaded > 0:
+        log.info(
+            "audit_bootstrap_pair_loaded",
+            genius=genius[:10],
+            idiot=idiot[:10],
+            cycle=batch_count,
+            signals=loaded,
+            purchases=len(purchase_ids),
+            unaudited_resolved=unaudited_resolved,
+            version=2,
+        )
+        return 1
+    return 0
 
 
 async def _get_buyers_for_signal(

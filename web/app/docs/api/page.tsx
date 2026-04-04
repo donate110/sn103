@@ -143,7 +143,7 @@ const idiotEndpoints: Endpoint[] = [
   "sports": ["basketball_nba", "americanfootball_nfl"],
   "recent_settlements": [
     {
-      "cycle": 5,
+      "batch": 5,
       "quality_score": 1250,
       "favorable": 7,
       "unfavorable": 2,
@@ -247,9 +247,11 @@ const sharedEndpoints: Endpoint[] = [
     path: "/api/settlement/{genius}/{idiot}/status",
     description: "Settlement status for a genius-idiot pair.",
     response: `{
-  "current_cycle": 3,
-  "signals_in_cycle": 7,
-  "signals_resolved": 5,
+  "contract_version": 2,
+  "total_purchases": 12,
+  "resolved_count": 8,
+  "audited_count": 0,
+  "audit_batch_count": 0,
   "ready_for_settlement": false
 }`,
   },

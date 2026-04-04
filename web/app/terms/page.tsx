@@ -133,7 +133,7 @@ export default function Terms() {
         proportionally.
       </p>
       <p>
-        After every 10 signals between a Genius-Idiot pair, a cryptographic audit
+        Once enough signals between a Genius-Idiot pair have resolved outcomes, a cryptographic audit
         computes a Quality Score using secure multi-party computation (MPC). If the
         Quality Score is negative, the Genius&apos;s collateral is slashed: the Idiot
         receives a USDC refund (up to fees paid) plus Djinn Credits for any excess

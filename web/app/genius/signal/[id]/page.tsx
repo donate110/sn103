@@ -393,7 +393,7 @@ export default function GeniusSignalDetail() {
               This signal has expired. No further actions are available.
               {hasPurchases && (
                 <span className="block mt-1">
-                  Existing purchases will settle through the normal audit cycle.
+                  Existing purchases will settle through the normal audit process.
                 </span>
               )}
             </p>
@@ -402,7 +402,7 @@ export default function GeniusSignalDetail() {
               This signal has been cancelled.
               {hasPurchases && (
                 <span className="block mt-1">
-                  Existing purchases will settle through the normal audit cycle.
+                  Existing purchases will settle through the normal audit process.
                 </span>
               )}
             </p>
@@ -414,7 +414,7 @@ export default function GeniusSignalDetail() {
             <div>
               <p className="text-sm text-slate-700 mb-4">
                 {hasPurchases
-                  ? `Cancel remaining capacity? ${purchases.length} existing purchase${purchases.length > 1 ? "s" : ""} will still settle through the normal audit cycle. No new purchases will be accepted.`
+                  ? `Cancel remaining capacity? ${purchases.length} existing purchase${purchases.length > 1 ? "s" : ""} will still settle through the normal audit process. No new purchases will be accepted.`
                   : "Are you sure you want to cancel this signal? This action is irreversible. Your collateral backing this signal will be released."
                 }
               </p>

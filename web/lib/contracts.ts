@@ -109,10 +109,17 @@ export const CREDIT_LEDGER_ABI = [
 ] as const;
 
 export const ACCOUNT_ABI = [
+  // v1 (cycle-based) functions -- still present in v2 as backwards-compat wrappers
   "function getAccountState(address genius, address idiot) external view returns (tuple(uint256 currentCycle, uint256 signalCount, int256 outcomeBalance, uint256[] purchaseIds, bool settled))",
   "function getCurrentCycle(address genius, address idiot) external view returns (uint256)",
   "function isAuditReady(address genius, address idiot) external view returns (bool)",
   "function getSignalCount(address genius, address idiot) external view returns (uint256)",
+  // v2 (queue-based) functions
+  "function getQueueState(address genius, address idiot) external view returns (tuple(uint256 totalPurchases, uint256 resolvedCount, uint256 auditedCount, uint256 auditBatchCount))",
+  "function getPairPurchaseIds(address genius, address idiot) external view returns (uint256[])",
+  "function getAuditBatchCount(address genius, address idiot) external view returns (uint256)",
+  "function isPurchaseAudited(uint256 purchaseId) external view returns (bool)",
+  // Events (shared across versions)
   "event PurchaseRecorded(address indexed genius, address indexed idiot, uint256 purchaseId, uint256 signalCount)",
 ] as const;
 
@@ -214,4 +221,40 @@ export function getUsdcContract(
     ERC20_ABI,
     signerOrProvider
   );
+}
+
+// ---------------------------------------------------------------------------
+// Contract version detection (v1 cycle-based vs v2 queue-based)
+// ---------------------------------------------------------------------------
+
+export type ContractVersion = 1 | 2;
+
+let _cachedVersion: ContractVersion | null = null;
+
+/**
+ * Detects whether the deployed Account contract is v1 (cycle-based) or v2
+ * (queue-based) by probing for the v2-only `getAuditBatchCount` function.
+ * Result is cached for the lifetime of the page.
+ */
+export async function detectContractVersion(
+  provider: ethers.Provider,
+): Promise<ContractVersion> {
+  if (_cachedVersion !== null) return _cachedVersion;
+
+  try {
+    const contract = getAccountContract(provider);
+    // Call with zero addresses; we only care whether the function exists, not the result
+    await contract.getAuditBatchCount(ethers.ZeroAddress, ethers.ZeroAddress);
+    _cachedVersion = 2;
+  } catch {
+    // Function doesn't exist or reverted: v1
+    _cachedVersion = 1;
+  }
+
+  return _cachedVersion;
+}
+
+/** Returns the cached version if already detected, otherwise null. */
+export function getCachedContractVersion(): ContractVersion | null {
+  return _cachedVersion;
 }

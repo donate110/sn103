@@ -7,7 +7,7 @@ const GLOSSARY: Record<string, string> = {
   "Shamir's Secret Sharing": "A method of splitting a secret into multiple pieces (shares), where you need a minimum number of shares (the threshold) to reconstruct it. A single share reveals nothing about the secret.",
   "Shamir secret sharing": "A method of splitting a secret into multiple pieces (shares), where you need a minimum number of shares (the threshold) to reconstruct it. A single share reveals nothing about the secret.",
   USDC: "USD Coin: a stablecoin pegged 1:1 to the US dollar, issued by Circle. Djinn uses USDC on the Base blockchain for all deposits, fees, and settlements.",
-  "Quality Score": "An aggregate measure of a Genius's prediction accuracy over a 10-signal cycle, computed by MPC across validators. Positive scores mean the Genius performed well; negative scores trigger collateral slashing.",
+  "Quality Score": "An aggregate measure of a Genius's prediction accuracy across an audit batch, computed by MPC across validators. Positive scores mean the Genius performed well; negative scores trigger collateral slashing.",
   "AES-256-GCM": "Advanced Encryption Standard with 256-bit keys in Galois/Counter Mode. A widely-used, high-security symmetric encryption algorithm. Djinn uses it to encrypt signal content client-side.",
   Bittensor: "A decentralized AI network where validators incentivize miners to perform useful work. Djinn runs on Subnet 103, using validators for MPC settlement and miners for sports data attestation via TLSNotary.",
   TLSNotary: "A protocol that lets you prove you received specific data from a website without revealing your session details. Miners use TLSNotary to cryptographically attest that a betting line is available at a sportsbook.",
@@ -15,7 +15,7 @@ const GLOSSARY: Record<string, string> = {
   "UUPS proxy": "Universal Upgradeable Proxy Standard: a smart contract pattern where users interact with a permanent proxy address, while the underlying logic can be upgraded through a governance process (in Djinn's case, a 72-hour timelock).",
   "decoy lines": "Nine fake betting lines bundled with the real pick inside a signal. They make it impossible for anyone (including validators) to determine which line is the actual prediction without reconstructing the Shamir secret.",
   SLA: "Service-Level Agreement: the terms a Genius commits to when creating a signal. The SLA multiplier determines how much collateral is slashed if predictions underperform.",
-  "blind resolution": "Validators resolve ALL 10 lines (real + 9 decoys) against game results, producing 10 outcomes. No single validator knows which outcome corresponds to the real pick. The correct outcome is selected later during MPC settlement.",
+  "blind resolution": "Validators resolve all lines (real + decoys) against game results, producing multiple outcomes. No single validator knows which outcome corresponds to the real pick. The correct outcome is selected later during MPC settlement.",
   ESPN: "ESPN's public scoreboard API provides free, real-time game scores. Djinn validators use ESPN to determine game outcomes without requiring paid API keys.",
 };
 

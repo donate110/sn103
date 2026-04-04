@@ -8,6 +8,8 @@ import {
   ADDRESSES,
   ACCOUNT_ABI,
   getAccountContract,
+  detectContractVersion,
+  type ContractVersion,
 } from "../contracts";
 
 /** Polling interval for relationships: 60 seconds */
@@ -16,10 +18,18 @@ const RELATIONSHIPS_POLL_MS = 60_000;
 export interface ActiveRelationship {
   genius: string;
   idiot: string;
+  /** v1: signals in current cycle. v2: total purchases in the queue. */
   signalCount: number;
   qualityScore: number;
+  /** v1: current cycle number. v2: audit batch count. */
   currentCycle: number;
+  /** v1: signalCount >= 10. v2: resolvedCount - auditedCount >= 10. */
   isAuditReady: boolean;
+  /** v2-only fields, present when contract is v2 */
+  resolvedCount?: number;
+  auditedCount?: number;
+  /** Which contract version populated this data */
+  contractVersion: ContractVersion;
 }
 
 /**
@@ -90,6 +100,9 @@ export function useActiveRelationships(
         return;
       }
 
+      // Detect contract version (cached after first call)
+      const version = await detectContractVersion(provider);
+
       // Query current state for counterparties with controlled concurrency
       const accountContract = getAccountContract(provider);
       const cpArray = Array.from(counterparties).slice(0, 50); // Cap at 50 to avoid RPC flood
@@ -101,6 +114,31 @@ export function useActiveRelationships(
           batch.map(async (cp) => {
             const genius = role === "genius" ? address : cp;
             const idiot = role === "genius" ? cp : address;
+
+            if (version === 2) {
+              // v2: queue-based
+              const qs = await accountContract.getQueueState(genius, idiot);
+              const totalPurchases = Number(qs.totalPurchases);
+              if (totalPurchases > 0) {
+                const resolved = Number(qs.resolvedCount);
+                const audited = Number(qs.auditedCount);
+                const batchCount = Number(qs.auditBatchCount);
+                return {
+                  genius,
+                  idiot,
+                  signalCount: totalPurchases,
+                  qualityScore: 0, // v2 doesn't store running QS on pair
+                  currentCycle: batchCount,
+                  isAuditReady: (resolved - audited) >= 10,
+                  resolvedCount: resolved,
+                  auditedCount: audited,
+                  contractVersion: 2,
+                } as ActiveRelationship;
+              }
+              return null;
+            }
+
+            // v1: cycle-based
             const state = await accountContract.getAccountState(genius, idiot);
             const signalCount = Number(state.signalCount);
             if (signalCount > 0) {
@@ -111,6 +149,7 @@ export function useActiveRelationships(
                 qualityScore: Number(state.outcomeBalance),
                 currentCycle: Number(state.currentCycle),
                 isAuditReady: signalCount >= 10,
+                contractVersion: 1,
               } as ActiveRelationship;
             }
             return null;

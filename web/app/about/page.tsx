@@ -101,7 +101,7 @@ export default function About() {
             </div>
             <h3 className="font-semibold text-slate-900 mb-2">Audit & Settle</h3>
             <p className="text-sm text-slate-500">
-              After 10 signals, validators compute the <Tooltip term="Quality Score" /> using <Tooltip term="MPC" />. Positive =
+              Once enough signals resolve, validators compute the <Tooltip term="Quality Score" /> using <Tooltip term="MPC" />. Positive =
               Genius keeps fees. Negative = collateral slashed, credits issued.
             </p>
           </div>

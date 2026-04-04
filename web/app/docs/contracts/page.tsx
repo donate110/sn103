@@ -54,11 +54,13 @@ const contracts: ContractInfo[] = [
   {
     name: "Account",
     description:
-      "Tracks genius-idiot pair cycles and purchase history for settlement grouping.",
+      "Tracks genius-idiot pair purchases in an append-only queue for settlement grouping.",
     address: "0x4546354Dd32a613B76Abf530F81c8359e7cE440B",
     functions: [
       "recordOutcome(address genius, address idiot, ...)",
-      "getPurchaseIds(address genius, address idiot) view",
+      "getQueueState(address genius, address idiot) view",
+      "getPairPurchaseIds(address genius, address idiot) view",
+      "getAuditBatchCount(address genius, address idiot) view",
       "getCurrentCycle(address genius, address idiot) view",
     ],
   },

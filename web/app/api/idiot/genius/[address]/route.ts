@@ -73,7 +73,7 @@ export async function GET(
       address: checksumAddr,
       quality_score_avg: Math.round(avgQualityScore),
       total_signals: totalSignals,
-      settled_cycles: totalSettled,
+      settled_batches: totalSettled,
       win_rate: Math.round(winRate * 100) / 100,
       favorable: totalFavorable,
       unfavorable: totalUnfavorable,

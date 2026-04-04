@@ -47,6 +47,14 @@ export interface AccountState {
   settled: boolean;
 }
 
+/** v2 queue-based pair state */
+export interface QueueState {
+  totalPurchases: number;
+  resolvedCount: number;
+  auditedCount: number;
+  auditBatchCount: number;
+}
+
 export interface GeniusLeaderboardEntry {
   address: string;
   qualityScore: number;

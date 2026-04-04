@@ -614,10 +614,10 @@ export default function GeniusDashboard() {
         ) : audits.length === 0 ? (
           <div className="card text-center py-8">
             <p className="text-slate-500 mb-3">
-              No settled cycles yet.
+              No settlements yet.
             </p>
             <p className="text-xs text-slate-400">
-              Every 10 signals between you and a buyer are settled automatically by validator consensus.
+              Signals between you and a buyer are settled automatically by validator consensus once enough outcomes are resolved.
             </p>
           </div>
         ) : (
@@ -627,7 +627,7 @@ export default function GeniusDashboard() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-slate-900">
-                      Cycle {a.cycle.toString()} &middot; {truncateAddress(a.idiot)}
+                      Batch {a.cycle.toString()} &middot; {truncateAddress(a.idiot)}
                     </p>
                     <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-slate-500">
                       <span>Earned: ${formatUsdc(a.trancheA)}</span>
@@ -653,7 +653,7 @@ export default function GeniusDashboard() {
             ))}
             {audits.length > 5 && (
               <Link href="/genius/track-record" className="block text-center text-sm text-genius-500 hover:text-genius-600 py-2">
-                View all {audits.length} settled cycles &rarr;
+                View all {audits.length} settlements &rarr;
               </Link>
             )}
           </div>
@@ -717,13 +717,21 @@ function RelationshipsSection({ address }: { address: string | undefined }) {
                       Buyer: {truncateAddress(rel.idiot)}
                     </p>
                     <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
-                      <span>Cycle {rel.currentCycle}</span>
-                      <span>
-                        {rel.signalCount} / 10 signals
-                      </span>
-                      <span className={rel.qualityScore >= 0 ? "text-green-600" : "text-red-500"}>
-                        QS: {rel.qualityScore >= 0 ? "+" : ""}{rel.qualityScore}
-                      </span>
+                      {rel.contractVersion === 2 ? (
+                        <>
+                          <span>{rel.signalCount} purchases</span>
+                          <span>{rel.resolvedCount ?? 0} resolved</span>
+                          <span>{rel.auditedCount ?? 0} audited</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Cycle {rel.currentCycle}</span>
+                          <span>{rel.signalCount} / 10 signals</span>
+                          <span className={rel.qualityScore >= 0 ? "text-green-600" : "text-red-500"}>
+                            QS: {rel.qualityScore >= 0 ? "+" : ""}{rel.qualityScore}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0 ml-4">
@@ -747,12 +755,18 @@ function RelationshipsSection({ address }: { address: string | undefined }) {
                         )}
                       </>
                     )}
-                    <div className="w-20 bg-slate-100 rounded-full h-1.5">
-                      <div
-                        className="bg-genius-500 h-1.5 rounded-full transition-all"
-                        style={{ width: `${(rel.signalCount / 10) * 100}%` }}
-                      />
-                    </div>
+                    {rel.contractVersion === 2 ? (
+                      <div className="text-xs text-slate-400 w-20 text-right">
+                        {rel.currentCycle} batches
+                      </div>
+                    ) : (
+                      <div className="w-20 bg-slate-100 rounded-full h-1.5">
+                        <div
+                          className="bg-genius-500 h-1.5 rounded-full transition-all"
+                          style={{ width: `${(rel.signalCount / 10) * 100}%` }}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
                 {isExiting && exitError && (

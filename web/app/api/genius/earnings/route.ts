@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
       collateral_deposited_usdc: 0,
       collateral_locked_usdc: 0,
       collateral_available_usdc: 0,
-      settled_cycles: 0,
+      settled_batches: 0,
       quality_score_avg: 0,
     });
   }
@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
       collateral_deposited_usdc: depositUsdc,
       collateral_locked_usdc: lockedUsdc,
       collateral_available_usdc: depositUsdc - lockedUsdc,
-      settled_cycles: settlements.length,
+      settled_batches: settlements.length,
       quality_score_avg: Math.round(avgScore),
       recent_settlements: settlements.slice(-10).reverse(),
     });

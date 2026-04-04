@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ethers } from "ethers";
-import { ADDRESSES, ACCOUNT_ABI } from "@/lib/contracts";
+import { ADDRESSES, ACCOUNT_ABI, detectContractVersion } from "@/lib/contracts";
 
 /**
  * GET /api/settlement/{genius}/{idiot}
  *
  * Check settlement status for a genius-idiot pair.
- * Returns current cycle, signals in cycle, and readiness for settlement.
+ * Supports both v1 (cycle-based) and v2 (queue-based) contract versions.
  */
 
 const RPC_URL = process.env.BASE_RPC_URL || process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://sepolia.base.org";
@@ -28,8 +28,13 @@ export async function GET(
     return NextResponse.json({
       genius,
       idiot,
+      contract_version: 1,
       current_cycle: 0,
       signals_in_cycle: 0,
+      total_purchases: 0,
+      resolved_count: 0,
+      audited_count: 0,
+      audit_batch_count: 0,
       ready_for_settlement: false,
     });
   }
@@ -45,6 +50,31 @@ export async function GET(
       provider,
     );
 
+    const version = await detectContractVersion(provider);
+
+    if (version === 2) {
+      const qs = await accountContract.getQueueState(geniusAddr, idiotAddr);
+      const totalPurchases = Number(qs.totalPurchases);
+      const resolvedCount = Number(qs.resolvedCount);
+      const auditedCount = Number(qs.auditedCount);
+      const batchCount = Number(qs.auditBatchCount);
+
+      return NextResponse.json({
+        genius: geniusAddr,
+        idiot: idiotAddr,
+        contract_version: 2,
+        total_purchases: totalPurchases,
+        resolved_count: resolvedCount,
+        audited_count: auditedCount,
+        audit_batch_count: batchCount,
+        ready_for_settlement: (resolvedCount - auditedCount) >= 10,
+        // Backwards-compat fields
+        current_cycle: batchCount,
+        signals_in_cycle: totalPurchases,
+      });
+    }
+
+    // v1: cycle-based
     const [currentCycle, purchaseIds] = await Promise.all([
       accountContract.getCurrentCycle(geniusAddr, idiotAddr).catch(() => 0n),
       accountContract.getPurchaseIds(geniusAddr, idiotAddr).catch(() => []),
@@ -57,8 +87,13 @@ export async function GET(
     return NextResponse.json({
       genius: geniusAddr,
       idiot: idiotAddr,
+      contract_version: 1,
       current_cycle: cycle,
       signals_in_cycle: signalsInCycle,
+      total_purchases: signalsInCycle,
+      resolved_count: 0,
+      audited_count: 0,
+      audit_batch_count: cycle,
       ready_for_settlement: readyForSettlement,
     });
   } catch (error) {

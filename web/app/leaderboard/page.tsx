@@ -237,7 +237,7 @@ export default function Leaderboard() {
         <div className="text-sm text-slate-500 space-y-2">
           <p>
             Quality Score (QS) is the on-chain measure of a Genius&apos;s prediction
-            accuracy, computed across each 10-signal audit cycle:
+            accuracy, computed across each audit batch:
           </p>
           <ul className="list-disc list-inside space-y-1 ml-2">
             <li>
@@ -251,7 +251,7 @@ export default function Leaderboard() {
             </li>
           </ul>
           <p>
-            After every 10 signals between a Genius-Idiot pair, a validator
+            Once enough signals between a Genius-Idiot pair have resolved, a validator
             audit verifies the Quality Score on-chain. If the score is negative, the
             Genius&apos;s collateral is slashed: the Idiot receives a USDC refund
             (up to fees paid) plus Djinn Credits for excess damages.

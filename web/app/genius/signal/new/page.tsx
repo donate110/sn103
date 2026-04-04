@@ -778,8 +778,8 @@ export default function CreateSignal() {
 
         {signalCount >= MAX_PROOF_SIGNALS && (
           <div className="rounded-lg px-4 py-3 mb-6 text-sm bg-amber-50 text-amber-700 border border-amber-200">
-            You have {signalCount} active signals. Audit sets settle every 10 signals
-            per buyer. Your track record updates automatically as sets are finalized.
+            You have {signalCount} active signals. Audit batches settle automatically
+            once enough outcomes are resolved per buyer. Your track record updates as batches are finalized.
           </div>
         )}
 

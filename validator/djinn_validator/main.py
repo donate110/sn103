@@ -73,6 +73,16 @@ async def epoch_loop(
     )
     consecutive_errors = 0
 
+    # Detect contract version on startup and periodically
+    if chain_client:
+        try:
+            detected_version = await chain_client.detect_contract_version(epoch=0)
+            log.info("contract_version_initial", version=detected_version)
+            if audit_set_store:
+                audit_set_store.contract_version = detected_version
+        except Exception as e:
+            log.warning("contract_version_detect_failed", err=str(e))
+
     # DDoS shield: resolve miner tunnel URLs for fallback routing
     _shield_resolver = None
     try:
@@ -254,6 +264,16 @@ async def epoch_loop(
 
             # Challenge miners for accuracy scoring (throttled)
             epoch_count += 1
+
+            # Re-detect contract version periodically (picks up mid-run proxy upgrades)
+            if chain_client and epoch_count % 100 == 0:
+                try:
+                    detected_version = await chain_client.detect_contract_version(epoch=epoch_count)
+                    if audit_set_store:
+                        audit_set_store.contract_version = detected_version
+                except Exception as e:
+                    log.debug("contract_version_redetect_failed", err=str(e))
+
             if epoch_count % CHALLENGE_INTERVAL_EPOCHS == 0:
                 if miner_uids:
                     miner_axons = []
@@ -388,9 +408,11 @@ async def epoch_loop(
                     # Phase 3: Submit aggregate quality score vote on-chain
                     if chain_client and chain_client.can_write:
                         try:
+                            cv = chain_client.contract_version
                             tx_hash = await chain_client.submit_vote(
                                 result.genius, result.idiot, result.quality_score,
                                 result.total_notional,
+                                purchase_ids=result.purchase_ids,
                             )
                             log.info(
                                 "audit_vote_submitted",
@@ -402,19 +424,21 @@ async def epoch_loop(
                                 losses=result.losses,
                                 voids=result.voids,
                                 tx_hash=tx_hash,
+                                contract_version=cv,
+                                purchase_ids_count=len(result.purchase_ids) if result.purchase_ids else 0,
                             )
                             if telemetry:
                                 telemetry.record(
                                     "audit_vote",
-                                    f"Vote submitted: quality={result.quality_score} ({result.wins}W/{result.losses}L/{result.voids}V)",
+                                    f"Vote submitted (v{cv}): quality={result.quality_score} ({result.wins}W/{result.losses}L/{result.voids}V)",
                                     genius=result.genius, idiot=result.idiot,
                                     cycle=result.cycle, quality_score=result.quality_score,
                                     wins=result.wins, losses=result.losses, voids=result.voids,
-                                    tx_hash=tx_hash,
+                                    tx_hash=tx_hash, contract_version=cv,
                                 )
                         except Exception as e:
                             err_str = str(e)
-                            if "AlreadyVoted" in err_str or "CycleAlreadyFinalized" in err_str:
+                            if "AlreadyVoted" in err_str or "CycleAlreadyFinalized" in err_str or "BatchAlreadyAudited" in err_str:
                                 log.debug("audit_vote_skipped", reason=err_str[:80])
                             else:
                                 log.error("audit_vote_failed", err=err_str)

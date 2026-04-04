@@ -111,7 +111,7 @@ export default function TrackRecordPage() {
 
             {audits.length === 0 ? (
               <p className="text-center text-slate-500 py-8">
-                No settled audit sets yet. Settlements occur after 10 signals
+                No settled audit sets yet. Settlements occur once enough signals
                 with each buyer are resolved by validator consensus.
               </p>
             ) : (
@@ -124,7 +124,7 @@ export default function TrackRecordPage() {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-slate-800">
-                          Cycle {audit.cycle.toString()}
+                          Batch {audit.cycle.toString()}
                         </span>
                         <span className="text-[10px] bg-slate-200 text-slate-500 rounded px-1.5 py-0.5">
                           {truncateAddress(audit.idiot)}
@@ -161,7 +161,8 @@ export default function TrackRecordPage() {
             </h3>
             <ol className="text-sm text-slate-500 space-y-2 list-decimal list-inside">
               <li>
-                Each audit set contains 10 signals between you and a buyer.
+                Purchases between you and a buyer accumulate in a queue. Once
+                enough outcomes are resolved, validators can audit a batch.
               </li>
               <li>
                 Validators independently resolve game outcomes from public
@@ -169,11 +170,11 @@ export default function TrackRecordPage() {
               </li>
               <li>
                 A batch MPC computation determines aggregate results without
-                revealing which of your 10 lines per signal were real.
+                revealing which of your lines per signal were real.
               </li>
               <li>
                 Settlement is finalized on-chain. Your track record is the
-                public sum of all finalized audit sets.
+                public sum of all finalized audit batches.
               </li>
             </ol>
           </div>
