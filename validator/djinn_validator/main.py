@@ -199,6 +199,9 @@ async def epoch_loop(
                                 notary_active_sessions=caps.get("notary_active_sessions", 0),
                                 disk_free_gb=caps.get("disk_free_gb", 0.0),
                             )
+                        # Mark notary-capable if miner reports notary capacity
+                        if caps.get("notary_max_concurrent", 0) > 0:
+                            metrics.notary_capable = True
                         # Cache tunnel URL for DDoS fallback
                         if _shield_resolver and data.get("tunnel_url"):
                             _shield_resolver.cache_from_health(uid, data)
