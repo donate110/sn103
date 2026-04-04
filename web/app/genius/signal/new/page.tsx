@@ -46,10 +46,11 @@ import {
 // validators run compatible software. Raise to 3 once the network stabilizes.
 // Actual threshold: clamp(ceil(2/3 * healthy_validators), SHAMIR_MIN, SHAMIR_MAX).
 const SHAMIR_MIN = 2;
-// Cap at 3 until more validators reliably participate in MPC.
-// Validators that pass health checks via the proxy may still be
-// unreachable for direct peer-to-peer MPC communication.
-const SHAMIR_MAX = 3;
+// Cap at 2 until MPC coordination is reliable enough to get 3 shares
+// within proxy timeouts. Validators pass health checks but MPC
+// purchase coordination through the Vercel proxy often times out
+// for the 3rd validator. Raise back to 3 once MPC is faster.
+const SHAMIR_MAX = 2;
 
 type WizardStep = "browse" | "review" | "configure" | "preflight" | "committing" | "distributing" | "success" | "error";
 
