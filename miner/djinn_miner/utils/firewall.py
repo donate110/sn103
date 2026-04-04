@@ -127,9 +127,33 @@ net.ipv4.tcp_keepalive_probes = 5
         return False
 
 
+def _manage_port(validator_ips: set[str], port: int, tag: str) -> tuple[int, int]:
+    """Manage ufw rules for a single port. Returns (added, removed) counts."""
+    current_ips = _get_current_allowed_ips(port)
+
+    stale = current_ips - validator_ips
+    for ip in stale:
+        _run(["ufw", "delete", "allow", "from", ip, "to", "any", "port", str(port), "proto", "tcp"])
+        log.info("firewall_removed_stale_ip", ip=ip, port=port)
+
+    new = validator_ips - current_ips
+    for ip in new:
+        _run(["ufw", "allow", "from", ip, "to", "any", "port", str(port), "proto", "tcp",
+               "comment", tag])
+        log.info("firewall_added_validator_ip", ip=ip, port=port)
+
+    # Ensure blanket deny is AFTER all allow rules.
+    _run(["ufw", "delete", "allow", f"{port}/tcp"])
+    _run(["ufw", "delete", "deny", f"{port}/tcp"])
+    _run(["ufw", "deny", f"{port}/tcp", "comment", f"{tag}-deny"])
+
+    return len(new), len(stale)
+
+
 def update_firewall(validator_ips: set[str], api_port: int) -> bool:
     """Update ufw rules to whitelist only the given validator IPs.
 
+    Manages both the API port and the notary sidecar port (8091).
     Returns True if rules were updated successfully.
     """
     if not _is_root() or not _has_ufw():
@@ -148,34 +172,23 @@ def update_firewall(validator_ips: set[str], api_port: int) -> bool:
     _run(["ufw", "allow", f"{ssh_port}/tcp"])
     _run(["ufw", "limit", f"{ssh_port}/tcp"])
 
-    current_ips = _get_current_allowed_ips(api_port)
+    # Manage API port
+    api_added, api_removed = _manage_port(validator_ips, api_port, UFW_TAG)
 
-    # Remove stale IPs (no longer validators)
-    stale = current_ips - validator_ips
-    for ip in stale:
-        _run(["ufw", "delete", "allow", "from", ip, "to", "any", "port", str(api_port), "proto", "tcp"])
-        log.info("firewall_removed_stale_ip", ip=ip, port=api_port)
-
-    # Add new validator IPs
-    new = validator_ips - current_ips
-    for ip in new:
-        _run(["ufw", "allow", "from", ip, "to", "any", "port", str(api_port), "proto", "tcp",
-               "comment", UFW_TAG])
-        log.info("firewall_added_validator_ip", ip=ip, port=api_port)
-
-    # Ensure blanket deny on the API port is AFTER all allow rules.
-    # Delete and re-add to guarantee ordering (ufw appends new rules at the end).
-    _run(["ufw", "delete", "allow", f"{api_port}/tcp"])
-    _run(["ufw", "delete", "deny", f"{api_port}/tcp"])
-    _run(["ufw", "deny", f"{api_port}/tcp", "comment", f"{UFW_TAG}-deny"])
+    # Manage notary sidecar port (peer miners connect here for notarization)
+    notary_port = int(os.getenv("NOTARY_PORT", "8091"))
+    notary_added, notary_removed = _manage_port(validator_ips, notary_port, "djinn-notary")
 
     # Enable (idempotent, --force skips interactive prompt)
     _run(["ufw", "--force", "enable"])
 
-    if new or stale:
+    total_new = api_added + notary_added
+    total_stale = api_removed + notary_removed
+    if total_new or total_stale:
         log.info("firewall_updated",
                  total_validators=len(validator_ips),
-                 added=len(new), removed=len(stale))
+                 added=total_new, removed=total_stale,
+                 ports=[api_port, notary_port])
     return True
 
 
