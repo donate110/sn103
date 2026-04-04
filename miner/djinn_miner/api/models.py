@@ -151,6 +151,7 @@ class HealthResponse(BaseModel):
     proactive_proof: ProactiveProof | None = None
     tunnel_url: str | None = None
     notary_tunnel_url: str | None = None
+    shield_installed: bool = False
 
 
 class ReadinessResponse(BaseModel):

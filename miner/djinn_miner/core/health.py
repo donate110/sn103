@@ -47,6 +47,11 @@ class HealthTracker:
         self._proactive_attester: object | None = None
         self._tunnel_url: str | None = None
         self._notary_tunnel_url: str | None = None
+        try:
+            import djinn_tunnel_shield  # noqa: F401
+            self._shield_installed = True
+        except ImportError:
+            self._shield_installed = False
 
     def record_ping(self) -> None:
         """Record a health check ping from a validator."""
@@ -182,6 +187,7 @@ class HealthTracker:
             proactive_proof=proactive,
             tunnel_url=self._tunnel_url,
             notary_tunnel_url=self._notary_tunnel_url,
+            shield_installed=self._shield_installed,
         )
 
     def set_tunnel_url(self, url: str | None) -> None:

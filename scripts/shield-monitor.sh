@@ -161,6 +161,35 @@ metrics = {
     "miner_versions": miner_versions if miners_data else {},
 }
 
+# Track our miner (UID 240) scores from the best validator
+our_miner = {}
+for v in VALIDATORS:
+    try:
+        data = fetch(f"http://{v}/v1/miner/240/scores", timeout=8)
+        if data and data.get("found"):
+            our_miner = {
+                "weight": round(data.get("weight", 0), 6),
+                "uptime": round(data.get("uptime", 0), 4),
+                "attestation_valid": data.get("attestations_valid", 0),
+                "attestation_total": data.get("attestations_total", 0),
+                "health_responded": data.get("health_checks_responded", 0),
+                "health_total": data.get("health_checks_total", 0),
+            }
+            break
+    except:
+        pass
+metrics["our_miner_240"] = our_miner
+
+# Count shield adoption from miner health responses
+shield_count = 0
+if miners_data and miners_data.get("miners"):
+    for m in miners_data["miners"]:
+        # Miners running our code with shield report shield_installed=true
+        # But we can't see that from the validator's /network/miners endpoint
+        # We'd need to check individual health responses
+        pass
+metrics["shield_adopted"] = shield_count
+
 with open("/home/user/djinn/scripts/shield-metrics.jsonl", "a") as f:
     f.write(json.dumps(metrics) + "\n")
 
