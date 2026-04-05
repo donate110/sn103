@@ -545,6 +545,8 @@ def create_app(
         # Acquire per-signal lock to prevent concurrent purchase races (R25-15)
         async with _purchase_locks_guard:
             if signal_id not in _purchase_locks:
+                if len(_purchase_locks) > 10_000:
+                    raise HTTPException(status_code=503, detail="Server busy, try again")
                 _purchase_locks[signal_id] = asyncio.Lock()
             signal_lock = _purchase_locks[signal_id]
 
