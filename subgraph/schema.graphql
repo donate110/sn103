@@ -294,6 +294,8 @@ type ProtocolStats @entity {
   totalCollateralDeposited: BigInt!
   "Total collateral slashed"
   totalCollateralSlashed: BigInt!
+  "Total USDC refunded"
+  totalRefunds: BigInt!
   "Number of unique Geniuses"
   uniqueGeniuses: BigInt!
   "Number of unique Idiots"

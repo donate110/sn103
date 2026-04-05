@@ -63,6 +63,8 @@ dataSources:
           handler: handleOutcomeUpdated
         - event: FeesClaimed(indexed address,indexed address,uint256,uint256)
           handler: handleFeesClaimed
+        - event: Refunded(indexed address,indexed address,uint256,uint256)
+          handler: handleRefunded
       file: ./src/escrow.ts
   - kind: ethereum
     name: Collateral

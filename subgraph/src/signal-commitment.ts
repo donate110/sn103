@@ -58,6 +58,7 @@ function getOrCreateProtocolStats(): ProtocolStats {
     stats.totalProtocolFees = BigInt.zero();
     stats.totalCollateralDeposited = BigInt.zero();
     stats.totalCollateralSlashed = BigInt.zero();
+    stats.totalRefunds = BigInt.zero();
     stats.uniqueGeniuses = BigInt.zero();
     stats.uniqueIdiots = BigInt.zero();
   }
