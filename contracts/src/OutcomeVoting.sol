@@ -97,6 +97,10 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
     /// @dev Prevents validators added after first vote from voting on the cycle.
     mapping(bytes32 => uint256) public cycleSyncNonce;
 
+    /// @notice Reset counter per batch. Incremented by resetBatch() to
+    ///         invalidate stale voteCounts without needing to iterate the map.
+    mapping(bytes32 => uint256) public batchResetCount;
+
     // ─── Events ─────────────────────────────────────────────────
 
     /// @notice Emitted when a validator submits their vote
@@ -151,6 +155,9 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
 
     /// @notice Cycle has already been finalized
     error CycleAlreadyFinalized(bytes32 cycleKey);
+
+    /// @notice purchaseIds must be in strictly ascending order
+    error PurchaseIdsNotSorted();
 
     /// @notice Validator address is zero
     error ZeroAddress();
@@ -382,6 +389,12 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
         if (!isValidator[msg.sender]) revert NotValidator(msg.sender);
         if (address(audit) == address(0)) revert ContractNotSet("Audit");
 
+        // Require purchaseIds in ascending order so all validators produce the
+        // same batch key regardless of internal ordering.
+        for (uint256 i = 1; i < purchaseIds.length; i++) {
+            if (purchaseIds[i] <= purchaseIds[i - 1]) revert PurchaseIdsNotSorted();
+        }
+
         // Batch key is derived from the hash of purchaseIds. Validators voting on
         // different sets of purchases naturally go to different keys.
         bytes32 batchKey = keccak256(abi.encode(genius, idiot, keccak256(abi.encode(purchaseIds))));
@@ -409,7 +422,7 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
         hasVoted[batchKey][msg.sender] = true;
         votedScore[batchKey][msg.sender] = qualityScore;
 
-        bytes32 scoreHash = keccak256(abi.encode(qualityScore, totalNotional, isEarlyExit, cycleSyncNonce[batchKey]));
+        bytes32 scoreHash = keccak256(abi.encode(qualityScore, totalNotional, isEarlyExit, cycleSyncNonce[batchKey], batchResetCount[batchKey]));
         uint256 newCount = voteCounts[batchKey][scoreHash] + 1;
         voteCounts[batchKey][scoreHash] = newCount;
 
@@ -530,6 +543,10 @@ contract OutcomeVoting is Initializable, OwnableUpgradeable, PausableUpgradeable
 
         delete earlyExitRequested[batchKey];
         delete earlyExitRequestedBy[batchKey];
+
+        // Invalidate any stale voteCounts by changing the reset counter.
+        // scoreHash includes batchResetCount, so old tallies no longer match.
+        batchResetCount[batchKey]++;
 
         // Emit with zero addresses since we only have the batch key
         emit CycleReset(address(0), address(0), 0);

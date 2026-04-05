@@ -202,17 +202,16 @@ contract ForkUpgradeTest is Test {
         assertEq(ids.length, 25, "25 IDs in queue");
     }
 
-    // ─── Test 7: Self-purchase allowed after upgrade ────────────
+    // ─── Test 7: Self-purchase blocked after upgrade ────────────
 
-    function test_fullUpgrade_selfPurchaseAllowed() public {
+    function test_fullUpgrade_selfPurchaseReverts() public {
         _upgradeAll();
 
         address selfTrader = makeAddr("selfTrader");
 
+        vm.expectRevert(DjinnAccount.SelfPurchase.selector);
         vm.prank(ESCROW_PROXY);
         account.recordPurchase(selfTrader, selfTrader, 777001);
-
-        assertTrue(account.isPurchaseRecorded(selfTrader, selfTrader, 777001));
     }
 
     // ─── Test 8: Mark batch audited after upgrade ───────────────

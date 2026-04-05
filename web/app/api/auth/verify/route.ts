@@ -26,7 +26,7 @@ import { getIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
  * }
  */
 export async function POST(request: NextRequest) {
-  if (isRateLimited("auth-verify", getIp(request), 60_000, 10)) {
+  if (isRateLimited("auth-verify", getIp(request), 10, 60_000)) {
     return rateLimitResponse();
   }
 
