@@ -13,7 +13,7 @@ import { getIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
  * Response: { challenge: "Sign this message...", nonce: "abc123...", expires_in: 300 }
  */
 export async function POST(request: NextRequest) {
-  if (isRateLimited("auth-connect", getIp(request), 60_000, 20)) {
+  if (isRateLimited("auth-connect", getIp(request), 20, 60_000)) {
     return rateLimitResponse();
   }
 

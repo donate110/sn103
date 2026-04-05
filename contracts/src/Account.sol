@@ -98,6 +98,7 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     error CallerNotAuthorized(address caller);
     error ZeroGeniusAddress();
     error ZeroIdiotAddress();
+    error SelfPurchase();
 
     error PurchaseAlreadyRecorded(address genius, address idiot, uint256 purchaseId);
     error PurchaseNotFound(address genius, address idiot, uint256 purchaseId);
@@ -384,6 +385,7 @@ contract Account is Initializable, OwnableUpgradeable, PausableUpgradeable, UUPS
     function _validatePair(address genius, address idiot) internal pure {
         if (genius == address(0)) revert ZeroGeniusAddress();
         if (idiot == address(0)) revert ZeroIdiotAddress();
+        if (genius == idiot) revert SelfPurchase();
     }
 
     // ─── Emergency Pause ────────────────────────────────────────────

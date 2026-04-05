@@ -22,7 +22,11 @@ function toHex(buf: ArrayBuffer): string {
 }
 
 function getSecret(): string {
-  return process.env.API_SESSION_SECRET || process.env.ADMIN_PASSWORD || "";
+  const secret = process.env.API_SESSION_SECRET || process.env.ADMIN_PASSWORD || "";
+  if (!secret) {
+    throw new Error("API_SESSION_SECRET or ADMIN_PASSWORD must be set");
+  }
+  return secret;
 }
 
 async function hmacSha256(key: string, data: string): Promise<string> {
