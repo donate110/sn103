@@ -228,7 +228,7 @@ contract Collateral is Initializable, OwnableUpgradeable, PausableUpgradeable, R
         if (withdrawalFreezeCount[genius] > 0) {
             withdrawalFreezeCount[genius]--;
         }
-        emit WithdrawalFreezeUpdated(genius, withdrawalFreezeCount[genius] == 0);
+        emit WithdrawalFreezeUpdated(genius, withdrawalFreezeCount[genius] > 0);
     }
 
     /// @notice Emergency reset of freeze counter. Owner-only for recovery scenarios.

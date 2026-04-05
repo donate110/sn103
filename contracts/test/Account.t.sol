@@ -708,10 +708,10 @@ contract AccountTest is Test {
         acct.recordPurchase(genius, address(0), 1);
     }
 
-    function test_recordPurchase_selfPurchaseReverts() public {
-        vm.expectRevert(DjinnAccount.SelfPurchase.selector);
+    function test_recordPurchase_selfPurchaseAllowed() public {
         vm.prank(authorizedCaller);
         acct.recordPurchase(genius, genius, 1);
+        assertEq(acct.getPairPurchaseIds(genius, genius).length, 1);
     }
 
     function test_recordOutcome_revertZeroGenius() public {
@@ -720,10 +720,12 @@ contract AccountTest is Test {
         acct.recordOutcome(address(0), idiot, 1, Outcome.Favorable);
     }
 
-    function test_recordOutcome_selfPurchaseReverts() public {
-        vm.expectRevert(DjinnAccount.SelfPurchase.selector);
+    function test_recordOutcome_selfPurchaseAllowed() public {
         vm.prank(authorizedCaller);
         acct.recordPurchase(genius, genius, 1);
+        vm.prank(authorizedCaller);
+        acct.recordOutcome(genius, genius, 1, Outcome.Favorable);
+        assertEq(uint256(acct.getOutcome(genius, genius, 1)), uint256(Outcome.Favorable));
     }
 
     function test_markBatchAudited_revertZeroGenius() public {
@@ -735,10 +737,17 @@ contract AccountTest is Test {
         acct.markBatchAudited(address(0), idiot, batch);
     }
 
-    function test_markBatchAudited_selfPurchaseReverts() public {
-        vm.expectRevert(DjinnAccount.SelfPurchase.selector);
+    function test_markBatchAudited_selfPurchaseAllowed() public {
         vm.prank(authorizedCaller);
         acct.recordPurchase(genius, genius, 1);
+        vm.prank(authorizedCaller);
+        acct.recordOutcome(genius, genius, 1, Outcome.Favorable);
+
+        uint256[] memory batch = new uint256[](1);
+        batch[0] = 1;
+        vm.prank(authorizedCaller);
+        uint256 batchId = acct.markBatchAudited(genius, genius, batch);
+        assertEq(batchId, 0);
     }
 
     // ═══════════════════════════════════════════════════════════════
