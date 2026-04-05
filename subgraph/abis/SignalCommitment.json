@@ -157,6 +157,21 @@
             "name": "availableSportsbooks",
             "type": "string[]",
             "internalType": "string[]"
+          },
+          {
+            "name": "linesHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "lineCount",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "bpaMode",
+            "type": "bool",
+            "internalType": "bool"
           }
         ]
       }
@@ -244,6 +259,21 @@
             "name": "createdAt",
             "type": "uint256",
             "internalType": "uint256"
+          },
+          {
+            "name": "linesHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "lineCount",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "bpaMode",
+            "type": "bool",
+            "internalType": "bool"
           }
         ]
       }
@@ -265,6 +295,25 @@
         "name": "",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isV2Signal",
+    "inputs": [
+      {
+        "name": "signalId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"

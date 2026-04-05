@@ -25,6 +25,9 @@ export interface Signal {
   availableSportsbooks: string[];
   status: SignalStatus;
   createdAt: bigint;
+  linesHash: string;
+  lineCount: number;
+  bpaMode: boolean;
 }
 
 export interface Purchase {
@@ -37,6 +40,7 @@ export interface Purchase {
   odds: bigint;
   outcome: Outcome;
   purchasedAt: bigint;
+  lockedOdds: bigint;
 }
 
 export interface AccountState {
@@ -71,6 +75,9 @@ export interface CommitParams {
   expiresAt: bigint;
   decoyLines: string[];
   availableSportsbooks: string[];
+  linesHash: string;
+  lineCount: number;
+  bpaMode: boolean;
 }
 
 export function formatUsdc(amount: bigint): string {

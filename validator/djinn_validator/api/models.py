@@ -36,11 +36,11 @@ class StoreShareRequest(BaseModel):
 
     signal_id: str = Field(max_length=256, pattern=r"^[a-zA-Z0-9_\-]+$")
     genius_address: str = Field(max_length=256)
-    share_x: int = Field(ge=1, le=10)
+    share_x: int = Field(ge=1, le=2000)
     share_y: str = Field(max_length=66)  # Hex-encoded BN254 field element (64 hex + 0x)
     encrypted_key_share: str = Field(max_length=4096)  # Hex-encoded encrypted AES key share
     encrypted_index_share: str = Field(default="", max_length=4096)  # Hex-encoded index share for MPC
-    shamir_threshold: int = Field(default=7, ge=1, le=10, description="Shamir reconstruction threshold declared by the client")
+    shamir_threshold: int = Field(default=7, ge=1, le=2000, description="Shamir reconstruction threshold declared by the client")
     precomputed_triples: list[BeaverTripleData] = Field(default_factory=list, max_length=20, description="Pre-computed Beaver triples for fast MPC purchase")
 
     @field_validator("share_y")
@@ -71,7 +71,7 @@ class PurchaseRequest(BaseModel):
 
     buyer_address: str = Field(max_length=256)
     sportsbook: str = Field(max_length=256)
-    available_indices: list[int] = Field(min_length=1, max_length=10)
+    available_indices: list[int] = Field(min_length=1, max_length=2000)
     buyer_signature: str = Field(
         default="",
         max_length=2048,
@@ -89,8 +89,8 @@ class PurchaseRequest(BaseModel):
     @classmethod
     def validate_indices_range(cls, v: list[int]) -> list[int]:
         for idx in v:
-            if idx < 1 or idx > 10:
-                raise ValueError(f"available_indices values must be 1-10, got {idx}")
+            if idx < 1 or idx > 2000:
+                raise ValueError(f"available_indices values must be 1-2000, got {idx}")
         if len(set(v)) != len(v):
             raise ValueError("available_indices must not contain duplicates")
         return v
@@ -126,17 +126,17 @@ class OutcomeResponse(BaseModel):
 class RegisterSignalRequest(BaseModel):
     """POST /v1/signal/{id}/register — Register for blind outcome tracking.
 
-    Accepts all 10 public decoy lines (already committed on-chain).
-    The validator resolves ALL lines against game results, producing 10
-    outcomes.  The real outcome is selected later by batch MPC at the
-    audit-set level, so no individual signal outcome is ever revealed.
+    Accepts the full set of decoy lines (2 to 2000, committed on-chain via
+    linesHash).  The validator resolves ALL lines against game results,
+    producing N outcomes.  The real outcome is selected later by batch MPC
+    at the audit-set level, so no individual signal outcome is ever revealed.
     """
 
     sport: str = Field(max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
     event_id: str = Field(max_length=256, pattern=r"^[a-zA-Z0-9_\-:.]+$")
     home_team: str = Field(max_length=256)
     away_team: str = Field(max_length=256)
-    lines: list[str] = Field(min_length=10, max_length=10)
+    lines: list[str] = Field(min_length=2, max_length=2000)
     genius_address: str = Field(default="", max_length=256)
     idiot_address: str = Field(default="", max_length=256)
     notional: int = Field(default=0, ge=0)
@@ -232,7 +232,7 @@ class MPCInitRequest(BaseModel):
 
     session_id: str = Field(max_length=256, pattern=r"^[a-zA-Z0-9_\-]+$")
     signal_id: str = Field(max_length=256, pattern=r"^[a-zA-Z0-9_\-]+$")
-    available_indices: list[int] = Field(max_length=10)
+    available_indices: list[int] = Field(max_length=2000)
     coordinator_x: int = Field(ge=1, le=255)
     participant_xs: list[int] = Field(max_length=20)
     threshold: int = Field(default=7, ge=1, le=20)
@@ -255,8 +255,8 @@ class MPCInitRequest(BaseModel):
     @classmethod
     def validate_mpc_indices(cls, v: list[int]) -> list[int]:
         for idx in v:
-            if idx < 1 or idx > 10:
-                raise ValueError(f"available_indices values must be 1-10, got {idx}")
+            if idx < 1 or idx > 2000:
+                raise ValueError(f"available_indices values must be 1-2000, got {idx}")
         return v
 
     @field_validator("participant_xs")
@@ -473,8 +473,60 @@ class OTSharesResponse(BaseModel):
     triple_shares: list[dict[str, str]] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# Check-Odds (buyer-facing odds lookup via validator)
+# ---------------------------------------------------------------------------
+
+
+class CheckOddsRequest(BaseModel):
+    """POST /v1/signal/{id}/check-odds -- Fetch current odds for BPA/WPA pricing.
+
+    The validator fetches fresh odds for all lines from a miner,
+    filters by the buyer's available sportsbooks, and returns
+    BPA/WPA per line. The MPC then selects at the secret index.
+    """
+
+    buyer_address: str = Field(max_length=256)
+    buyer_books: list[str] = Field(min_length=1, max_length=50)
+    buyer_signature: str = Field(default="", max_length=2048)
+
+
+class LineOdds(BaseModel):
+    index: int
+    bpa: float = 0  # best price available from buyer's books
+    wpa: float = 0  # worst price available from buyer's books
+    executable: bool = False  # at least one book offers this line
+
+
+class CheckOddsResponse(BaseModel):
+    signal_id: str
+    line_count: int
+    odds: list[LineOdds]
+    bpa_mode: bool  # from the signal's on-chain setting
+    source: str = "validator"
+
+
+# ---------------------------------------------------------------------------
+# Buyer Preferences
+# ---------------------------------------------------------------------------
+
+
+class SetPreferencesRequest(BaseModel):
+    """PUT /v1/preferences/{address} -- Store buyer preferences."""
+
+    books: list[str] = Field(min_length=0, max_length=50)
+    encrypted_data: str = Field(default="", max_length=10000)
+    signature: str = Field(default="", max_length=2048)
+
+
+class PreferencesResponse(BaseModel):
+    address: str
+    books: list[str] = []
+    encrypted_data: str = ""
+
+
 # ------------------------------------------------------------------
-# Web Attestation (whitepaper §15 — pure Bittensor, no Base chain)
+# Web Attestation (whitepaper S15 -- pure Bittensor, no Base chain)
 # ------------------------------------------------------------------
 
 

@@ -1,8 +1,9 @@
-import { BigInt, Bytes } from "@graphprotocol/graph-ts";
+import { BigInt, Bytes, ethereum } from "@graphprotocol/graph-ts";
 import {
   SignalCommitted,
   SignalCancelled,
   SignalStatusUpdated,
+  SignalCommitment,
 } from "../generated/SignalCommitment/SignalCommitment";
 import { Signal, Genius, ProtocolStats } from "../generated/schema";
 
@@ -83,6 +84,29 @@ export function handleSignalCommitted(event: SignalCommitted): void {
   signal.createdAt = event.block.timestamp;
   signal.createdAtBlock = event.block.number;
   signal.createdAtTx = event.transaction.hash;
+
+  // v2 off-chain decoy lines: try_ calls for backward compat with v1 signals
+  let contract = SignalCommitment.bind(event.address);
+  let isV2Result = contract.tryCall(
+    "isV2Signal",
+    "isV2Signal(uint256):(bool)",
+    [ethereum.Value.fromUnsignedBigInt(event.params.signalId)],
+  );
+  if (!isV2Result.reverted && isV2Result.value[0].toBoolean()) {
+    // Signal is v2; read the extended struct from getSignal
+    let sigResult = contract.tryCall(
+      "getSignal",
+      "getSignal(uint256):((address,bytes,bytes32,string,uint256,uint256,uint256,uint256,uint256,string[],string[],uint8,uint256,bytes32,uint16,bool))",
+      [ethereum.Value.fromUnsignedBigInt(event.params.signalId)],
+    );
+    if (!sigResult.reverted) {
+      let sigTuple = sigResult.value[0].toTuple();
+      signal.linesHash = sigTuple[13].toBytes();
+      signal.lineCount = sigTuple[14].toI32();
+      signal.bpaMode = sigTuple[15].toBoolean();
+    }
+  }
+
   signal.save();
 
   let stats = getOrCreateProtocolStats();

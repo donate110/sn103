@@ -8,13 +8,13 @@ _VALID_MARKETS = {"spreads", "totals", "h2h"}
 
 
 class CandidateLine(BaseModel):
-    """A single candidate line from the 10-line set sent by validators.
+    """A single candidate line from the set sent by validators (up to 2000).
 
     Each line represents a specific bet at a specific event. The miner
     checks if this exact line (within tolerance) is available at any sportsbook.
     """
 
-    index: int = Field(ge=1, le=10, description="Line index (1-10)")
+    index: int = Field(ge=1, le=2000, description="Line index (1-2000)")
     sport: str = Field(max_length=128, description="Sport key, e.g. 'basketball_nba'")
     event_id: str = Field(max_length=256, description="Unique event identifier")
     home_team: str = Field(max_length=256, description="Home team name")
@@ -40,12 +40,12 @@ class CandidateLine(BaseModel):
 
 
 class CheckRequest(BaseModel):
-    """POST /v1/check — Receive 10 candidate lines, return availability."""
+    """POST /v1/check — Receive candidate lines (up to 2000), return availability."""
 
     lines: list[CandidateLine] = Field(
         min_length=1,
-        max_length=10,
-        description="Up to 10 candidate lines to check",
+        max_length=2000,
+        description="Up to 2000 candidate lines to check",
     )
 
 
@@ -59,7 +59,7 @@ class BookmakerAvailability(BaseModel):
 class LineResult(BaseModel):
     """Result for a single candidate line."""
 
-    index: int = Field(ge=1, le=10)
+    index: int = Field(ge=1, le=2000)
     available: bool
     bookmakers: list[BookmakerAvailability] = Field(default_factory=list, max_length=50)
     unavailable_reason: str | None = Field(

@@ -71,4 +71,23 @@ describe("generateDecoys", () => {
     expect(decoys.length).toBeLessThanOrEqual(3);
     expect(decoys.length).toBeGreaterThan(0);
   });
+
+  it("generates count=1 decoy", () => {
+    const decoys = generateDecoys({ realPick, availableLines, count: 1 });
+    expect(decoys).toHaveLength(1);
+    const key = `${decoys[0].event_id}:${decoys[0].market}:${decoys[0].pick}`;
+    const realKey = `${realPick.event_id}:${realPick.market}:${realPick.pick}`;
+    expect(key).not.toBe(realKey);
+  });
+
+  it("generates count=99 decoys (capped by available lines)", () => {
+    // We only have 12 available lines, so count=99 should return at most 12
+    const decoys = generateDecoys({ realPick, availableLines, count: 99 });
+    expect(decoys.length).toBeLessThanOrEqual(availableLines.length);
+    expect(decoys.length).toBeGreaterThan(0);
+    // No duplicates
+    const keys = decoys.map((d) => `${d.event_id}:${d.market}:${d.pick}`);
+    const unique = new Set(keys);
+    expect(unique.size).toBe(keys.length);
+  });
 });

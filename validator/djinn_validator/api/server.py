@@ -1,30 +1,35 @@
 """FastAPI server for the Djinn validator REST API.
 
 Endpoints from Appendix A of the whitepaper:
-- POST /v1/signal                    — Accept encrypted key shares from Genius
-- POST /v1/signal/{id}/purchase      — Handle buyer purchase (MPC + share release)
-- POST /v1/signal/{id}/register      — Register purchased signal for outcome tracking
-- POST /v1/signal/{id}/outcome       — Submit outcome attestation
-- POST /v1/signals/resolve           — Resolve all pending signal outcomes
-- POST /v1/attest                    — Web attestation: TLSNotary proof of any URL (§15)
-- POST /v1/notary/session            — Assign a notary miner for external provers (browser extensions)
-- POST /v1/analytics/attempt         — Fire-and-forget analytics
-- GET  /health                       — Health check
+- POST /v1/signal                    -- Accept encrypted key shares from Genius
+- POST /v1/signal/{id}/purchase      -- Handle buyer purchase (MPC + share release)
+- POST /v1/signal/{id}/register      -- Register purchased signal for outcome tracking
+- POST /v1/signal/{id}/check-odds    -- Fetch BPA/WPA odds for a signal at purchase time
+- POST /v1/signal/{id}/outcome       -- Submit outcome attestation
+- POST /v1/signals/resolve           -- Resolve all pending signal outcomes
+- PUT  /v1/preferences/{address}     -- Store buyer preferences (books, encrypted data)
+- GET  /v1/preferences/{address}     -- Retrieve buyer preferences
+- POST /v1/attest                    -- Web attestation: TLSNotary proof of any URL (S15)
+- POST /v1/notary/session            -- Assign a notary miner for external provers (browser extensions)
+- POST /v1/analytics/attempt         -- Fire-and-forget analytics
+- GET  /health                       -- Health check
 
 Inter-validator MPC endpoints:
-- POST /v1/mpc/init                  — Accept MPC session invitation
-- POST /v1/mpc/round1               — Submit Round 1 multiplication messages
-- POST /v1/mpc/result               — Accept coordinator's final result
-- GET  /v1/mpc/{session_id}/status   — Check MPC session status
+- POST /v1/mpc/init                  -- Accept MPC session invitation
+- POST /v1/mpc/round1               -- Submit Round 1 multiplication messages
+- POST /v1/mpc/result               -- Accept coordinator's final result
+- GET  /v1/mpc/{session_id}/status   -- Check MPC session status
 """
 
 from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import os
 import re
 import socket
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
@@ -62,6 +67,9 @@ from djinn_validator.api.models import (
     AnalyticsRequest,
     AttestRequest,
     AttestResponse,
+    CheckOddsRequest,
+    CheckOddsResponse,
+    LineOdds,
     NotarySessionResponse,
     AuditSetStatusResponse,
     HealthResponse,
@@ -91,12 +99,14 @@ from djinn_validator.api.models import (
     OTTransfersResponse,
     OutcomeRequest,
     OutcomeResponse,
+    PreferencesResponse,
     PurchaseRequest,
     PurchaseResponse,
     ReadinessResponse,
     RegisterSignalRequest,
     RegisterSignalResponse,
     ResolveResponse,
+    SetPreferencesRequest,
     ShareInfoResponse,
     StoreShareRequest,
     StoreShareResponse,
@@ -3061,6 +3071,85 @@ def create_app(
             "amount": cached.get("amount", 0),
             "block_ts": cached.get("block_ts", 0),
         }
+
+    # ------------------------------------------------------------------
+    # Check-Odds: buyer fetches live odds through the validator
+    # ------------------------------------------------------------------
+
+    @app.post("/v1/signal/{signal_id}/check-odds", response_model=CheckOddsResponse)
+    async def check_odds(signal_id: str, req: CheckOddsRequest) -> CheckOddsResponse:
+        """Fetch current odds for BPA/WPA pricing at purchase time.
+
+        TODO: Fan out to miners to fetch live odds. For now, returns
+        stored line prices as placeholders.
+        """
+        _validate_signal_id_path(signal_id)
+
+        # Get stored signal metadata
+        signal_meta = outcome_attestor.get_signal(signal_id)
+        if signal_meta is None:
+            raise HTTPException(status_code=404, detail="Signal not registered on this validator")
+
+        # Build odds array from stored lines
+        odds_list: list[LineOdds] = []
+        for i, line in enumerate(signal_meta.lines):
+            # TODO: fetch live odds from miner, filter by buyer_books
+            # For now, use stored odds as placeholder
+            price = line.odds or 0
+            odds_list.append(LineOdds(
+                index=i + 1,
+                bpa=float(price) if price else 0,
+                wpa=float(price) if price else 0,
+                executable=price is not None and price != 0,
+            ))
+
+        return CheckOddsResponse(
+            signal_id=signal_id,
+            line_count=len(signal_meta.lines),
+            odds=odds_list,
+            bpa_mode=False,  # TODO: read from on-chain signal
+        )
+
+    # ------------------------------------------------------------------
+    # Buyer Preferences
+    # ------------------------------------------------------------------
+
+    @app.put("/v1/preferences/{address}")
+    async def set_preferences(address: str, req: SetPreferencesRequest):
+        """Store buyer preferences (encrypted)."""
+        if not address.startswith("0x") or len(address) != 42:
+            raise HTTPException(status_code=400, detail="Invalid address format")
+
+        if outcome_attestor._db:
+            outcome_attestor._db.execute(
+                """INSERT OR REPLACE INTO buyer_preferences
+                   (address, books_json, encrypted_data, updated_at)
+                   VALUES (?, ?, ?, ?)""",
+                (address.lower(), json.dumps(req.books), req.encrypted_data, time.time()),
+            )
+            outcome_attestor._db.commit()
+
+        return {"address": address, "stored": True}
+
+    @app.get("/v1/preferences/{address}", response_model=PreferencesResponse)
+    async def get_preferences(address: str):
+        """Retrieve buyer preferences."""
+        if not address.startswith("0x") or len(address) != 42:
+            raise HTTPException(status_code=400, detail="Invalid address format")
+
+        if outcome_attestor._db:
+            row = outcome_attestor._db.execute(
+                "SELECT books_json, encrypted_data FROM buyer_preferences WHERE address = ?",
+                (address.lower(),),
+            ).fetchone()
+            if row:
+                return PreferencesResponse(
+                    address=address,
+                    books=json.loads(row[0]) if row[0] else [],
+                    encrypted_data=row[1] or "",
+                )
+
+        return PreferencesResponse(address=address)
 
     @app.get("/metrics")
     async def metrics() -> bytes:

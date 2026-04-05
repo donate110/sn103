@@ -391,6 +391,9 @@ export function useSignal(signalId: bigint | undefined) {
       availableSportsbooks: Array.isArray(raw.availableSportsbooks) ? raw.availableSportsbooks.map(String) : [],
       status: Number(raw.status ?? 0),
       createdAt: toBigInt(raw.createdAt),
+      linesHash: String(raw.linesHash || "0x" + "0".repeat(64)),
+      lineCount: Number(raw.lineCount || 0),
+      bpaMode: Boolean(raw.bpaMode),
     });
     const fetchWithRetry = async (retries = 2, delayMs = 3000): Promise<void> => {
       for (let attempt = 0; attempt <= retries; attempt++) {
@@ -483,7 +486,7 @@ const COLLATERAL_ABI = parseAbi([
 ]);
 
 const SIGNAL_COMMITMENT_VIEM_ABI = parseAbi([
-  "function commit((uint256 signalId, bytes encryptedBlob, bytes32 commitHash, string sport, uint256 maxPriceBps, uint256 slaMultiplierBps, uint256 maxNotional, uint256 minNotional, uint256 expiresAt, string[] decoyLines, string[] availableSportsbooks) p)",
+  "function commit((uint256 signalId, bytes encryptedBlob, bytes32 commitHash, string sport, uint256 maxPriceBps, uint256 slaMultiplierBps, uint256 maxNotional, uint256 minNotional, uint256 expiresAt, string[] decoyLines, string[] availableSportsbooks, bytes32 linesHash, uint16 lineCount, bool bpaMode) p)",
   "function cancelSignal(uint256 signalId)",
 ]);
 
@@ -540,6 +543,9 @@ export function useCommitSignal() {
             expiresAt: params.expiresAt,
             decoyLines: params.decoyLines,
             availableSportsbooks: params.availableSportsbooks,
+            linesHash: (params.linesHash || "0x" + "0".repeat(64)) as Hex,
+            lineCount: params.lineCount || 0,
+            bpaMode: params.bpaMode || false,
           }],
         });
         debug("[commit-signal] tx:", hash);

@@ -374,7 +374,10 @@ contract PausableTest is Test {
                 minNotional: 0,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: decoys,
-                availableSportsbooks: books
+                availableSportsbooks: books,
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
     }
@@ -401,7 +404,10 @@ contract PausableTest is Test {
                 minNotional: 0,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: decoys,
-                availableSportsbooks: books
+                availableSportsbooks: books,
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
 

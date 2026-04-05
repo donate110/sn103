@@ -51,6 +51,12 @@ type Signal @entity {
   createdAtBlock: BigInt!
   "Transaction hash of the commit"
   createdAtTx: Bytes!
+  "Keccak256 hash of off-chain decoy lines (v2 signals only)"
+  linesHash: Bytes
+  "Number of decoy lines stored off-chain (v2 signals only)"
+  lineCount: Int
+  "Whether this signal uses Best Price Available mode (v2 signals only)"
+  bpaMode: Boolean
   "Purchases of this signal"
   purchases: [Purchase!]! @derivedFrom(field: "signal")
 }

@@ -131,7 +131,7 @@ def create_app(
     async def check_lines(request: CheckRequest) -> CheckResponse:
         """Phase 1: Check availability of candidate lines at sportsbooks.
 
-        Receives up to 10 candidate lines. For each, queries the odds data
+        Receives up to 2000 candidate lines. For each, queries the odds data
         source and returns which lines are currently available and at which
         bookmakers.
         """

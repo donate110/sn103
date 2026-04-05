@@ -8,7 +8,6 @@ import { useSignal, useCancelSignal, useSignalPurchases, useSignalNotionalFilled
 import { invalidateSignalCache } from "@/lib/events";
 import { useEncryptedSignals } from "@/lib/hooks/useEncryptedSignals";
 import { SignalStatus, formatUsdc, formatBps, truncateAddress } from "@/lib/types";
-import { parseLine, formatLine, type StructuredLine } from "@/lib/odds";
 
 export default function GeniusSignalDetail() {
   const params = useParams();
@@ -260,85 +259,32 @@ export default function GeniusSignalDetail() {
         )}
       </div>
 
-      {/* Lines (decoys + real pick if local data available) */}
-      {savedData ? (
-        /* Dark treatment: real pick is client-side secret, only visible to the genius */
-        <div className="rounded-2xl bg-slate-900 p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white">
-              Lines
-              <span className="text-sm font-normal text-genius-400 ml-2">
-                Your real pick is highlighted
-              </span>
-            </h2>
-            <div className="flex items-center gap-3">
-              <span className="inline-flex items-center gap-1.5 text-xs text-slate-400">
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                </svg>
-                Only visible to you
-              </span>
+      {/* Lines summary */}
+      <div className="card mb-6">
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">Lines</h2>
+        {signal.lineCount > 0 ? (
+          <p className="text-sm text-slate-600">
+            {signal.lineCount} lines (privacy-enhanced, stored off-chain with validators)
+          </p>
+        ) : signal.decoyLines.length > 0 ? (
+          <p className="text-sm text-slate-600">
+            {signal.decoyLines.length} lines (v1 on-chain)
+          </p>
+        ) : (
+          <p className="text-slate-500 text-sm">No line data available.</p>
+        )}
+        {savedData ? (
+          <div className="rounded-lg bg-genius-50 border border-genius-200 p-3 mt-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <svg className="w-3.5 h-3.5 text-genius-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+              </svg>
+              <span className="text-xs text-genius-600 font-medium">Your real pick (only visible to you)</span>
             </div>
+            <p className="text-sm font-bold text-genius-800">{savedData.pick}</p>
           </div>
-          {signal.decoyLines.length === 0 ? (
-            <p className="text-slate-400 text-sm">No line data available.</p>
-          ) : (
-            <div className="space-y-2">
-              {signal.decoyLines.map((raw, i) => {
-                const isReal = savedData?.realIndex === i + 1;
-                const structured = parseLine(raw);
-                return (
-                  <div
-                    key={i}
-                    className={`px-3 py-2.5 rounded-lg text-sm ${
-                      isReal
-                        ? "bg-genius-500/20 border-2 border-genius-400 text-genius-200"
-                        : "bg-slate-800 border border-slate-700 text-slate-400"
-                    }`}
-                  >
-                    {structured ? (
-                      <LineDisplay line={structured} index={i + 1} isReal={isReal} dark />
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        {isReal && (
-                          <span className="text-xs font-bold text-genius-400 uppercase">
-                            Real
-                          </span>
-                        )}
-                        <span className="text-slate-500">Line {i + 1}:</span>
-                        <span className="font-mono text-xs break-all">{raw}</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      ) : savedLocked ? (
-        /* Data is encrypted and seed not cached — show unlock prompt */
-        <div className="card mb-6">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">Lines</h2>
-          {signal.decoyLines.length > 0 && (
-            <div className="space-y-2 mb-4">
-              {signal.decoyLines.map((raw, i) => {
-                const structured = parseLine(raw);
-                return (
-                  <div key={i} className="px-3 py-2.5 rounded-lg text-sm bg-slate-50 border border-slate-200 text-slate-600">
-                    {structured ? (
-                      <LineDisplay line={structured} index={i + 1} isReal={false} />
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-500">Line {i + 1}:</span>
-                        <span className="font-mono text-xs break-all">{raw}</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <div className="rounded-lg border border-genius-200 bg-genius-50 p-3">
+        ) : savedLocked ? (
+          <div className="rounded-lg border border-genius-200 bg-genius-50 p-3 mt-3">
             <p className="text-sm text-genius-700">Your signal data is encrypted. Sign to reveal your real pick.</p>
             <button
               type="button"
@@ -348,41 +294,13 @@ export default function GeniusSignalDetail() {
               Unlock Data
             </button>
           </div>
-        </div>
-      ) : (
-        /* No local data at all — show lines without highlighting */
-        <div className="card mb-6">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">Lines</h2>
-          {signal.decoyLines.length === 0 ? (
-            <p className="text-slate-500 text-sm">No line data available.</p>
-          ) : (
-            <div className="space-y-2">
-              {signal.decoyLines.map((raw, i) => {
-                const structured = parseLine(raw);
-                return (
-                  <div
-                    key={i}
-                    className="px-3 py-2.5 rounded-lg text-sm bg-slate-50 border border-slate-200 text-slate-600"
-                  >
-                    {structured ? (
-                      <LineDisplay line={structured} index={i + 1} isReal={false} />
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-500">Line {i + 1}:</span>
-                        <span className="font-mono text-xs break-all">{raw}</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+        ) : (
           <p className="text-xs text-slate-400 mt-3">
-            Local signal data not found for this signal. The real pick cannot be highlighted.
+            Local signal data not found. The real pick cannot be shown.
             This may happen if the signal was created in a different browser session.
           </p>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Actions */}
       {isOwner && !cancelSuccess && (
@@ -469,70 +387,3 @@ export default function GeniusSignalDetail() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Formatted line display
-// ---------------------------------------------------------------------------
-
-function LineDisplay({
-  line,
-  index,
-  isReal,
-  dark,
-}: {
-  line: StructuredLine;
-  index: number;
-  isReal: boolean;
-  dark?: boolean;
-}) {
-  const display = formatLine(line);
-  const sportLabel = line.sport
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-  const marketLabel =
-    line.market === "h2h" ? "Moneyline" :
-    line.market === "spreads" ? "Spread" :
-    line.market === "totals" ? "Total" : line.market;
-
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2 flex-wrap">
-        {isReal && (
-          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-            dark ? "bg-genius-500/30 text-genius-300" : "bg-genius-100 text-genius-700"
-          }`}>
-            Real Pick
-          </span>
-        )}
-        <span className={`text-xs ${
-          isReal
-            ? dark ? "text-genius-400" : "text-genius-500"
-            : dark ? "text-slate-500" : "text-slate-400"
-        }`}>
-          #{index}
-        </span>
-        <span className={`font-medium ${
-          isReal
-            ? dark ? "text-genius-200" : "text-genius-800"
-            : dark ? "text-slate-300" : "text-slate-700"
-        }`}>
-          {display}
-        </span>
-      </div>
-      <div className={`flex items-center gap-2 text-[11px] ${dark ? "text-slate-500" : "text-slate-400"}`}>
-        <span>{sportLabel}</span>
-        <span>&middot;</span>
-        <span>{marketLabel}</span>
-        <span>&middot;</span>
-        <span className="truncate max-w-[180px]">
-          {line.home_team} vs {line.away_team}
-        </span>
-        {line.commence_time && (
-          <>
-            <span>&middot;</span>
-            <span>{new Date(line.commence_time).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}

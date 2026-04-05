@@ -166,7 +166,7 @@ class TestCheckEndpoint:
         body = {
             "lines": [
                 {
-                    "index": 11,
+                    "index": 2001,
                     "sport": "basketball_nba",
                     "event_id": "ev-001",
                     "home_team": "Team A",
@@ -298,7 +298,7 @@ class TestInputValidation:
             "market": "h2h",
             "side": "A",
         }
-        resp = app.post("/v1/check", json={"lines": [line] * 11})
+        resp = app.post("/v1/check", json={"lines": [line] * 2001})
         assert resp.status_code == 422
 
     def test_proof_missing_query_id(self, app: TestClient) -> None:

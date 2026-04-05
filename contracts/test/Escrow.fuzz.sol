@@ -89,7 +89,10 @@ contract EscrowFuzzTest is Test {
                 minNotional: 0,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: _buildDecoys(),
-                availableSportsbooks: _buildBooks()
+                availableSportsbooks: _buildBooks(),
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
 
@@ -163,7 +166,10 @@ contract EscrowFuzzTest is Test {
                 minNotional: 0,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: _buildDecoys(),
-                availableSportsbooks: _buildBooks()
+                availableSportsbooks: _buildBooks(),
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
 
@@ -248,7 +254,10 @@ contract EscrowFuzzTest is Test {
                 minNotional: 0,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: _buildDecoys(),
-                availableSportsbooks: _buildBooks()
+                availableSportsbooks: _buildBooks(),
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
 
