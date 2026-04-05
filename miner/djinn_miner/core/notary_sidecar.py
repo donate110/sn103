@@ -147,7 +147,7 @@ class NotarySidecar:
         if key_dir:
             os.makedirs(key_dir, mode=0o700, exist_ok=True)
 
-        bind_host = os.getenv("NOTARY_HOST", "0.0.0.0")
+        bind_host = os.getenv("NOTARY_HOST", "127.0.0.1")
         cmd = [
             binary,
             "--port", str(self._port),
