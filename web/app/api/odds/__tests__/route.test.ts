@@ -255,15 +255,15 @@ describe("GET /api/odds", () => {
     // Use a unique IP to avoid collisions with other tests
     const headers = { "x-forwarded-for": "192.168.99.99" };
 
-    // Send 30 requests (the limit)
-    for (let i = 0; i < 30; i++) {
+    // Send 120 requests (the limit)
+    for (let i = 0; i < 120; i++) {
       const resp = await GET(
         makeRequest({ sport: "icehockey_nhl" }, headers),
       );
       expect(resp.status).toBe(200);
     }
 
-    // 31st request should be rate limited
+    // 121st request should be rate limited
     const resp = await GET(
       makeRequest({ sport: "icehockey_nhl" }, headers),
     );
