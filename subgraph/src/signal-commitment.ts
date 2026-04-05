@@ -102,6 +102,7 @@ export function handleSignalCommitted(event: SignalCommitted): void {
     );
     if (!sigResult.reverted) {
       let sigTuple = sigResult.value[0].toTuple();
+      signal.minNotional = sigTuple[7].toBigInt();
       signal.linesHash = sigTuple[13].toBytes();
       signal.lineCount = sigTuple[14].toI32();
       signal.bpaMode = sigTuple[15].toBoolean();
