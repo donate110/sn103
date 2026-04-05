@@ -246,6 +246,18 @@ async def watch_loop(package_dir: Path | None = None) -> None:
             if not _install_deps(package_dir):
                 continue
 
+            # Only restart if miner-relevant code changed
+            try:
+                diff_r = _run(["git", "diff", "--name-only", local, "HEAD"], repo)
+                if diff_r.returncode == 0:
+                    changed = diff_r.stdout.strip().splitlines()
+                    relevant = ("miner/", "shield/", "pyproject.toml", "uv.lock")
+                    if not any(f.startswith(relevant) for f in changed):
+                        log.info("watchtower_skip_no_miner_changes", changed=len(changed))
+                        continue
+            except Exception:
+                pass  # restart on error to be safe
+
             # Wait for in-flight tasks to finish before restarting
             if _in_flight > 0:
                 log.info(
