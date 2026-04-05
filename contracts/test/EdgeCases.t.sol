@@ -146,20 +146,30 @@ contract EdgeCaseIntegrationTest is Test {
         escrow.setOutcome(purchaseId, outcome);
     }
 
-    // ─── Cancelled/Postponed Game → Void Outcome
+    /// @dev Build an array of purchaseIds [0..n-1]
+    function _buildPurchaseIds(uint256 n) internal pure returns (uint256[] memory pids) {
+        pids = new uint256[](n);
+        for (uint256 i; i < n; i++) {
+            pids[i] = i;
+        }
+    }
+
+    // ─── Cancelled/Postponed Game: Void Outcome
     // ────────────────────────
 
     function test_cancelledGame_allVoid_zeroScore() public {
+        uint256[] memory pids = new uint256[](10);
         for (uint256 i; i < 10; i++) {
             uint256 sigId = _createSignal();
             uint256 pid = _purchaseSignal(sigId);
             _recordOutcome(pid, Outcome.Void);
+            pids[i] = pid;
         }
 
-        int256 score = audit.computeScore(genius, idiot);
+        int256 score = audit.computeScore(genius, idiot, pids);
         assertEq(score, 0, "All void should give zero score");
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, pids);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.qualityScore, 0, "Stored score should be zero");
@@ -171,14 +181,16 @@ contract EdgeCaseIntegrationTest is Test {
 
     function test_postponedGame_partialVoid() public {
         // 5 favorable, 5 void (postponed games)
+        uint256[] memory pids = new uint256[](10);
         for (uint256 i; i < 10; i++) {
             uint256 sigId = _createSignal();
             uint256 pid = _purchaseSignal(sigId);
             Outcome o = i < 5 ? Outcome.Favorable : Outcome.Void;
             _recordOutcome(pid, o);
+            pids[i] = pid;
         }
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, pids);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertTrue(result.qualityScore > 0, "5 favorable should give positive score");
@@ -188,20 +200,22 @@ contract EdgeCaseIntegrationTest is Test {
         assertEq(result.protocolFee, expectedFee, "Fee only on non-void signals");
     }
 
-    // ─── Push → Void Outcome
+    // ─── Push: Void Outcome
     // ────────────────────────────────────────────
 
     function test_push_treatedAsVoid() public {
         // A "push" in sports betting means the game lands on the spread exactly.
         // In Djinn, this maps to Void outcome.
+        uint256[] memory pids = new uint256[](10);
         for (uint256 i; i < 10; i++) {
             uint256 sigId = _createSignal();
             uint256 pid = _purchaseSignal(sigId);
             // Push = Void
             _recordOutcome(pid, Outcome.Void);
+            pids[i] = pid;
         }
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, pids);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.qualityScore, 0, "All pushes (void) should give zero score");
@@ -348,8 +362,11 @@ contract EdgeCaseIntegrationTest is Test {
         uint256 pid = _purchaseSignal(sigId);
         _recordOutcome(pid, Outcome.Unfavorable);
 
+        uint256[] memory pids = new uint256[](1);
+        pids[0] = pid;
+
         vm.prank(idiot);
-        audit.earlyExit(genius, idiot);
+        audit.earlyExit(genius, idiot, pids);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertTrue(result.qualityScore < 0, "Single unfavorable should be negative");
@@ -362,9 +379,12 @@ contract EdgeCaseIntegrationTest is Test {
         uint256 pid = _purchaseSignal(sigId);
         _recordOutcome(pid, Outcome.Favorable);
 
+        uint256[] memory pids = new uint256[](1);
+        pids[0] = pid;
+
         // Genius triggers early exit
         vm.prank(genius);
-        audit.earlyExit(genius, idiot);
+        audit.earlyExit(genius, idiot, pids);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertTrue(result.qualityScore > 0, "Should be positive");
@@ -373,51 +393,45 @@ contract EdgeCaseIntegrationTest is Test {
 
     function test_earlyExit_randomCallerReverts() public {
         uint256 sigId = _createSignal();
-        _purchaseSignal(sigId);
-        _recordOutcome(0, Outcome.Favorable);
+        uint256 pid = _purchaseSignal(sigId);
+        _recordOutcome(pid, Outcome.Favorable);
+
+        uint256[] memory pids = new uint256[](1);
+        pids[0] = pid;
 
         address random = address(0xDEAD);
         vm.expectRevert(abi.encodeWithSelector(Audit.NotPartyToAudit.selector, random, genius, idiot));
         vm.prank(random);
-        audit.earlyExit(genius, idiot);
+        audit.earlyExit(genius, idiot, pids);
     }
 
     // ─── Dispute Resolution (Re-settlement Not Possible) ────────────────
 
-    function test_cannotRetrigger_settledCycle() public {
-        // Complete full cycle
+    function test_cannotResettle_settledBatch() public {
+        // Complete full batch of 10
+        uint256[] memory pids = new uint256[](10);
         for (uint256 i; i < 10; i++) {
             uint256 sigId = _createSignal();
             uint256 pid = _purchaseSignal(sigId);
             _recordOutcome(pid, Outcome.Favorable);
+            pids[i] = pid;
         }
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, pids);
 
-        // Cannot re-trigger same cycle
-        vm.expectRevert(abi.encodeWithSelector(Audit.NotAuditReady.selector, genius, idiot));
-        audit.trigger(genius, idiot);
-    }
-
-    function test_cannotEarlyExit_afterAuditReady() public {
-        for (uint256 i; i < 10; i++) {
-            uint256 sigId = _createSignal();
-            uint256 pid = _purchaseSignal(sigId);
-            _recordOutcome(pid, Outcome.Favorable);
-        }
-
-        vm.expectRevert(abi.encodeWithSelector(Audit.AuditAlreadyReady.selector, genius, idiot));
-        vm.prank(idiot);
-        audit.earlyExit(genius, idiot);
+        // Cannot re-settle same batch (purchases are now marked audited)
+        vm.expectRevert();
+        audit.settle(genius, idiot, pids);
     }
 
     // ─── Signal With Maximum SLA
     // ────────────────────────────────────────
 
     function test_highSLA_largeDamages() public {
-        // SLA of 300% (30000 bps) — maximum damage per unfavorable signal
+        // SLA of 300% (30000 bps): maximum damage per unfavorable signal
         uint256 highSla = 30_000;
 
+        uint256[] memory pids = new uint256[](10);
         for (uint256 i; i < 10; i++) {
             uint256 sigId = nextSignalId++;
             vm.prank(genius);
@@ -446,9 +460,10 @@ contract EdgeCaseIntegrationTest is Test {
             vm.prank(idiot);
             uint256 pid = escrow.purchase(sigId, NOTIONAL, ODDS);
             _recordOutcome(pid, Outcome.Unfavorable);
+            pids[i] = pid;
         }
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, pids);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertTrue(result.qualityScore < 0, "All unfavorable with high SLA should be very negative");
@@ -471,6 +486,7 @@ contract EdgeCaseIntegrationTest is Test {
         uint256 feePerSignal = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
         creditLedger.mint(idiot, feePerSignal * 10);
 
+        uint256[] memory pids = new uint256[](10);
         for (uint256 i; i < 10; i++) {
             uint256 sigId = _createSignal();
             uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
@@ -480,19 +496,19 @@ contract EdgeCaseIntegrationTest is Test {
             vm.prank(idiot);
             uint256 pid = escrow.purchase(sigId, NOTIONAL, ODDS);
             _recordOutcome(pid, Outcome.Unfavorable);
+            pids[i] = pid;
         }
 
-        // Fee pool should be zero (all paid by credits)
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        assertEq(escrow.feePool(genius, idiot, cycle), 0, "Fee pool should be zero for credit-only purchases");
+        // feePool is no longer written to in v2, so we skip that assertion.
+        // In v2, fees are computed from Purchase records at settlement time.
 
         uint256 idiotBalBefore = escrow.getBalance(idiot);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, pids);
 
-        // Even though QS is negative, tranche A refund is capped at fee pool (0)
+        // Even though QS is negative, tranche A refund is capped at USDC fees paid (0 for credit-only)
         // So idiot gets 0 USDC refund but gets credits from tranche B
-        assertEq(escrow.getBalance(idiot), idiotBalBefore, "No USDC refund when fee pool is zero");
+        assertEq(escrow.getBalance(idiot), idiotBalBefore, "No USDC refund when paid entirely by credits");
         assertTrue(creditLedger.balanceOf(idiot) > 0, "Credits should be minted for damages");
     }
 
@@ -516,27 +532,18 @@ contract EdgeCaseIntegrationTest is Test {
         account.recordOutcome(genius, idiot, pid, Outcome.Unfavorable);
     }
 
-    // ─── Cycle Signal Limit
+    // ─── No Cycle Signal Limit (v2: unlimited purchases per pair)
     // ─────────────────────────────────────────────
 
-    function test_cannotExceed10SignalsPerCycle() public {
-        for (uint256 i; i < 10; i++) {
+    function test_moreThan10SignalsPerPair() public {
+        // v2 has no cycle limit; purchases accumulate without limit
+        for (uint256 i; i < 15; i++) {
             uint256 sigId = _createSignal();
             _purchaseSignal(sigId);
         }
 
-        // 11th signal should fail on account recording (but purchase might go through
-        // depending on whether the limit is enforced at Account level)
-        uint256 sigId11 = _createSignal();
-        uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
-        uint256 fee = (NOTIONAL * MAX_PRICE_BPS) / 10_000;
-        uint256 protocolFee = (NOTIONAL * 50) / 10_000;
-        _depositCollateral(lockAmount + fee + protocolFee);
-        _depositEscrow(fee);
-
-        vm.expectRevert(abi.encodeWithSelector(DjinnAccount.CycleSignalLimitReached.selector, genius, idiot, 10));
-        vm.prank(idiot);
-        escrow.purchase(sigId11, NOTIONAL, ODDS);
+        // 15 purchases should all succeed
+        assertEq(account.getSignalCount(genius, idiot), 15, "Should have 15 unaudited purchases");
     }
 
     // ─── Zero Notional Edge
@@ -586,25 +593,26 @@ contract EdgeCaseIntegrationTest is Test {
         new ERC1967Proxy(address(colImpl), abi.encodeCall(Collateral.initialize, (address(0), owner)));
     }
 
-    // ─── Early Exit: Protocol Fee Must Be Zero
+    // ─── Early Exit: Protocol Fee Charged
     // ──────────────────────
 
-    function test_earlyExit_noProtocolFeeSlashed() public {
+    function test_earlyExit_protocolFeeCharged() public {
         // Create only 3 signals (< 10 = early exit)
+        uint256[] memory pids = new uint256[](3);
         for (uint256 i; i < 3; i++) {
             uint256 sid = _createSignal();
             uint256 pid = _purchaseSignal(sid);
             _recordOutcome(pid, Outcome.Unfavorable);
+            pids[i] = pid;
         }
 
-        // Trigger early exit (must be called by genius or idiot, not triggerAudit)
+        // Trigger early exit (must be called by genius or idiot)
         vm.prank(idiot);
-        audit.earlyExit(genius, idiot);
+        audit.earlyExit(genius, idiot, pids);
 
-        // Early exit should not slash any protocol fee from collateral.
-        // Only SLA damages (trancheB as credits) should apply — no USDC movement.
-        AuditResult memory result = audit.getAuditResult(genius, idiot, 1);
-        assertEq(result.protocolFee, 0, "Protocol fee must be zero on early exit");
+        // v2 early exit charges protocol fee from collateral
+        AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
+        assertGt(result.protocolFee, 0, "Protocol fee should be charged on early exit");
     }
 
     // ─── Escrow: MAX_NOTIONAL limit
@@ -614,7 +622,7 @@ contract EdgeCaseIntegrationTest is Test {
         uint256 sid = _createSignal();
         uint256 excessiveNotional = escrow.MAX_NOTIONAL() + 1;
 
-        // Don't need actual deposits — revert happens before balance checks
+        // Don't need actual deposits: revert happens before balance checks
         vm.expectRevert(
             abi.encodeWithSelector(Escrow.NotionalTooLarge.selector, excessiveNotional, escrow.MAX_NOTIONAL())
         );

@@ -392,3 +392,11 @@ See the whitepaper for design intent.
 **What we did:** Replaced The Odds API scores endpoint with ESPN's free public scoreboard API. Games are matched by team names + date using a static normalization table. ESPN client has its own circuit breaker and supports 8 sports (NBA, NCAAB, NFL, NCAAF, MLB, NHL, EPL, MLS). Signal registrations are persisted in SQLite for crash recovery.
 **Why:** Validators should not need a paid API key ($59/month) to perform their core function. ESPN provides free, reliable, real-time game scores without rate limits or API keys. The validator only needs final scores, not odds data.
 **Impact:** Validators no longer need SPORTS_API_KEY. The supported sports list is reduced to those with ESPN mappings (8 sports vs. the previous 17). SQLite persistence ensures signal registrations survive validator restarts.
+
+## DEV-039: Queue-Based Audits Replace Fixed Cycles
+
+**Whitepaper Section:** Section 5 -- Settlement, Section 7 -- Audit
+**Whitepaper Says:** "After 10 signals between a pair an audit occurs." Fixed cycles of 10 sequential signals, pair is blocked until audit settles.
+**What we did:** Replaced the fixed-cycle model with an append-only purchase queue per genius-idiot pair. Purchases accumulate without limit. When 10+ resolved (non-Pending) outcomes exist that haven't been audited, validators batch-audit any 10 of them. The pair is never blocked from trading. "Cycles" are replaced by "audit batches" assigned at settlement time.
+**Why:** The fixed-cycle model blocked purchasing when a cycle was full but unsettled. A single rain-delayed baseball game could block the pair for days. The queue model lets fast-resolving games get audited promptly while slow games wait in the queue. The idiot is never prevented from buying, and the genius is never prevented from selling. This came from a design review with Philip.
+**Impact:** Major contract upgrade (Account, Audit, OutcomeVoting, Escrow). Fee claiming changes from per-cycle to per-batch. Escrow no longer writes to feePool at purchase time; fees are computed from Purchase records at settlement. Quality Score formula is unchanged. Collateral lock mechanics are unchanged. Protocol fee (0.5%) is unchanged.

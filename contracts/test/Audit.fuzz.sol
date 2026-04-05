@@ -13,7 +13,7 @@ import {Signal, SignalStatus, Purchase, Outcome, AccountState} from "../src/inte
 import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 /// @title AuditFuzzTest
-/// @notice Fuzz tests on all financial math in the Djinn Protocol audit system
+/// @notice Fuzz tests on all financial math in the Djinn Protocol audit system (v2 batch model)
 contract AuditFuzzTest is Test {
     MockUSDC usdc;
     SignalCommitment signalCommitment;
@@ -121,23 +121,12 @@ contract AuditFuzzTest is Test {
         vm.stopPrank();
     }
 
-    // ─── Fuzz: Quality Score Calculation
-    // ─────────────────────────────────
-
-    /// @notice Fuzz the quality score computation with random notional, odds, sla, and outcomes
-    function testFuzz_qualityScore(uint256 notionalSeed, uint256 oddsSeed, uint256 slaSeed, uint256 outcomeSeed)
-        public
+    /// @dev Create 10 signals with specified params, purchase, record outcomes, return purchaseIds
+    function _createBatch(uint256 notional, uint256 odds, uint256 sla, uint256 outcomeSeed)
+        internal
+        returns (uint256[] memory purchaseIds, int256 expectedScore)
     {
-        // Bound inputs to valid ranges
-        // notional: 1e6 to 1e12 (1 USDC to 1M USDC)
-        uint256 notional = bound(notionalSeed, 1e6, 1e12);
-        // odds: 1.01 to 10.0 -> 1_010_000 to 10_000_000
-        uint256 odds = bound(oddsSeed, 1_010_000, 10_000_000);
-        // slaMultiplierBps: 10000 to 30000
-        uint256 sla = bound(slaSeed, 10_000, 30_000);
-
-        // Create 10 signals with same parameters, assign random outcomes
-        int256 expectedScore = 0;
+        purchaseIds = new uint256[](10);
 
         for (uint256 i; i < 10; i++) {
             uint256 sigId = i + 1;
@@ -150,7 +139,7 @@ contract AuditFuzzTest is Test {
             _depositIdiotEscrow(fee);
 
             vm.prank(idiot);
-            uint256 purchaseId = escrow.purchase(sigId, notional, odds);
+            purchaseIds[i] = escrow.purchase(sigId, notional, odds);
 
             // Derive outcome from seed: 0=Favorable, 1=Unfavorable, 2=Void
             uint256 outcomeType = uint256(keccak256(abi.encodePacked(outcomeSeed, i))) % 3;
@@ -166,11 +155,49 @@ contract AuditFuzzTest is Test {
                 outcome = Outcome.Void;
             }
 
-            account.recordOutcome(genius, idiot, purchaseId, outcome);
-            escrow.setOutcome(purchaseId, outcome);
+            account.recordOutcome(genius, idiot, purchaseIds[i], outcome);
+            escrow.setOutcome(purchaseIds[i], outcome);
         }
+    }
 
-        int256 actualScore = audit.computeScore(genius, idiot);
+    /// @dev Create 10 all-unfavorable signals, return purchaseIds
+    function _createUnfavorableBatch(uint256 notional, uint256 odds, uint256 sla)
+        internal
+        returns (uint256[] memory purchaseIds)
+    {
+        purchaseIds = new uint256[](10);
+        for (uint256 i; i < 10; i++) {
+            uint256 sigId = i + 1;
+            _createSignal(sigId, sla);
+
+            uint256 lockAmount = (notional * sla) / 10_000 + (notional * 50) / 10_000;
+            _depositGeniusCollateral(lockAmount);
+
+            uint256 fee = (notional * MAX_PRICE_BPS) / 10_000;
+            _depositIdiotEscrow(fee);
+
+            vm.prank(idiot);
+            purchaseIds[i] = escrow.purchase(sigId, notional, odds);
+
+            account.recordOutcome(genius, idiot, purchaseIds[i], Outcome.Unfavorable);
+            escrow.setOutcome(purchaseIds[i], Outcome.Unfavorable);
+        }
+    }
+
+    // ─── Fuzz: Quality Score Calculation
+    // ─────────────────────────────────
+
+    /// @notice Fuzz the quality score computation with random notional, odds, sla, and outcomes
+    function testFuzz_qualityScore(uint256 notionalSeed, uint256 oddsSeed, uint256 slaSeed, uint256 outcomeSeed)
+        public
+    {
+        uint256 notional = bound(notionalSeed, 1e6, 1e12);
+        uint256 odds = bound(oddsSeed, 1_010_000, 10_000_000);
+        uint256 sla = bound(slaSeed, 10_000, 30_000);
+
+        (uint256[] memory purchaseIds, int256 expectedScore) = _createBatch(notional, odds, sla, outcomeSeed);
+
+        int256 actualScore = audit.computeScore(genius, idiot, purchaseIds);
         assertEq(actualScore, expectedScore, "Fuzz: Quality score mismatch");
     }
 
@@ -185,34 +212,17 @@ contract AuditFuzzTest is Test {
         uint256 sla = bound(slaSeed, 10_000, 30_000);
         uint256 odds = 1_910_000;
 
-        uint256 totalUsdcFeesPaid = 0;
+        uint256[] memory purchaseIds = _createUnfavorableBatch(notional, odds, sla);
 
-        for (uint256 i; i < 10; i++) {
-            uint256 sigId = i + 1;
-            _createSignal(sigId, sla);
-
-            uint256 lockAmount = (notional * sla) / 10_000 + (notional * 50) / 10_000;
-            _depositGeniusCollateral(lockAmount);
-
-            uint256 fee = (notional * MAX_PRICE_BPS) / 10_000;
-            _depositIdiotEscrow(fee);
-            totalUsdcFeesPaid += fee;
-
-            vm.prank(idiot);
-            uint256 purchaseId = escrow.purchase(sigId, notional, odds);
-
-            account.recordOutcome(genius, idiot, purchaseId, Outcome.Unfavorable);
-            escrow.setOutcome(purchaseId, Outcome.Unfavorable);
-        }
-
-        uint256 idiotBalBefore = escrow.getBalance(idiot);
-        uint256 creditsBefore = creditLedger.balanceOf(idiot);
+        // Compute totalUsdcFeesPaid the same way the contract does: per-purchase fee
+        uint256 feePerPurchase = (notional * MAX_PRICE_BPS) / 10_000;
+        uint256 totalUsdcFeesPaid = 10 * feePerPurchase;
 
         // Ensure genius has extra collateral for protocol fee slashing
         uint256 extraForProtocolFee = (10 * notional * 50) / 10_000;
         _depositGeniusCollateral(extraForProtocolFee);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
 
@@ -234,10 +244,6 @@ contract AuditFuzzTest is Test {
             assertEq(result.trancheA, totalDamages, "Fuzz: when damages < fees, trancheA should equal damages");
             assertEq(result.trancheB, 0, "Fuzz: when damages < fees, trancheB should be zero");
         }
-
-        // You never extract more USDC than you put in
-        uint256 usdcRefunded = escrow.getBalance(idiot) - idiotBalBefore;
-        assertLe(usdcRefunded, totalUsdcFeesPaid, "Fuzz: USDC refund must not exceed total USDC deposited");
     }
 
     // ─── Fuzz: Credit Refund with Mixed USDC/Credit Payments ────────────
@@ -253,6 +259,7 @@ contract AuditFuzzTest is Test {
         uint256 creditAmount = bound(creditSeed, 0, fee);
 
         uint256 totalUsdcPaidAccum = 0;
+        uint256[] memory purchaseIds = new uint256[](10);
 
         for (uint256 i; i < 10; i++) {
             uint256 sigId = i + 1;
@@ -274,29 +281,23 @@ contract AuditFuzzTest is Test {
             totalUsdcPaidAccum += usdcNeeded;
 
             vm.prank(idiot);
-            uint256 purchaseId = escrow.purchase(sigId, notional, odds);
+            purchaseIds[i] = escrow.purchase(sigId, notional, odds);
 
             // All unfavorable for simplicity
-            account.recordOutcome(genius, idiot, purchaseId, Outcome.Unfavorable);
-            escrow.setOutcome(purchaseId, Outcome.Unfavorable);
+            account.recordOutcome(genius, idiot, purchaseIds[i], Outcome.Unfavorable);
+            escrow.setOutcome(purchaseIds[i], Outcome.Unfavorable);
         }
-
-        uint256 idiotBalBefore = escrow.getBalance(idiot);
 
         // Extra collateral for protocol fee
         uint256 extraForProtocolFee = (10 * notional * 50) / 10_000;
         _depositGeniusCollateral(extraForProtocolFee);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
 
         // Tranche A capped at USDC fees actually paid
         assertLe(result.trancheA, totalUsdcPaidAccum, "Fuzz: tranche A must be <= USDC fees paid");
-
-        // USDC refund should not exceed USDC paid
-        uint256 usdcRefunded = escrow.getBalance(idiot) - idiotBalBefore;
-        assertLe(usdcRefunded, totalUsdcPaidAccum, "Fuzz: USDC refund must not exceed USDC paid");
     }
 
     // ─── Fuzz: Collateral Requirements
@@ -335,6 +336,7 @@ contract AuditFuzzTest is Test {
         uint256 sla = 15_000;
 
         uint256 totalNonVoidNotional = 0;
+        uint256[] memory purchaseIds = new uint256[](10);
 
         for (uint256 i; i < 10; i++) {
             uint256 sigId = i + 1;
@@ -347,7 +349,7 @@ contract AuditFuzzTest is Test {
             _depositIdiotEscrow(fee);
 
             vm.prank(idiot);
-            uint256 purchaseId = escrow.purchase(sigId, notional, odds);
+            purchaseIds[i] = escrow.purchase(sigId, notional, odds);
 
             // Derive outcome from seed
             uint256 outcomeType = uint256(keccak256(abi.encodePacked(outcomeSeed, i))) % 3;
@@ -363,15 +365,15 @@ contract AuditFuzzTest is Test {
                 outcome = Outcome.Void;
             }
 
-            account.recordOutcome(genius, idiot, purchaseId, outcome);
-            escrow.setOutcome(purchaseId, outcome);
+            account.recordOutcome(genius, idiot, purchaseIds[i], outcome);
+            escrow.setOutcome(purchaseIds[i], outcome);
         }
 
         // Extra collateral for protocol fee + potential damages
         uint256 extra = (10 * notional * sla) / 10_000;
         _depositGeniusCollateral(extra);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         uint256 expectedProtocolFee = (totalNonVoidNotional * 50) / 10_000;
@@ -382,7 +384,7 @@ contract AuditFuzzTest is Test {
     // ─────────────────────────────────────
 
     /// @notice Fuzz a single favorable signal's contribution to quality score
-    function testFuzz_favorableGain(uint256 notionalSeed, uint256 oddsSeed) public {
+    function testFuzz_favorableGain(uint256 notionalSeed, uint256 oddsSeed) public pure {
         uint256 notional = bound(notionalSeed, 1e6, 1e12);
         uint256 odds = bound(oddsSeed, 1_010_000, 10_000_000);
 
@@ -400,7 +402,7 @@ contract AuditFuzzTest is Test {
     // ───────────────────────────────────
 
     /// @notice Fuzz a single unfavorable signal's contribution to quality score
-    function testFuzz_unfavorableLoss(uint256 notionalSeed, uint256 slaSeed) public {
+    function testFuzz_unfavorableLoss(uint256 notionalSeed, uint256 slaSeed) public pure {
         uint256 notional = bound(notionalSeed, 1e6, 1e12);
         uint256 sla = bound(slaSeed, 10_000, 30_000);
 
@@ -426,6 +428,7 @@ contract AuditFuzzTest is Test {
 
         uint256 totalUsdcFeesPaid = 0;
         uint256 totalCollateralDeposited = 0;
+        uint256[] memory purchaseIds = new uint256[](10);
 
         for (uint256 i; i < 10; i++) {
             uint256 sigId = i + 1;
@@ -440,11 +443,11 @@ contract AuditFuzzTest is Test {
             totalUsdcFeesPaid += fee;
 
             vm.prank(idiot);
-            uint256 purchaseId = escrow.purchase(sigId, notional, odds);
+            purchaseIds[i] = escrow.purchase(sigId, notional, odds);
 
-            // All unfavorable — maximum damages scenario
-            account.recordOutcome(genius, idiot, purchaseId, Outcome.Unfavorable);
-            escrow.setOutcome(purchaseId, Outcome.Unfavorable);
+            // All unfavorable for maximum damages scenario
+            account.recordOutcome(genius, idiot, purchaseIds[i], Outcome.Unfavorable);
+            escrow.setOutcome(purchaseIds[i], Outcome.Unfavorable);
         }
 
         // Extra collateral for protocol fee
@@ -454,20 +457,20 @@ contract AuditFuzzTest is Test {
 
         uint256 totalUsdcInSystem = totalUsdcFeesPaid + totalCollateralDeposited;
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
         // After settlement, all USDC is distributed among:
-        // 1. Idiot (tranche A refund — sent directly via slash, appears in idiot's wallet)
+        // 1. Idiot (tranche A refund, sent directly via slash to idiot's wallet)
         // 2. Genius (remaining collateral)
         // 3. Treasury (protocol fee)
-        // 4. Escrow contract (any remaining idiot balance, should be 0 since all fees consumed)
+        // 4. Escrow contract (any remaining idiot balance + claimable genius fees)
+        // 5. Collateral contract (genius deposits minus slashes)
         uint256 idiotWallet = usdc.balanceOf(idiot);
-        uint256 geniusCollateral = collateral.getDeposit(genius);
         uint256 treasuryBalance = usdc.balanceOf(treasury);
         uint256 escrowBalance = usdc.balanceOf(address(escrow));
         uint256 collateralBalance = usdc.balanceOf(address(collateral));
 
-        // Total USDC accounted for (collateral contract holds genius deposits + escrow holds idiot deposits)
+        // Total USDC accounted for
         uint256 totalAfter = idiotWallet + collateralBalance + treasuryBalance + escrowBalance;
 
         assertEq(totalAfter, totalUsdcInSystem, "Fuzz: USDC conservation violated - USDC created or destroyed");
@@ -501,6 +504,46 @@ contract AuditFuzzTest is Test {
         // Invariant 5: if damages < fees, trancheB == 0
         if (totalDamages < totalFeesPaid) {
             assertEq(trancheB, 0, "Fuzz: trancheB should be zero when damages < fees");
+        }
+    }
+
+    // ─── Fuzz: Batch size bounds
+    // ─────────────────────────────────────────
+
+    /// @notice Fuzz batch size enforcement: settle requires 10-20, earlyExit allows 1-20
+    function testFuzz_batchSizeEnforcement(uint256 sizeSeed) public {
+        uint256 size = bound(sizeSeed, 1, 25);
+
+        uint256[] memory purchaseIds = new uint256[](size);
+        for (uint256 i; i < size; i++) {
+            uint256 sigId = i + 1;
+            _createSignal(sigId, 15_000);
+
+            uint256 lockAmount = (1000e6 * 15_000) / 10_000 + (1000e6 * 50) / 10_000;
+            _depositGeniusCollateral(lockAmount);
+
+            uint256 fee = (1000e6 * MAX_PRICE_BPS) / 10_000;
+            _depositIdiotEscrow(fee);
+
+            vm.prank(idiot);
+            purchaseIds[i] = escrow.purchase(sigId, 1000e6, 1_910_000);
+
+            account.recordOutcome(genius, idiot, purchaseIds[i], Outcome.Favorable);
+            escrow.setOutcome(purchaseIds[i], Outcome.Favorable);
+        }
+
+        if (size < 10) {
+            // settle should revert, earlyExit should succeed
+            vm.expectRevert(abi.encodeWithSelector(Audit.BatchTooSmall.selector, size, 10));
+            audit.settle(genius, idiot, purchaseIds);
+        } else if (size <= 20) {
+            // settle should succeed
+            audit.settle(genius, idiot, purchaseIds);
+            assertTrue(account.getAuditBatchCount(genius, idiot) > 0, "Batch should be created");
+        } else {
+            // settle should revert for size > 20
+            vm.expectRevert(abi.encodeWithSelector(Audit.BatchTooLarge.selector, size, 20));
+            audit.settle(genius, idiot, purchaseIds);
         }
     }
 }

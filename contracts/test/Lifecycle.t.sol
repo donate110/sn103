@@ -10,13 +10,13 @@ import {CreditLedger} from "../src/CreditLedger.sol";
 import {Account as DjinnAccount} from "../src/Account.sol";
 import {Audit, AuditResult} from "../src/Audit.sol";
 import {KeyRecovery} from "../src/KeyRecovery.sol";
-import {Signal, SignalStatus, Purchase, Outcome} from "../src/interfaces/IDjinn.sol";
+import {Signal, SignalStatus, Purchase, Outcome, PairQueueState} from "../src/interfaces/IDjinn.sol";
 import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 /// @title LifecycleIntegrationTest
 /// @notice End-to-end lifecycle tests covering the complete signal flow from
-///         creation through settlement, multi-pair interactions, multi-cycle
-///         credit reuse, and collateral exhaustion scenarios
+///         creation through batch-based settlement, multi-pair interactions,
+///         multi-batch credit reuse, and collateral exhaustion scenarios
 contract LifecycleIntegrationTest is Test {
     MockUSDC usdc;
     SignalCommitment signalCommitment;
@@ -152,7 +152,7 @@ contract LifecycleIntegrationTest is Test {
         escrow.setOutcome(purchaseId, outcome);
     }
 
-    function _fullCycle(address genius, address idiot, Outcome[] memory outcomes)
+    function _fullBatch(address genius, address idiot, Outcome[] memory outcomes)
         internal
         returns (uint256[] memory purchaseIds)
     {
@@ -209,25 +209,29 @@ contract LifecycleIntegrationTest is Test {
         // Verify collateral locked
         assertEq(collateral.getSignalLock(genius1, signalId), lockAmount);
 
-        // Verify account updated
-        assertEq(account.getSignalCount(genius1, idiot1), 1);
+        // Verify account updated (queue model)
+        PairQueueState memory qs = account.getQueueState(genius1, idiot1);
+        assertEq(qs.totalPurchases, 1);
 
         // Step 6: Game outcome attested (Favorable)
         _recordOutcome(genius1, idiot1, purchaseId, Outcome.Favorable);
         assertEq(uint8(account.getOutcome(genius1, idiot1, purchaseId)), uint8(Outcome.Favorable));
 
         // Step 7: Complete remaining 9 signals to reach audit threshold
+        uint256[] memory allPurchaseIds = new uint256[](10);
+        allPurchaseIds[0] = purchaseId;
         for (uint256 i = 1; i < 10; i++) {
             uint256 sid = _createSignal(genius1);
             uint256 pid = _purchaseSignal(genius1, idiot1, sid, NOTIONAL, ODDS);
             _recordOutcome(genius1, idiot1, pid, Outcome.Favorable);
+            allPurchaseIds[i] = pid;
         }
 
-        // Step 8: Audit triggers at 10 signals
+        // Step 8: Audit settles at 10 signals
         assertTrue(account.isAuditReady(genius1, idiot1));
         uint256 treasuryBefore = usdc.balanceOf(treasury);
 
-        audit.trigger(genius1, idiot1);
+        audit.settle(genius1, idiot1, allPurchaseIds);
 
         // Step 9: Verify settlement
         AuditResult memory result = audit.getAuditResult(genius1, idiot1, 0);
@@ -237,9 +241,8 @@ contract LifecycleIntegrationTest is Test {
         assertTrue(result.protocolFee > 0, "Protocol fee should be collected");
         assertTrue(usdc.balanceOf(treasury) > treasuryBefore, "Treasury should receive fee");
 
-        // Step 10: New cycle starts
-        assertEq(account.getCurrentCycle(genius1, idiot1), 1);
-        assertEq(account.getSignalCount(genius1, idiot1), 0);
+        // Step 10: Verify batch created
+        assertEq(account.getAuditBatchCount(genius1, idiot1), 1);
 
         // Step 11: Collateral released
         assertEq(collateral.getLocked(genius1), 0);
@@ -260,28 +263,28 @@ contract LifecycleIntegrationTest is Test {
             outcomes2[i] = Outcome.Unfavorable;
         }
 
-        // Run both cycles
-        _fullCycle(genius1, idiot1, outcomes1);
-        _fullCycle(genius2, idiot2, outcomes2);
+        // Run both batches
+        uint256[] memory batch1Ids = _fullBatch(genius1, idiot1, outcomes1);
+        uint256[] memory batch2Ids = _fullBatch(genius2, idiot2, outcomes2);
 
         // Both should be audit ready
         assertTrue(account.isAuditReady(genius1, idiot1));
         assertTrue(account.isAuditReady(genius2, idiot2));
 
         // Settle pair 1 (positive score)
-        audit.trigger(genius1, idiot1);
+        audit.settle(genius1, idiot1, batch1Ids);
         AuditResult memory r1 = audit.getAuditResult(genius1, idiot1, 0);
         assertTrue(r1.qualityScore > 0);
 
         // Settle pair 2 (negative score)
-        audit.trigger(genius2, idiot2);
+        audit.settle(genius2, idiot2, batch2Ids);
         AuditResult memory r2 = audit.getAuditResult(genius2, idiot2, 0);
         assertTrue(r2.qualityScore < 0);
         assertTrue(r2.trancheA > 0 || r2.trancheB > 0, "Damages should exist");
 
-        // Both move to cycle 1 independently
-        assertEq(account.getCurrentCycle(genius1, idiot1), 1);
-        assertEq(account.getCurrentCycle(genius2, idiot2), 1);
+        // Both have 1 batch independently
+        assertEq(account.getAuditBatchCount(genius1, idiot1), 1);
+        assertEq(account.getAuditBatchCount(genius2, idiot2), 1);
     }
 
     // ─── Test 3: Cross-Pair (One Genius, Multiple Idiots) ────────────────
@@ -292,18 +295,18 @@ contract LifecycleIntegrationTest is Test {
         for (uint256 i; i < 10; i++) {
             outcomes1[i] = Outcome.Favorable;
         }
-        _fullCycle(genius1, idiot1, outcomes1);
+        uint256[] memory batch1Ids = _fullBatch(genius1, idiot1, outcomes1);
 
         // genius1 with idiot2: unfavorable
         Outcome[] memory outcomes2 = new Outcome[](10);
         for (uint256 i; i < 10; i++) {
             outcomes2[i] = Outcome.Unfavorable;
         }
-        _fullCycle(genius1, idiot2, outcomes2);
+        uint256[] memory batch2Ids = _fullBatch(genius1, idiot2, outcomes2);
 
         // Settle both
-        audit.trigger(genius1, idiot1);
-        audit.trigger(genius1, idiot2);
+        audit.settle(genius1, idiot1, batch1Ids);
+        audit.settle(genius1, idiot2, batch2Ids);
 
         AuditResult memory r1 = audit.getAuditResult(genius1, idiot1, 0);
         AuditResult memory r2 = audit.getAuditResult(genius1, idiot2, 0);
@@ -312,18 +315,18 @@ contract LifecycleIntegrationTest is Test {
         assertTrue(r2.qualityScore < 0, "Pair 2 should be negative");
     }
 
-    // ─── Test 4: Multi-Cycle with Credit Reuse
+    // ─── Test 4: Multi-Batch with Credit Reuse
     // ──────────────────────────
 
-    function test_multiCycle_creditsFromCycle0_usedInCycle1() public {
-        // Cycle 0: all unfavorable -> idiot gets credits from tranche B
+    function test_multiBatch_creditsFromBatch0_usedInBatch1() public {
+        // Batch 0: all unfavorable -> idiot gets credits from tranche B
         Outcome[] memory outcomes0 = new Outcome[](10);
         for (uint256 i; i < 10; i++) {
             outcomes0[i] = Outcome.Unfavorable;
         }
-        _fullCycle(genius1, idiot1, outcomes0);
+        uint256[] memory batch0Ids = _fullBatch(genius1, idiot1, outcomes0);
 
-        audit.trigger(genius1, idiot1);
+        audit.settle(genius1, idiot1, batch0Ids);
 
         AuditResult memory r0 = audit.getAuditResult(genius1, idiot1, 0);
         assertTrue(r0.trancheB > 0, "Should have credits from tranche B");
@@ -331,7 +334,7 @@ contract LifecycleIntegrationTest is Test {
         uint256 creditsBefore = creditLedger.balanceOf(idiot1);
         assertTrue(creditsBefore > 0, "Idiot should have credits");
 
-        // Cycle 1: Use credits to pay for purchases
+        // Batch 1: Use credits to pay for purchases
         // Create a signal and purchase using credits
         uint256 sigId = _createSignal(genius1);
         uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
@@ -364,19 +367,19 @@ contract LifecycleIntegrationTest is Test {
         }
     }
 
-    // ─── Test 5: Three Full Cycles
+    // ─── Test 5: Three Full Batches
     // ──────────────────────────────────────
 
-    function test_threeCycles() public {
-        for (uint256 cycle; cycle < 3; cycle++) {
+    function test_threeBatches() public {
+        for (uint256 batch; batch < 3; batch++) {
             Outcome[] memory outcomes = new Outcome[](10);
             for (uint256 i; i < 10; i++) {
-                outcomes[i] = (cycle % 2 == 0) ? Outcome.Favorable : Outcome.Unfavorable;
+                outcomes[i] = (batch % 2 == 0) ? Outcome.Favorable : Outcome.Unfavorable;
             }
-            _fullCycle(genius1, idiot1, outcomes);
-            audit.trigger(genius1, idiot1);
+            uint256[] memory batchIds = _fullBatch(genius1, idiot1, outcomes);
+            audit.settle(genius1, idiot1, batchIds);
 
-            assertEq(account.getCurrentCycle(genius1, idiot1), cycle + 1);
+            assertEq(account.getAuditBatchCount(genius1, idiot1), batch + 1);
         }
 
         // Verify all three audit results exist
@@ -384,9 +387,9 @@ contract LifecycleIntegrationTest is Test {
         AuditResult memory r1 = audit.getAuditResult(genius1, idiot1, 1);
         AuditResult memory r2 = audit.getAuditResult(genius1, idiot1, 2);
 
-        assertTrue(r0.qualityScore > 0, "Cycle 0 should be positive");
-        assertTrue(r1.qualityScore < 0, "Cycle 1 should be negative");
-        assertTrue(r2.qualityScore > 0, "Cycle 2 should be positive");
+        assertTrue(r0.qualityScore > 0, "Batch 0 should be positive");
+        assertTrue(r1.qualityScore < 0, "Batch 1 should be negative");
+        assertTrue(r2.qualityScore > 0, "Batch 2 should be positive");
         assertTrue(r0.timestamp > 0);
         assertTrue(r1.timestamp > 0);
         assertTrue(r2.timestamp > 0);
@@ -411,6 +414,7 @@ contract LifecycleIntegrationTest is Test {
         outcomes[9] = Outcome.Void;
 
         // Create and purchase signals
+        uint256[] memory purchaseIds = new uint256[](10);
         for (uint256 i; i < 10; i++) {
             uint256 sigId = _createSignal(genius1);
             uint256 lockAmount = (NOTIONAL * SLA_MULTIPLIER_BPS) / 10_000 + (NOTIONAL * 50) / 10_000;
@@ -433,12 +437,12 @@ contract LifecycleIntegrationTest is Test {
             vm.stopPrank();
 
             vm.prank(idiot1);
-            uint256 pid = escrow.purchase(sigId, NOTIONAL, ODDS);
-            _recordOutcome(genius1, idiot1, pid, outcomes[i]);
+            purchaseIds[i] = escrow.purchase(sigId, NOTIONAL, ODDS);
+            _recordOutcome(genius1, idiot1, purchaseIds[i], outcomes[i]);
         }
 
         // Settlement
-        audit.trigger(genius1, idiot1);
+        audit.settle(genius1, idiot1, purchaseIds);
 
         // Invariant: all USDC accounted for
         uint256 totalSystemUsdc = usdc.balanceOf(address(escrow)) + usdc.balanceOf(address(collateral))
@@ -450,36 +454,37 @@ contract LifecycleIntegrationTest is Test {
         assertEq(collateral.getLocked(genius1), 0, "All locks should be released");
     }
 
-    // ─── Test 7: Early Exit Then Full Cycle
+    // ─── Test 7: Early Exit Then Full Batch
     // ─────────────────────────────
 
-    function test_earlyExit_thenFullCycle() public {
+    function test_earlyExit_thenFullBatch() public {
         // Create 5 signals (not enough for audit)
+        uint256[] memory earlyIds = new uint256[](5);
         for (uint256 i; i < 5; i++) {
             uint256 sigId = _createSignal(genius1);
-            uint256 pid = _purchaseSignal(genius1, idiot1, sigId, NOTIONAL, ODDS);
-            _recordOutcome(genius1, idiot1, pid, Outcome.Unfavorable);
+            earlyIds[i] = _purchaseSignal(genius1, idiot1, sigId, NOTIONAL, ODDS);
+            _recordOutcome(genius1, idiot1, earlyIds[i], Outcome.Unfavorable);
         }
 
         assertFalse(account.isAuditReady(genius1, idiot1));
 
         // Early exit
         vm.prank(idiot1);
-        audit.earlyExit(genius1, idiot1);
+        audit.earlyExit(genius1, idiot1, earlyIds);
 
         uint256 creditsAfterEarlyExit = creditLedger.balanceOf(idiot1);
         assertTrue(creditsAfterEarlyExit > 0, "Should have credits from early exit");
-        assertEq(account.getCurrentCycle(genius1, idiot1), 1, "Should be on cycle 1");
+        assertEq(account.getAuditBatchCount(genius1, idiot1), 1, "Should have 1 batch (early exit)");
 
-        // Now do a full cycle
+        // Now do a full batch
         Outcome[] memory outcomes = new Outcome[](10);
         for (uint256 i; i < 10; i++) {
             outcomes[i] = Outcome.Favorable;
         }
-        _fullCycle(genius1, idiot1, outcomes);
+        uint256[] memory fullBatchIds = _fullBatch(genius1, idiot1, outcomes);
 
-        audit.trigger(genius1, idiot1);
-        assertEq(account.getCurrentCycle(genius1, idiot1), 2, "Should be on cycle 2");
+        audit.settle(genius1, idiot1, fullBatchIds);
+        assertEq(account.getAuditBatchCount(genius1, idiot1), 2, "Should have 2 batches");
     }
 
     // ─── Test 8: Concurrent Signals from Same Genius
@@ -499,8 +504,10 @@ contract LifecycleIntegrationTest is Test {
         _recordOutcome(genius1, idiot2, pid2, Outcome.Unfavorable);
 
         // Both accounts updated independently
-        assertEq(account.getSignalCount(genius1, idiot1), 1);
-        assertEq(account.getSignalCount(genius1, idiot2), 1);
+        PairQueueState memory qs1 = account.getQueueState(genius1, idiot1);
+        PairQueueState memory qs2 = account.getQueueState(genius1, idiot2);
+        assertEq(qs1.totalPurchases, 1);
+        assertEq(qs2.totalPurchases, 1);
     }
 
     // ─── Test 9: Varying Notional and Odds Across Signals ───────────────
@@ -541,6 +548,7 @@ contract LifecycleIntegrationTest is Test {
         oddsArr[9] = 1_910_000;
         outcomes[9] = Outcome.Favorable;
 
+        uint256[] memory purchaseIds = new uint256[](10);
         for (uint256 i; i < 10; i++) {
             uint256 sigId = _createSignal(genius1);
             uint256 lockAmount = (notionals[i] * SLA_MULTIPLIER_BPS) / 10_000;
@@ -550,8 +558,8 @@ contract LifecycleIntegrationTest is Test {
             _depositEscrow(idiot1, fee);
 
             vm.prank(idiot1);
-            uint256 pid = escrow.purchase(sigId, notionals[i], oddsArr[i]);
-            _recordOutcome(genius1, idiot1, pid, outcomes[i]);
+            purchaseIds[i] = escrow.purchase(sigId, notionals[i], oddsArr[i]);
+            _recordOutcome(genius1, idiot1, purchaseIds[i], outcomes[i]);
         }
 
         // Compute expected score manually
@@ -564,10 +572,10 @@ contract LifecycleIntegrationTest is Test {
             }
         }
 
-        int256 actualScore = audit.computeScore(genius1, idiot1);
+        int256 actualScore = audit.computeScore(genius1, idiot1, purchaseIds);
         assertEq(actualScore, expectedScore, "Score should match manual computation");
 
-        audit.trigger(genius1, idiot1);
+        audit.settle(genius1, idiot1, purchaseIds);
 
         AuditResult memory result = audit.getAuditResult(genius1, idiot1, 0);
         assertEq(result.qualityScore, expectedScore, "Stored score should match");
@@ -576,22 +584,22 @@ contract LifecycleIntegrationTest is Test {
     // ─── Test 10: Full Lifecycle Through Claim and Withdraw ─────────────
 
     function test_fullLifecycle_throughClaimAndWithdraw() public {
-        // Step 1: Run a full favorable cycle
+        // Step 1: Run a full favorable batch
         Outcome[] memory outcomes = new Outcome[](10);
         for (uint256 i; i < 10; i++) {
             outcomes[i] = Outcome.Favorable;
         }
-        _fullCycle(genius1, idiot1, outcomes);
+        uint256[] memory batchIds = _fullBatch(genius1, idiot1, outcomes);
 
         // Step 2: Settle
         uint256 treasuryBefore = usdc.balanceOf(treasury);
-        audit.trigger(genius1, idiot1);
+        audit.settle(genius1, idiot1, batchIds);
 
         AuditResult memory result = audit.getAuditResult(genius1, idiot1, 0);
         assertTrue(result.qualityScore > 0, "All favorable should give positive score");
         assertTrue(result.timestamp > 0, "Settlement timestamp should be set");
 
-        // Step 3: Genius tries to claim fees immediately → ClaimTooEarly
+        // Step 3: Genius tries to claim fees immediately -> ClaimTooEarly
         uint256 claimableAt = result.timestamp + escrow.FEE_CLAIM_DELAY();
         vm.expectRevert(
             abi.encodeWithSelector(Escrow.ClaimTooEarly.selector, genius1, idiot1, 0, claimableAt)
@@ -602,19 +610,19 @@ contract LifecycleIntegrationTest is Test {
         // Step 4: Warp past fee claim delay
         vm.warp(result.timestamp + 48 hours + 1);
 
-        // Step 5: Genius claims fees → success
-        uint256 feePoolBalance = escrow.feePool(genius1, idiot1, 0);
-        assertTrue(feePoolBalance > 0, "Fee pool should have USDC");
+        // Step 5: Genius claims fees (v2: from batchClaimable)
+        uint256 claimableBalance = escrow.batchClaimable(genius1, idiot1, 0);
+        assertTrue(claimableBalance > 0, "Batch claimable should have USDC");
 
         uint256 geniusBalBefore = usdc.balanceOf(genius1);
         vm.prank(genius1);
         escrow.claimFees(idiot1, 0);
 
-        assertEq(usdc.balanceOf(genius1), geniusBalBefore + feePoolBalance, "Genius should receive fees");
-        assertEq(escrow.feePool(genius1, idiot1, 0), 0, "Fee pool should be zero after claim");
+        assertEq(usdc.balanceOf(genius1), geniusBalBefore + claimableBalance, "Genius should receive fees");
+        assertEq(escrow.batchClaimable(genius1, idiot1, 0), 0, "Batch claimable should be zero after claim");
 
-        // Step 6: Verify cycle advanced and system is clean
-        assertEq(account.getCurrentCycle(genius1, idiot1), 1, "Should be on cycle 1");
+        // Step 6: Verify batch completed and system is clean
+        assertEq(account.getAuditBatchCount(genius1, idiot1), 1, "Should have 1 batch");
         assertEq(collateral.getLocked(genius1), 0, "All collateral locks released");
         assertTrue(usdc.balanceOf(treasury) > treasuryBefore, "Treasury received protocol fee");
     }
@@ -623,6 +631,7 @@ contract LifecycleIntegrationTest is Test {
 
     function test_protocolFee_variedNotionals() public {
         uint256 totalNotional = 0;
+        uint256[] memory purchaseIds = new uint256[](10);
 
         for (uint256 i; i < 10; i++) {
             uint256 notional = (i + 1) * 100e6; // 100, 200, ... 1000 USDC
@@ -636,14 +645,110 @@ contract LifecycleIntegrationTest is Test {
             _depositEscrow(idiot1, fee);
 
             vm.prank(idiot1);
-            uint256 pid = escrow.purchase(sigId, notional, ODDS);
-            _recordOutcome(genius1, idiot1, pid, Outcome.Favorable);
+            purchaseIds[i] = escrow.purchase(sigId, notional, ODDS);
+            _recordOutcome(genius1, idiot1, purchaseIds[i], Outcome.Favorable);
         }
 
         uint256 treasuryBefore = usdc.balanceOf(treasury);
-        audit.trigger(genius1, idiot1);
+        audit.settle(genius1, idiot1, purchaseIds);
 
         uint256 expectedProtocolFee = (totalNotional * 50) / 10_000;
         assertEq(usdc.balanceOf(treasury) - treasuryBefore, expectedProtocolFee, "Protocol fee wrong");
+    }
+
+    // ─── Test 12: Unbounded Queue (Purchases After Settlement)
+    // ─────────────────────────────
+
+    function test_purchasesAfterSettlement_neverBlocked() public {
+        // First batch of 10
+        Outcome[] memory outcomes = new Outcome[](10);
+        for (uint256 i; i < 10; i++) {
+            outcomes[i] = Outcome.Favorable;
+        }
+        uint256[] memory batch1 = _fullBatch(genius1, idiot1, outcomes);
+
+        // Settle batch 1
+        audit.settle(genius1, idiot1, batch1);
+        assertEq(account.getAuditBatchCount(genius1, idiot1), 1);
+
+        // Immediately purchase more signals (queue is never blocked)
+        uint256 sigId = _createSignal(genius1);
+        uint256 pid = _purchaseSignal(genius1, idiot1, sigId, NOTIONAL, ODDS);
+        _recordOutcome(genius1, idiot1, pid, Outcome.Favorable);
+
+        PairQueueState memory qs = account.getQueueState(genius1, idiot1);
+        assertEq(qs.totalPurchases, 11, "Should have 11 total purchases (10 settled + 1 new)");
+        assertEq(qs.auditedCount, 10, "10 should be audited from batch 1");
+
+        // New purchase is NOT audited yet
+        assertFalse(account.isPurchaseAudited(pid), "New purchase should not be audited yet");
+    }
+
+    // ─── Test 13: Batch Claim Fees (multiple batches)
+    // ─────────────────────────────
+
+    function test_batchClaimFees_multipleBatches() public {
+        // Create and settle two batches
+        for (uint256 b; b < 2; b++) {
+            Outcome[] memory outcomes = new Outcome[](10);
+            for (uint256 i; i < 10; i++) {
+                outcomes[i] = Outcome.Favorable;
+            }
+            uint256[] memory batchPurchaseIds = _fullBatch(genius1, idiot1, outcomes);
+            audit.settle(genius1, idiot1, batchPurchaseIds);
+        }
+
+        // Warp past claim delay
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        // Both batches should be claimable
+        uint256 claimable0 = escrow.batchClaimable(genius1, idiot1, 0);
+        uint256 claimable1 = escrow.batchClaimable(genius1, idiot1, 1);
+        assertTrue(claimable0 > 0, "Batch 0 should be claimable");
+        assertTrue(claimable1 > 0, "Batch 1 should be claimable");
+
+        // Use batch claim
+        address[] memory idiots = new address[](2);
+        uint256[] memory batchIdArr = new uint256[](2);
+        idiots[0] = idiot1;
+        idiots[1] = idiot1;
+        batchIdArr[0] = 0;
+        batchIdArr[1] = 1;
+
+        uint256 geniusBefore = usdc.balanceOf(genius1);
+        vm.prank(genius1);
+        escrow.claimFeesBatch(idiots, batchIdArr);
+
+        assertEq(usdc.balanceOf(genius1), geniusBefore + claimable0 + claimable1, "Should receive both batch fees");
+        assertEq(escrow.batchClaimable(genius1, idiot1, 0), 0, "Batch 0 claimed");
+        assertEq(escrow.batchClaimable(genius1, idiot1, 1), 0, "Batch 1 claimed");
+    }
+
+    // ─── Test 14: Active Pair Count Tracking
+    // ─────────────────────────────
+
+    function test_activePairCount_tracking() public {
+        assertEq(account.activePairCount(), 0, "Initial active pair count should be 0");
+
+        // Create one purchase for a pair
+        uint256 sigId = _createSignal(genius1);
+        uint256 pid = _purchaseSignal(genius1, idiot1, sigId, NOTIONAL, ODDS);
+        _recordOutcome(genius1, idiot1, pid, Outcome.Favorable);
+
+        assertEq(account.activePairCount(), 1, "Should have 1 active pair after purchase");
+
+        // Create more purchases to reach batch size, then settle
+        uint256[] memory purchaseIds = new uint256[](10);
+        purchaseIds[0] = pid;
+        for (uint256 i = 1; i < 10; i++) {
+            uint256 sid = _createSignal(genius1);
+            purchaseIds[i] = _purchaseSignal(genius1, idiot1, sid, NOTIONAL, ODDS);
+            _recordOutcome(genius1, idiot1, purchaseIds[i], Outcome.Favorable);
+        }
+
+        audit.settle(genius1, idiot1, purchaseIds);
+
+        // After settling all purchases, pair should be inactive
+        assertEq(account.activePairCount(), 0, "Active pair count should be 0 after settling all");
     }
 }

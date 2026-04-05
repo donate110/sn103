@@ -9,11 +9,11 @@ import {Collateral} from "../src/Collateral.sol";
 import {CreditLedger} from "../src/CreditLedger.sol";
 import {Account as DjinnAccount} from "../src/Account.sol";
 import {Audit, AuditResult} from "../src/Audit.sol";
-import {Outcome} from "../src/interfaces/IDjinn.sol";
+import {Outcome, PairQueueState} from "../src/interfaces/IDjinn.sol";
 import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 /// @title AuditIntegrationTest
-/// @notice Full lifecycle integration tests for the Audit contract
+/// @notice Full lifecycle integration tests for the batch-based Audit contract (v2)
 contract AuditIntegrationTest is Test {
     MockUSDC usdc;
     SignalCommitment signalCommitment;
@@ -160,13 +160,13 @@ contract AuditIntegrationTest is Test {
         }
     }
 
-    /// @dev Create 10 signals and purchase all, returning purchase IDs
-    function _create10Signals(Outcome[] memory outcomes, uint256[] memory notionals, uint256[] memory oddsArr)
+    /// @dev Create N signals and purchase all, returning purchase IDs
+    function _createNSignals(uint256 n, Outcome[] memory outcomes, uint256[] memory notionals, uint256[] memory oddsArr)
         internal
         returns (uint256[] memory purchaseIds)
     {
-        purchaseIds = new uint256[](10);
-        for (uint256 i; i < 10; i++) {
+        purchaseIds = new uint256[](n);
+        for (uint256 i; i < n; i++) {
             purchaseIds[i] = _createAndPurchaseSignal(
                 i + 1, // signalId
                 notionals[i],
@@ -177,10 +177,27 @@ contract AuditIntegrationTest is Test {
         }
     }
 
+    /// @dev Create 10 signals and purchase all, returning purchase IDs
+    function _create10Signals(Outcome[] memory outcomes, uint256[] memory notionals, uint256[] memory oddsArr)
+        internal
+        returns (uint256[] memory purchaseIds)
+    {
+        return _createNSignals(10, outcomes, notionals, oddsArr);
+    }
+
     function _uniformArrays() internal pure returns (uint256[] memory notionals, uint256[] memory oddsArr) {
         notionals = new uint256[](10);
         oddsArr = new uint256[](10);
         for (uint256 i; i < 10; i++) {
+            notionals[i] = NOTIONAL;
+            oddsArr[i] = ODDS;
+        }
+    }
+
+    function _uniformArraysN(uint256 n) internal pure returns (uint256[] memory notionals, uint256[] memory oddsArr) {
+        notionals = new uint256[](n);
+        oddsArr = new uint256[](n);
+        for (uint256 i; i < n; i++) {
             notionals[i] = NOTIONAL;
             oddsArr[i] = ODDS;
         }
@@ -204,9 +221,9 @@ contract AuditIntegrationTest is Test {
         outcomes[9] = Outcome.Void;
 
         (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
-        _create10Signals(outcomes, notionals, oddsArr);
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
 
-        int256 score = audit.computeScore(genius, idiot);
+        int256 score = audit.computeScore(genius, idiot, purchaseIds);
 
         // Favorable: +notional * (odds - 1e6) / 1e6
         // = 1000e6 * (1_910_000 - 1_000_000) / 1_000_000
@@ -233,9 +250,9 @@ contract AuditIntegrationTest is Test {
         }
 
         (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
-        _create10Signals(outcomes, notionals, oddsArr);
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
 
-        int256 score = audit.computeScore(genius, idiot);
+        int256 score = audit.computeScore(genius, idiot, purchaseIds);
 
         // All unfavorable: -10 * notional * sla / 10000
         int256 expected = -10 * int256(NOTIONAL) * int256(SLA_MULTIPLIER_BPS) / 10_000;
@@ -250,9 +267,9 @@ contract AuditIntegrationTest is Test {
         }
 
         (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
-        _create10Signals(outcomes, notionals, oddsArr);
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
 
-        int256 score = audit.computeScore(genius, idiot);
+        int256 score = audit.computeScore(genius, idiot, purchaseIds);
 
         int256 expected = 10 * int256(NOTIONAL) * (int256(ODDS) - 1e6) / 1e6;
         assertEq(score, expected, "All favorable score wrong");
@@ -266,9 +283,9 @@ contract AuditIntegrationTest is Test {
         }
 
         (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
-        _create10Signals(outcomes, notionals, oddsArr);
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
 
-        int256 score = audit.computeScore(genius, idiot);
+        int256 score = audit.computeScore(genius, idiot, purchaseIds);
         assertEq(score, 0, "All void signals should give zero score");
     }
 
@@ -282,12 +299,12 @@ contract AuditIntegrationTest is Test {
         }
 
         (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
-        _create10Signals(outcomes, notionals, oddsArr);
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
 
         uint256 idiotBalBefore = escrow.getBalance(idiot);
         uint256 creditsBefore = creditLedger.balanceOf(idiot);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
         // Idiot should get no refund (trancheA=0, trancheB=0)
         assertEq(escrow.getBalance(idiot), idiotBalBefore, "Idiot should get no USDC refund");
@@ -318,7 +335,7 @@ contract AuditIntegrationTest is Test {
         }
 
         (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
-        _create10Signals(outcomes, notionals, oddsArr);
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
 
         uint256 idiotUsdcBefore = usdc.balanceOf(idiot);
         uint256 creditsBefore = creditLedger.balanceOf(idiot);
@@ -333,7 +350,7 @@ contract AuditIntegrationTest is Test {
         // Tranche B: excess as credits
         uint256 expectedTrancheB = totalDamages - expectedTrancheA;
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
         // Idiot gets USDC refund (tranche A) directly to wallet from genius collateral
         assertEq(usdc.balanceOf(idiot), idiotUsdcBefore + expectedTrancheA, "Idiot should get tranche A USDC refund");
@@ -367,6 +384,7 @@ contract AuditIntegrationTest is Test {
         oddsArr[9] = ODDS;
         outcomes[9] = Outcome.Unfavorable;
 
+        uint256[] memory purchaseIds = new uint256[](10);
         for (uint256 i; i < 10; i++) {
             uint256 sigId = 500 + i;
             _createSignal(sigId);
@@ -380,10 +398,10 @@ contract AuditIntegrationTest is Test {
             _depositIdiotEscrow(fee);
 
             vm.prank(idiot);
-            uint256 pid = escrow.purchase(sigId, notionals[i], oddsArr[i]);
+            purchaseIds[i] = escrow.purchase(sigId, notionals[i], oddsArr[i]);
 
             if (outcomes[i] != Outcome.Pending) {
-                _recordOutcome(pid, outcomes[i]);
+                _recordOutcome(purchaseIds[i], outcomes[i]);
             }
         }
 
@@ -394,7 +412,7 @@ contract AuditIntegrationTest is Test {
 
         uint256 idiotUsdcBefore = usdc.balanceOf(idiot);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.trancheA, expectedDamages, "Tranche A should equal total damages");
@@ -412,11 +430,11 @@ contract AuditIntegrationTest is Test {
         }
 
         (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
-        _create10Signals(outcomes, notionals, oddsArr);
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
 
         uint256 treasuryBefore = usdc.balanceOf(treasury);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
         // totalNotional = 10 * 1000e6 = 10_000e6
         // protocolFee = 10_000e6 * 50 / 10_000 = 50e6 (0.5%)
@@ -437,7 +455,7 @@ contract AuditIntegrationTest is Test {
         }
 
         (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
-        _create10Signals(outcomes, notionals, oddsArr);
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
 
         // All signal locks should exist before settlement
         for (uint256 i; i < 10; i++) {
@@ -445,7 +463,7 @@ contract AuditIntegrationTest is Test {
             assertTrue(lockAmount > 0, "Signal lock should exist before settlement");
         }
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
         // After settlement, all signal locks should be released
         for (uint256 i; i < 10; i++) {
@@ -457,27 +475,37 @@ contract AuditIntegrationTest is Test {
         assertEq(collateral.getLocked(genius), 0, "Total locked should be zero after settlement");
     }
 
-    // ─── New Cycle After Settlement
+    // ─── Batch Audit Tracking
     // ──────────────────────────────────────
 
-    function test_newCycleStartsAfterSettlement() public {
+    function test_batchCreatedAfterSettlement() public {
         Outcome[] memory outcomes = new Outcome[](10);
         for (uint256 i; i < 10; i++) {
             outcomes[i] = Outcome.Favorable;
         }
 
         (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
-        _create10Signals(outcomes, notionals, oddsArr);
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
 
-        uint256 cycleBefore = account.getCurrentCycle(genius, idiot);
-        assertEq(cycleBefore, 0, "Initial cycle should be 0");
-        assertEq(account.getSignalCount(genius, idiot), 10, "Should have 10 signals before audit");
+        uint256 batchCountBefore = account.getAuditBatchCount(genius, idiot);
+        assertEq(batchCountBefore, 0, "Initial batch count should be 0");
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
-        uint256 cycleAfter = account.getCurrentCycle(genius, idiot);
-        assertEq(cycleAfter, cycleBefore + 1, "Cycle should increment after settlement");
-        assertEq(account.getSignalCount(genius, idiot), 0, "Signal count should reset after new cycle");
+        uint256 batchCountAfter = account.getAuditBatchCount(genius, idiot);
+        assertEq(batchCountAfter, 1, "Batch count should be 1 after settlement");
+
+        // Verify all purchases are marked audited
+        for (uint256 i; i < 10; i++) {
+            assertTrue(account.isPurchaseAudited(purchaseIds[i]), "Purchase should be marked audited");
+        }
+
+        // Verify audit batch contents
+        uint256[] memory batchContents = account.getAuditBatch(genius, idiot, 0);
+        assertEq(batchContents.length, 10, "Batch should contain 10 purchases");
+        for (uint256 i; i < 10; i++) {
+            assertEq(batchContents[i], purchaseIds[i], "Batch purchase ID mismatch");
+        }
     }
 
     // ─── Early Exit
@@ -485,14 +513,15 @@ contract AuditIntegrationTest is Test {
 
     function test_earlyExit_creditsDamagesOnly() public {
         // Create 5 signals (less than 10) - all unfavorable
+        uint256[] memory purchaseIds = new uint256[](5);
         for (uint256 i; i < 5; i++) {
-            _createAndPurchaseSignal(i + 1, NOTIONAL, ODDS, SLA_MULTIPLIER_BPS, Outcome.Unfavorable);
+            purchaseIds[i] = _createAndPurchaseSignal(i + 1, NOTIONAL, ODDS, SLA_MULTIPLIER_BPS, Outcome.Unfavorable);
         }
 
         uint256 idiotBalBefore = escrow.getBalance(idiot);
 
         vm.prank(idiot);
-        audit.earlyExit(genius, idiot);
+        audit.earlyExit(genius, idiot, purchaseIds);
 
         // All damages should be in credits, not USDC
         assertEq(escrow.getBalance(idiot), idiotBalBefore, "Idiot should get no USDC refund on early exit");
@@ -513,12 +542,13 @@ contract AuditIntegrationTest is Test {
     }
 
     function test_earlyExit_positiveScore_noDamages() public {
+        uint256[] memory purchaseIds = new uint256[](5);
         for (uint256 i; i < 5; i++) {
-            _createAndPurchaseSignal(i + 1, NOTIONAL, ODDS, SLA_MULTIPLIER_BPS, Outcome.Favorable);
+            purchaseIds[i] = _createAndPurchaseSignal(i + 1, NOTIONAL, ODDS, SLA_MULTIPLIER_BPS, Outcome.Favorable);
         }
 
         vm.prank(genius);
-        audit.earlyExit(genius, idiot);
+        audit.earlyExit(genius, idiot, purchaseIds);
 
         assertEq(creditLedger.balanceOf(idiot), 0, "No credits should be minted for positive score");
 
@@ -528,43 +558,41 @@ contract AuditIntegrationTest is Test {
     }
 
     function test_earlyExit_onlyPartyCanTrigger() public {
-        _createAndPurchaseSignal(1, NOTIONAL, ODDS, SLA_MULTIPLIER_BPS, Outcome.Favorable);
+        uint256[] memory purchaseIds = new uint256[](1);
+        purchaseIds[0] = _createAndPurchaseSignal(1, NOTIONAL, ODDS, SLA_MULTIPLIER_BPS, Outcome.Favorable);
 
         address random = address(0xDEAD);
         vm.expectRevert(abi.encodeWithSelector(Audit.NotPartyToAudit.selector, random, genius, idiot));
         vm.prank(random);
-        audit.earlyExit(genius, idiot);
+        audit.earlyExit(genius, idiot, purchaseIds);
     }
 
-    function test_earlyExit_reverts_if_auditReady() public {
-        Outcome[] memory outcomes = new Outcome[](10);
-        for (uint256 i; i < 10; i++) {
-            outcomes[i] = Outcome.Favorable;
-        }
-        (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
-        _create10Signals(outcomes, notionals, oddsArr);
+    function test_earlyExit_emptyBatchReverts() public {
+        uint256[] memory purchaseIds = new uint256[](0);
 
-        vm.expectRevert(abi.encodeWithSelector(Audit.AuditAlreadyReady.selector, genius, idiot));
+        vm.expectRevert(abi.encodeWithSelector(Audit.NoPurchasesInBatch.selector));
         vm.prank(idiot);
-        audit.earlyExit(genius, idiot);
+        audit.earlyExit(genius, idiot, purchaseIds);
     }
 
-    // ─── Cannot Re-settle Same Cycle
+    // ─── Cannot Re-settle Same Purchases
     // ─────────────────────────────────────
 
-    function test_cannotResettle() public {
+    function test_cannotResettleSamePurchases() public {
         Outcome[] memory outcomes = new Outcome[](10);
         for (uint256 i; i < 10; i++) {
             outcomes[i] = Outcome.Favorable;
         }
 
         (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
-        _create10Signals(outcomes, notionals, oddsArr);
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
-        vm.expectRevert(abi.encodeWithSelector(Audit.NotAuditReady.selector, genius, idiot));
-        audit.trigger(genius, idiot);
+        // Trying to settle the same purchases again should revert
+        // because markBatchAudited will fail on already-audited purchases
+        vm.expectRevert(abi.encodeWithSelector(DjinnAccount.PurchaseAlreadyAudited.selector, purchaseIds[0]));
+        audit.settle(genius, idiot, purchaseIds);
     }
 
     // ─── Mixed Outcome Scenario (10 signals)
@@ -585,9 +613,9 @@ contract AuditIntegrationTest is Test {
         outcomes[9] = Outcome.Void;
 
         (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
-        _create10Signals(outcomes, notionals, oddsArr);
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
 
-        int256 score = audit.computeScore(genius, idiot);
+        int256 score = audit.computeScore(genius, idiot, purchaseIds);
 
         // favorable: 4 * 910e6 = 3640e6
         // unfavorable: 4 * 1500e6 = 6000e6
@@ -599,7 +627,7 @@ contract AuditIntegrationTest is Test {
 
         uint256 idiotUsdcBefore = usdc.balanceOf(idiot);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
 
@@ -613,7 +641,7 @@ contract AuditIntegrationTest is Test {
 
         assertEq(usdc.balanceOf(idiot), idiotUsdcBefore + expectedA, "Idiot refund wrong");
         assertEq(creditLedger.balanceOf(idiot), expectedB, "Credits mismatch");
-        assertEq(account.getCurrentCycle(genius, idiot), 1, "New cycle should start");
+        assertEq(account.getAuditBatchCount(genius, idiot), 1, "Should have 1 audit batch");
     }
 
     // ─── Protocol Fee With Void Signals
@@ -629,9 +657,9 @@ contract AuditIntegrationTest is Test {
         }
 
         (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
-        _create10Signals(outcomes, notionals, oddsArr);
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
 
@@ -647,6 +675,7 @@ contract AuditIntegrationTest is Test {
         // Verify that when genius collateral is limited, damages (tranche A)
         // are paid first, and protocol fee only gets what remains.
         // 10 unfavorable signals with tight collateral.
+        uint256[] memory purchaseIds = new uint256[](10);
         for (uint256 i; i < 10; i++) {
             uint256 sigId = 700 + i;
             _createSignal(sigId, SLA_MULTIPLIER_BPS);
@@ -658,14 +687,14 @@ contract AuditIntegrationTest is Test {
             _depositIdiotEscrow(fee);
 
             vm.prank(idiot);
-            uint256 pid = escrow.purchase(sigId, NOTIONAL, ODDS);
-            _recordOutcome(pid, Outcome.Unfavorable);
+            purchaseIds[i] = escrow.purchase(sigId, NOTIONAL, ODDS);
+            _recordOutcome(purchaseIds[i], Outcome.Unfavorable);
         }
 
         uint256 idiotUsdcBefore = usdc.balanceOf(idiot);
         uint256 treasuryBefore = usdc.balanceOf(treasury);
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
 
@@ -684,7 +713,8 @@ contract AuditIntegrationTest is Test {
 
     function test_zeroScore_noRefundNoCredit() public {
         // Mix favorable and unfavorable outcomes to get score near zero
-        // 5 favorable + 5 void → positive score, no damages
+        // 10 void -> zero score, no damages
+        uint256[] memory purchaseIds = new uint256[](10);
         for (uint256 i; i < 10; i++) {
             uint256 sigId = 800 + i;
             _createSignal(sigId, SLA_MULTIPLIER_BPS);
@@ -696,11 +726,11 @@ contract AuditIntegrationTest is Test {
             _depositIdiotEscrow(fee);
 
             vm.prank(idiot);
-            uint256 pid = escrow.purchase(sigId, NOTIONAL, ODDS);
-            _recordOutcome(pid, Outcome.Void);
+            purchaseIds[i] = escrow.purchase(sigId, NOTIONAL, ODDS);
+            _recordOutcome(purchaseIds[i], Outcome.Void);
         }
 
-        audit.trigger(genius, idiot);
+        audit.settle(genius, idiot, purchaseIds);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.qualityScore, 0, "Score should be zero with all voids");
@@ -708,32 +738,197 @@ contract AuditIntegrationTest is Test {
         assertEq(result.trancheB, 0, "No credits when score >= 0");
     }
 
-    // ─── Two Full Cycles
+    // ─── Two Batches
     // ─────────────────────────────────────────────────
 
-    function test_twoCycles() public {
-        // Cycle 0: all favorable
+    function test_twoBatches() public {
+        // Batch 0: all favorable (10 purchases)
         (uint256[] memory notionals1, uint256[] memory oddsArr1) = _uniformArrays();
-
+        Outcome[] memory outcomes1 = new Outcome[](10);
         for (uint256 i; i < 10; i++) {
-            _createAndPurchaseSignal(i + 1, notionals1[i], oddsArr1[i], SLA_MULTIPLIER_BPS, Outcome.Favorable);
+            outcomes1[i] = Outcome.Favorable;
         }
 
-        audit.trigger(genius, idiot);
-        assertEq(account.getCurrentCycle(genius, idiot), 1, "Should be on cycle 1");
-
-        // Cycle 1: all unfavorable
+        uint256[] memory batch1Ids = new uint256[](10);
         for (uint256 i; i < 10; i++) {
-            _createAndPurchaseSignal(i + 100, notionals1[i], oddsArr1[i], SLA_MULTIPLIER_BPS, Outcome.Unfavorable);
+            batch1Ids[i] = _createAndPurchaseSignal(i + 1, notionals1[i], oddsArr1[i], SLA_MULTIPLIER_BPS, Outcome.Favorable);
         }
 
-        audit.trigger(genius, idiot);
-        assertEq(account.getCurrentCycle(genius, idiot), 2, "Should be on cycle 2");
+        audit.settle(genius, idiot, batch1Ids);
+        assertEq(account.getAuditBatchCount(genius, idiot), 1, "Should have 1 batch");
+
+        // Batch 1: all unfavorable (10 more purchases)
+        uint256[] memory batch2Ids = new uint256[](10);
+        for (uint256 i; i < 10; i++) {
+            batch2Ids[i] = _createAndPurchaseSignal(i + 100, notionals1[i], oddsArr1[i], SLA_MULTIPLIER_BPS, Outcome.Unfavorable);
+        }
+
+        audit.settle(genius, idiot, batch2Ids);
+        assertEq(account.getAuditBatchCount(genius, idiot), 2, "Should have 2 batches");
 
         // Verify both audit results exist
         AuditResult memory r0 = audit.getAuditResult(genius, idiot, 0);
         AuditResult memory r1 = audit.getAuditResult(genius, idiot, 1);
-        assertTrue(r0.qualityScore > 0, "Cycle 0 should be positive");
-        assertTrue(r1.qualityScore < 0, "Cycle 1 should be negative");
+        assertTrue(r0.qualityScore > 0, "Batch 0 should be positive");
+        assertTrue(r1.qualityScore < 0, "Batch 1 should be negative");
+    }
+
+    // ─── Batch Size Validation
+    // ─────────────────────────────────────────────────
+
+    function test_settle_revertsBelowMinBatchSize() public {
+        // Only 9 purchases, settle requires 10
+        uint256[] memory purchaseIds = new uint256[](9);
+        for (uint256 i; i < 9; i++) {
+            purchaseIds[i] = _createAndPurchaseSignal(i + 1, NOTIONAL, ODDS, SLA_MULTIPLIER_BPS, Outcome.Favorable);
+        }
+
+        vm.expectRevert(abi.encodeWithSelector(Audit.BatchTooSmall.selector, 9, 10));
+        audit.settle(genius, idiot, purchaseIds);
+    }
+
+    function test_settle_revertsAboveMaxBatchSize() public {
+        // 21 purchases, settle max is 20
+        uint256[] memory purchaseIds = new uint256[](21);
+        for (uint256 i; i < 21; i++) {
+            purchaseIds[i] = _createAndPurchaseSignal(i + 1, NOTIONAL, ODDS, SLA_MULTIPLIER_BPS, Outcome.Favorable);
+        }
+
+        vm.expectRevert(abi.encodeWithSelector(Audit.BatchTooLarge.selector, 21, 20));
+        audit.settle(genius, idiot, purchaseIds);
+    }
+
+    function test_earlyExit_allowsSmallBatch() public {
+        // earlyExit allows batches smaller than 10
+        uint256[] memory purchaseIds = new uint256[](3);
+        for (uint256 i; i < 3; i++) {
+            purchaseIds[i] = _createAndPurchaseSignal(i + 1, NOTIONAL, ODDS, SLA_MULTIPLIER_BPS, Outcome.Favorable);
+        }
+
+        vm.prank(genius);
+        audit.earlyExit(genius, idiot, purchaseIds);
+
+        AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
+        assertTrue(result.timestamp > 0, "Early exit should succeed for small batch");
+    }
+
+    // ─── Queue State
+    // ─────────────────────────────────────────────────
+
+    function test_queueState_afterSettlement() public {
+        Outcome[] memory outcomes = new Outcome[](10);
+        for (uint256 i; i < 10; i++) {
+            outcomes[i] = Outcome.Favorable;
+        }
+
+        (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
+
+        PairQueueState memory stateBefore = account.getQueueState(genius, idiot);
+        assertEq(stateBefore.totalPurchases, 10, "Should have 10 total purchases");
+        assertEq(stateBefore.resolvedCount, 10, "Should have 10 resolved");
+        assertEq(stateBefore.auditedCount, 0, "None audited yet");
+        assertEq(stateBefore.auditBatchCount, 0, "No batches yet");
+
+        audit.settle(genius, idiot, purchaseIds);
+
+        PairQueueState memory stateAfter = account.getQueueState(genius, idiot);
+        assertEq(stateAfter.totalPurchases, 10, "Still 10 total purchases");
+        assertEq(stateAfter.resolvedCount, 10, "Still 10 resolved");
+        assertEq(stateAfter.auditedCount, 10, "All 10 audited");
+        assertEq(stateAfter.auditBatchCount, 1, "One batch completed");
+    }
+
+    // ─── Batch Claimable Fees (v2)
+    // ─────────────────────────────────────────────────
+
+    function test_batchClaimable_recordedAfterSettlement() public {
+        Outcome[] memory outcomes = new Outcome[](10);
+        for (uint256 i; i < 10; i++) {
+            outcomes[i] = Outcome.Favorable;
+        }
+
+        (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
+
+        audit.settle(genius, idiot, purchaseIds);
+
+        // For positive score, no tranche A damages, so full fees are claimable
+        uint256 totalFees = 10 * (NOTIONAL * MAX_PRICE_BPS / 10_000);
+        uint256 claimable = escrow.batchClaimable(genius, idiot, 0);
+        assertEq(claimable, totalFees, "Claimable should equal total USDC fees for positive score");
+    }
+
+    function test_batchClaimable_reducedByDamages() public {
+        // All unfavorable: damages > fees, so claimable = 0 (all fees consumed by tranche A)
+        Outcome[] memory outcomes = new Outcome[](10);
+        for (uint256 i; i < 10; i++) {
+            outcomes[i] = Outcome.Unfavorable;
+        }
+
+        (uint256[] memory notionals, uint256[] memory oddsArr) = _uniformArrays();
+        uint256[] memory purchaseIds = _create10Signals(outcomes, notionals, oddsArr);
+
+        audit.settle(genius, idiot, purchaseIds);
+
+        uint256 claimable = escrow.batchClaimable(genius, idiot, 0);
+        assertEq(claimable, 0, "Claimable should be zero when damages exceed fees");
+    }
+
+    // ─── Force Settlement
+    // ─────────────────────────────────────────────────
+
+    function test_forceSettle_ownerOnly() public {
+        uint256[] memory purchaseIds = new uint256[](10);
+        for (uint256 i; i < 10; i++) {
+            purchaseIds[i] = _createAndPurchaseSignal(i + 1, NOTIONAL, ODDS, SLA_MULTIPLIER_BPS, Outcome.Favorable);
+        }
+
+        // Non-owner cannot force settle
+        vm.expectRevert();
+        vm.prank(genius);
+        audit.forceSettle(genius, idiot, purchaseIds, 0);
+
+        // Owner can force settle
+        audit.forceSettle(genius, idiot, purchaseIds, 0);
+
+        AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
+        assertEq(result.qualityScore, 0, "Force settled score should match specified score");
+        assertTrue(result.timestamp > 0, "Should have timestamp");
+    }
+
+    // ─── Unfinalized Outcomes Revert
+    // ─────────────────────────────────────────────────
+
+    function test_settle_revertsWithPendingOutcomes() public {
+        // Create 10 signals but leave one with Pending outcome
+        uint256[] memory purchaseIds = new uint256[](10);
+        for (uint256 i; i < 9; i++) {
+            purchaseIds[i] = _createAndPurchaseSignal(i + 1, NOTIONAL, ODDS, SLA_MULTIPLIER_BPS, Outcome.Favorable);
+        }
+        // Last one: create signal and purchase, but do NOT record outcome (stays Pending)
+        purchaseIds[9] = _createAndPurchaseSignal(10, NOTIONAL, ODDS, SLA_MULTIPLIER_BPS, Outcome.Pending);
+
+        vm.expectRevert(abi.encodeWithSelector(Audit.OutcomesNotFinalized.selector, genius, idiot));
+        audit.settle(genius, idiot, purchaseIds);
+    }
+
+    // ─── 20-Signal Maximum Batch
+    // ─────────────────────────────────────────────────
+
+    function test_settle_maxBatchSize20() public {
+        uint256[] memory purchaseIds = new uint256[](20);
+        for (uint256 i; i < 20; i++) {
+            purchaseIds[i] = _createAndPurchaseSignal(i + 1, NOTIONAL, ODDS, SLA_MULTIPLIER_BPS, Outcome.Favorable);
+        }
+
+        audit.settle(genius, idiot, purchaseIds);
+
+        AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
+        assertTrue(result.qualityScore > 0, "20-signal batch should succeed");
+        assertEq(account.getAuditBatchCount(genius, idiot), 1, "Should have 1 batch");
+
+        uint256[] memory batchContents = account.getAuditBatch(genius, idiot, 0);
+        assertEq(batchContents.length, 20, "Batch should contain 20 purchases");
     }
 }

@@ -14,7 +14,7 @@ import {Outcome} from "../src/interfaces/IDjinn.sol";
 import {_deployProxy} from "./helpers/DeployHelpers.sol";
 
 /// @title OutcomeVotingTest
-/// @notice Tests for OutcomeVoting and Audit.settleByVote / earlyExitByVote
+/// @notice Tests for OutcomeVoting and Audit.settleByVote / earlyExitByVote (v2 queue-based)
 contract OutcomeVotingTest is Test {
     MockUSDC usdc;
     SignalCommitment signalCommitment;
@@ -157,18 +157,28 @@ contract OutcomeVotingTest is Test {
         purchaseId = escrow.purchase(signalId, NOTIONAL, ODDS);
     }
 
-    /// @dev Create 10 signals and purchase them (no outcomes recorded — voted path)
-    function _create10SignalsNoOutcomes() internal {
+    /// @dev Create 10 signals, purchase, and record Favorable outcomes (required for settlement)
+    function _create10SignalsNoOutcomes() internal returns (uint256[] memory purchaseIds) {
+        purchaseIds = new uint256[](10);
         for (uint256 i; i < 10; i++) {
-            _createAndPurchaseSignal(i + 1);
+            purchaseIds[i] = _createAndPurchaseSignal(i + 1);
+            // v2 requires outcomes recorded before markBatchAudited
+            account.recordOutcome(genius, idiot, purchaseIds[i], Outcome.Favorable);
         }
     }
 
-    /// @dev Create N signals and purchase them (no outcomes recorded)
-    function _createNSignals(uint256 n) internal {
+    /// @dev Create N signals, purchase, and record Favorable outcomes
+    function _createNSignals(uint256 n) internal returns (uint256[] memory purchaseIds) {
+        purchaseIds = new uint256[](n);
         for (uint256 i; i < n; i++) {
-            _createAndPurchaseSignal(i + 1);
+            purchaseIds[i] = _createAndPurchaseSignal(i + 1);
+            account.recordOutcome(genius, idiot, purchaseIds[i], Outcome.Favorable);
         }
+    }
+
+    /// @dev Compute the batch key for a set of purchaseIds (matches OutcomeVoting logic)
+    function _batchKey(uint256[] memory purchaseIds) internal view returns (bytes32) {
+        return keccak256(abi.encode(genius, idiot, keccak256(abi.encode(purchaseIds))));
     }
 
     // ─── Validator Management ────────────────────────────────
@@ -221,56 +231,57 @@ contract OutcomeVotingTest is Test {
     // ─── Voting: Basic Flow ─────────────────────────────────
 
     function test_submitVote_recordsVote() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         int256 score = 5000e6;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
 
-        assertTrue(voting.hasVoted(_cycleKey(0), validator1));
-        assertEq(voting.getVoteCount(genius, idiot, 0, score, TOTAL_NOTIONAL_10), 1);
+        bytes32 batchKey = _batchKey(pids);
+        assertTrue(voting.hasVoted(batchKey, validator1));
     }
 
     function test_submitVote_nonValidatorReverts() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         vm.expectRevert(abi.encodeWithSelector(OutcomeVoting.NotValidator.selector, address(0xDEAD)));
         vm.prank(address(0xDEAD));
-        voting.submitVote(genius, idiot, 5000e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 5000e6, TOTAL_NOTIONAL_10, false);
     }
 
     function test_submitVote_doubleVoteReverts() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 5000e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 5000e6, TOTAL_NOTIONAL_10, false);
 
-        bytes32 cycleKey = _cycleKey(0);
-        vm.expectRevert(abi.encodeWithSelector(OutcomeVoting.AlreadyVoted.selector, validator1, cycleKey));
+        bytes32 batchKey = _batchKey(pids);
+        vm.expectRevert(abi.encodeWithSelector(OutcomeVoting.AlreadyVoted.selector, validator1, batchKey));
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 5000e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 5000e6, TOTAL_NOTIONAL_10, false);
     }
 
     // ─── Voting: Quorum Triggers Settlement ──────────────────
 
     function test_quorumTriggersSettlement_positiveScore() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
-        int256 score = 5000e6; // Positive → genius keeps fees
+        int256 score = 5000e6; // Positive: genius keeps fees
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
 
         // Not finalized yet (1/3, need 2/3)
-        assertFalse(voting.isCycleFinalized(genius, idiot, 0));
+        bytes32 batchKey = _batchKey(pids);
+        assertFalse(voting.isBatchFinalized(batchKey));
 
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
 
         // Finalized! (2/3 quorum)
-        assertTrue(voting.isCycleFinalized(genius, idiot, 0));
+        assertTrue(voting.isBatchFinalized(batchKey));
 
-        // Audit result stored
+        // Audit result stored (batchId = 0 since first batch)
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.qualityScore, score);
         assertTrue(result.timestamp > 0);
@@ -282,14 +293,14 @@ contract OutcomeVotingTest is Test {
         assertEq(result.protocolFee, expectedFee);
         assertEq(usdc.balanceOf(treasury), expectedFee);
 
-        // Cycle advanced
+        // Batch count advanced
         assertEq(account.getCurrentCycle(genius, idiot), 1);
     }
 
     function test_quorumTriggersSettlement_negativeScore() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
-        // Negative score: -5000e6 → damages to idiot
+        // Negative score: -5000e6: damages to idiot
         int256 score = -5000e6;
         uint256 totalDamages = uint256(-score);
         uint256 totalFees = 10 * (NOTIONAL * MAX_PRICE_BPS / 10_000); // 10 * 50e6 = 500e6
@@ -297,12 +308,13 @@ contract OutcomeVotingTest is Test {
         uint256 idiotUsdcBefore = usdc.balanceOf(idiot);
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
 
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
 
-        assertTrue(voting.isCycleFinalized(genius, idiot, 0));
+        bytes32 batchKey = _batchKey(pids);
+        assertTrue(voting.isBatchFinalized(batchKey));
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.qualityScore, score);
@@ -322,19 +334,20 @@ contract OutcomeVotingTest is Test {
     }
 
     function test_quorum_disagreementNoFinalization() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
-        // All 3 vote different scores → no quorum
+        // All 3 vote different scores: no quorum
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 1000e6, TOTAL_NOTIONAL_10, false);
 
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, 2000e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 2000e6, TOTAL_NOTIONAL_10, false);
 
         vm.prank(validator3);
-        voting.submitVote(genius, idiot, 3000e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 3000e6, TOTAL_NOTIONAL_10, false);
 
-        assertFalse(voting.isCycleFinalized(genius, idiot, 0));
+        bytes32 batchKey = _batchKey(pids);
+        assertFalse(voting.isBatchFinalized(batchKey));
     }
 
     function test_quorum_partialAgreement() public {
@@ -342,41 +355,41 @@ contract OutcomeVotingTest is Test {
         voting.addValidator(validator4);
         voting.addValidator(validator5);
 
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         int256 score = 1000e6;
 
         // 2 agree
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
 
         // 1 disagrees
         vm.prank(validator3);
-        voting.submitVote(genius, idiot, 999e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 999e6, TOTAL_NOTIONAL_10, false);
 
-        assertFalse(voting.isCycleFinalized(genius, idiot, 0));
+        bytes32 batchKey = _batchKey(pids);
+        assertFalse(voting.isBatchFinalized(batchKey));
 
         // 3 agree (need 4)
         vm.prank(validator4);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
 
-        assertFalse(voting.isCycleFinalized(genius, idiot, 0));
+        assertFalse(voting.isBatchFinalized(batchKey));
 
-        // 4 agree → quorum reached (but validator5 voted differently)
-        // Wait, validator5 hasn't voted yet. Let's have v5 agree.
+        // 4 agree: quorum reached
         vm.prank(validator5);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
 
-        // Now 4/5 agree → finalized
-        assertTrue(voting.isCycleFinalized(genius, idiot, 0));
+        // Now 4/5 agree: finalized
+        assertTrue(voting.isBatchFinalized(batchKey));
     }
 
     // ─── Voted Settlement: Collateral Release ────────────────
 
     function test_votedSettlement_releasesSignalLocks() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         // All signal locks should exist before
         for (uint256 i = 1; i <= 10; i++) {
@@ -385,9 +398,9 @@ contract OutcomeVotingTest is Test {
 
         int256 score = 5000e6;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
 
         // All locks released
         for (uint256 i = 1; i <= 10; i++) {
@@ -399,23 +412,24 @@ contract OutcomeVotingTest is Test {
     // ─── Early Exit Via Voting ──────────────────────────────
 
     function test_earlyExitByVote_creditsOnly() public {
-        _createNSignals(5);
+        uint256[] memory pids = _createNSignals(5);
 
-        // Request early exit
+        // Request early exit (v2: takes purchaseIds)
         vm.prank(idiot);
-        voting.requestEarlyExit(genius, idiot);
+        voting.requestEarlyExit(genius, idiot, pids);
 
-        assertTrue(voting.earlyExitRequested(_cycleKey(0)));
+        bytes32 batchKey = _batchKey(pids);
+        assertTrue(voting.earlyExitRequested(batchKey));
 
         int256 score = -3000e6;
         uint256 idiotUsdcBefore = usdc.balanceOf(idiot);
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_5, true);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_5, true);
 
-        assertTrue(voting.isCycleFinalized(genius, idiot, 0));
+        assertTrue(voting.isBatchFinalized(batchKey));
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.qualityScore, score);
@@ -425,22 +439,22 @@ contract OutcomeVotingTest is Test {
 
         // No USDC movement for idiot
         assertEq(usdc.balanceOf(idiot), idiotUsdcBefore);
-        // Credits minted (full damages — fee is slashed from genius collateral separately)
+        // Credits minted (full damages)
         assertEq(creditLedger.balanceOf(idiot), uint256(-score));
     }
 
     function test_earlyExitByVote_positiveScore_noDamages() public {
-        _createNSignals(5);
+        uint256[] memory pids = _createNSignals(5);
 
         vm.prank(genius);
-        voting.requestEarlyExit(genius, idiot);
+        voting.requestEarlyExit(genius, idiot, pids);
 
         int256 score = 2000e6;
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_5, true);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_5, true);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.trancheA, 0);
@@ -451,112 +465,96 @@ contract OutcomeVotingTest is Test {
     // ─── Early Exit Request Validation ──────────────────────
 
     function test_requestEarlyExit_onlyParty() public {
-        _createNSignals(3);
+        uint256[] memory pids = _createNSignals(3);
 
         vm.expectRevert(
             abi.encodeWithSelector(OutcomeVoting.NotPartyToAudit.selector, address(0xDEAD), genius, idiot)
         );
         vm.prank(address(0xDEAD));
-        voting.requestEarlyExit(genius, idiot);
+        voting.requestEarlyExit(genius, idiot, pids);
     }
 
     function test_requestEarlyExit_noPurchasesReverts() public {
+        uint256[] memory empty = new uint256[](0);
         vm.expectRevert(abi.encodeWithSelector(OutcomeVoting.NoPurchases.selector, genius, idiot));
         vm.prank(genius);
-        voting.requestEarlyExit(genius, idiot);
+        voting.requestEarlyExit(genius, idiot, empty);
     }
 
     function test_requestEarlyExit_doubleRequestReverts() public {
-        _createNSignals(3);
+        uint256[] memory pids = _createNSignals(3);
 
         vm.prank(idiot);
-        voting.requestEarlyExit(genius, idiot);
+        voting.requestEarlyExit(genius, idiot, pids);
 
-        bytes32 cycleKey = _cycleKey(0);
-        vm.expectRevert(abi.encodeWithSelector(OutcomeVoting.EarlyExitAlreadyRequested.selector, cycleKey));
+        bytes32 batchKey = _batchKey(pids);
+        vm.expectRevert(abi.encodeWithSelector(OutcomeVoting.EarlyExitAlreadyRequested.selector, batchKey));
         vm.prank(genius);
-        voting.requestEarlyExit(genius, idiot);
+        voting.requestEarlyExit(genius, idiot, pids);
     }
 
     // ─── Authorization Checks ────────────────────────────────
 
     function test_settleByVote_onlyOutcomeVoting() public {
+        uint256[] memory pids = new uint256[](1);
+        pids[0] = 0;
         vm.expectRevert(abi.encodeWithSelector(Audit.CallerNotOutcomeVoting.selector, address(this)));
-        audit.settleByVote(genius, idiot, 1000e6, 10_000e6);
+        audit.settleByVote(genius, idiot, pids, 1000e6, 10_000e6);
     }
 
     function test_earlyExitByVote_onlyOutcomeVoting() public {
+        uint256[] memory pids = new uint256[](1);
+        pids[0] = 0;
         vm.expectRevert(abi.encodeWithSelector(Audit.CallerNotOutcomeVoting.selector, address(this)));
-        audit.earlyExitByVote(genius, idiot, 1000e6, 5_000e6);
+        audit.earlyExitByVote(genius, idiot, pids, 1000e6, 5_000e6);
     }
 
     // ─── Cannot Re-settle After Voted Settlement ─────────────
 
     function test_cannotResettleAfterVote() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         int256 score = 5000e6;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
 
-        // Try to settle again via traditional trigger
-        vm.expectRevert(abi.encodeWithSelector(Audit.NotAuditReady.selector, genius, idiot));
-        audit.trigger(genius, idiot);
-    }
+        // Batch already finalized; voting on the same purchaseIds again reverts
+        bytes32 batchKey = _batchKey(pids);
+        assertTrue(voting.isBatchFinalized(batchKey));
 
-    function test_voteAfterSettlement_goesToNewCycle() public {
-        _create10SignalsNoOutcomes();
-
-        int256 score = 5000e6;
-        vm.prank(validator1);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
-        vm.prank(validator2);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
-
-        // Cycle 0 is finalized and cycle advanced to 1
-        assertTrue(voting.isCycleFinalized(genius, idiot, 0));
-        assertEq(account.getCurrentCycle(genius, idiot), 1);
-
-        // Validator3's vote goes to cycle 1 (new cycle), not cycle 0
+        vm.expectRevert(abi.encodeWithSelector(OutcomeVoting.CycleAlreadyFinalized.selector, batchKey));
         vm.prank(validator3);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
-
-        // Vote is recorded on cycle 1, not cycle 0
-        // Note: no purchases in cycle 1, so totalNotional is arbitrary for the hash
-        assertEq(voting.getVoteCount(genius, idiot, 1, score, TOTAL_NOTIONAL_10), 1);
-        assertTrue(voting.hasVoted(_cycleKey(1), validator3));
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
     }
 
-    function _cycleKey(address g, address i, uint256 cycle) internal pure returns (bytes32) {
-        return keccak256(abi.encode(g, i, cycle));
-    }
+    // ─── Two Voted Batches ────────────────────────────────────
 
-    // ─── Two Voted Cycles ────────────────────────────────────
-
-    function test_twoVotedCycles() public {
-        // Cycle 0
-        _create10SignalsNoOutcomes();
+    function test_twoVotedBatches() public {
+        // Batch 0
+        uint256[] memory pids0 = _create10SignalsNoOutcomes();
 
         int256 score0 = 3000e6;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score0, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids0, score0, TOTAL_NOTIONAL_10, false);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score0, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids0, score0, TOTAL_NOTIONAL_10, false);
 
         assertEq(account.getCurrentCycle(genius, idiot), 1);
 
-        // Cycle 1
+        // Batch 1
+        uint256[] memory pids1 = new uint256[](10);
         for (uint256 i; i < 10; i++) {
-            _createAndPurchaseSignal(i + 100);
+            pids1[i] = _createAndPurchaseSignal(i + 100);
+            account.recordOutcome(genius, idiot, pids1[i], Outcome.Favorable);
         }
 
         int256 score1 = -2000e6;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score1, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids1, score1, TOTAL_NOTIONAL_10, false);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score1, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids1, score1, TOTAL_NOTIONAL_10, false);
 
         assertEq(account.getCurrentCycle(genius, idiot), 2);
 
@@ -569,13 +567,13 @@ contract OutcomeVotingTest is Test {
     // ─── Zero Score Via Vote ─────────────────────────────────
 
     function test_zeroScoreVote_noDamages() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         int256 score = 0;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_10, false);
 
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.qualityScore, 0);
@@ -586,19 +584,20 @@ contract OutcomeVotingTest is Test {
     // ─── Pause/Unpause ──────────────────────────────────────
 
     function test_pausedVotingReverts() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         voting.pause();
 
         vm.expectRevert();
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 1000e6, TOTAL_NOTIONAL_10, false);
 
         voting.unpause();
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
-        assertTrue(voting.hasVoted(_cycleKey(0), validator1));
+        voting.submitVote(genius, idiot, pids, 1000e6, TOTAL_NOTIONAL_10, false);
+        bytes32 batchKey = _batchKey(pids);
+        assertTrue(voting.hasVoted(batchKey, validator1));
     }
 
     // ─── Admin: setOutcomeVoting on Audit ────────────────────
@@ -617,75 +616,78 @@ contract OutcomeVotingTest is Test {
     // ─── Quality Score Bounds Checking ──────────────────────
 
     function test_settleByVote_revertsOnExtremePositiveScore() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         int256 extremeScore = audit.MAX_QUALITY_SCORE() + 1;
 
         // First vote succeeds (no quorum yet)
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, extremeScore, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, extremeScore, TOTAL_NOTIONAL_10, false);
 
-        // Second vote reaches quorum → triggers settleByVote → reverts with bounds check
+        // Second vote reaches quorum: triggers settleByVote which reverts with bounds check
         vm.prank(validator2);
         vm.expectRevert();
-        voting.submitVote(genius, idiot, extremeScore, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, extremeScore, TOTAL_NOTIONAL_10, false);
 
-        // Cycle should NOT be finalized (settlement reverted)
-        assertFalse(voting.isCycleFinalized(genius, idiot, 0));
+        // Batch should NOT be finalized (settlement reverted)
+        bytes32 batchKey = _batchKey(pids);
+        assertFalse(voting.isBatchFinalized(batchKey));
     }
 
     function test_settleByVote_revertsOnExtremeNegativeScore() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         int256 extremeScore = -(audit.MAX_QUALITY_SCORE() + 1);
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, extremeScore, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, extremeScore, TOTAL_NOTIONAL_10, false);
 
         vm.prank(validator2);
         vm.expectRevert();
-        voting.submitVote(genius, idiot, extremeScore, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, extremeScore, TOTAL_NOTIONAL_10, false);
 
-        assertFalse(voting.isCycleFinalized(genius, idiot, 0));
+        bytes32 batchKey = _batchKey(pids);
+        assertFalse(voting.isBatchFinalized(batchKey));
     }
 
     function test_settleByVote_maxBoundaryAccepted() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         // Exactly at the boundary should work (though damages may exceed collateral)
         int256 maxScore = audit.MAX_QUALITY_SCORE();
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, maxScore, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, maxScore, TOTAL_NOTIONAL_10, false);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, maxScore, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, maxScore, TOTAL_NOTIONAL_10, false);
 
-        assertTrue(voting.isCycleFinalized(genius, idiot, 0));
+        bytes32 batchKey = _batchKey(pids);
+        assertTrue(voting.isBatchFinalized(batchKey));
     }
 
     // ─── Validator Snapshot for Quorum ──────────────────────
 
     function test_quorumSnapshot_recordedOnFirstVote() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
-        bytes32 cycleKey = _cycleKey(0);
-        assertEq(voting.cycleValidatorSnapshot(cycleKey), 0, "No snapshot before voting");
+        bytes32 batchKey = _batchKey(pids);
+        assertEq(voting.cycleValidatorSnapshot(batchKey), 0, "No snapshot before voting");
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 1000e6, TOTAL_NOTIONAL_10, false);
 
-        assertEq(voting.cycleValidatorSnapshot(cycleKey), 3, "Snapshot should be 3 after first vote");
+        assertEq(voting.cycleValidatorSnapshot(batchKey), 3, "Snapshot should be 3 after first vote");
     }
 
     function test_quorumSnapshot_addingValidatorMidVoteResetsSnapshot() public {
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         // First vote snapshots at 3 validators and syncNonce
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 1000e6, TOTAL_NOTIONAL_10, false);
 
-        bytes32 cycleKey = _cycleKey(0);
-        assertEq(voting.cycleValidatorSnapshot(cycleKey), 3, "Snapshot should be 3 after first vote");
+        bytes32 batchKey = _batchKey(pids);
+        assertEq(voting.cycleValidatorSnapshot(batchKey), 3, "Snapshot should be 3 after first vote");
 
         // Add 2 more validators after first vote (changes syncNonce)
         voting.addValidator(validator4);
@@ -693,9 +695,9 @@ contract OutcomeVotingTest is Test {
 
         // Next vote resets the snapshot and re-snapshots with 5 validators
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 1000e6, TOTAL_NOTIONAL_10, false);
 
-        assertEq(voting.cycleValidatorSnapshot(cycleKey), 5, "Snapshot should be 5 after reset");
+        assertEq(voting.cycleValidatorSnapshot(batchKey), 5, "Snapshot should be 5 after reset");
     }
 
     function test_quorumSnapshot_removingValidatorMidVoteResetsSnapshot() public {
@@ -703,14 +705,14 @@ contract OutcomeVotingTest is Test {
         voting.addValidator(validator4);
         voting.addValidator(validator5);
 
-        _create10SignalsNoOutcomes();
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         // First vote snapshots at 5 and syncNonce
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 2000e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 2000e6, TOTAL_NOTIONAL_10, false);
 
-        bytes32 cycleKey = _cycleKey(0);
-        assertEq(voting.cycleValidatorSnapshot(cycleKey), 5, "Snapshot should be 5 after first vote");
+        bytes32 batchKey = _batchKey(pids);
+        assertEq(voting.cycleValidatorSnapshot(batchKey), 5, "Snapshot should be 5 after first vote");
 
         // Remove 2 validators (changes syncNonce, leaves MIN_VALIDATORS=3)
         voting.removeValidator(validator4);
@@ -718,63 +720,68 @@ contract OutcomeVotingTest is Test {
 
         // Next vote resets the snapshot and re-snapshots with 3 validators
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, 2000e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 2000e6, TOTAL_NOTIONAL_10, false);
 
-        assertEq(voting.cycleValidatorSnapshot(cycleKey), 3, "Snapshot should be 3 after reset");
+        assertEq(voting.cycleValidatorSnapshot(batchKey), 3, "Snapshot should be 3 after reset");
     }
 
-    function test_cycleQuorumThreshold_returnsZeroBeforeVotes() public {
-        assertEq(voting.cycleQuorumThreshold(genius, idiot, 0), 0);
+    function test_batchQuorumThreshold_returnsZeroBeforeVotes() public {
+        uint256[] memory pids = _create10SignalsNoOutcomes();
+        bytes32 batchKey = _batchKey(pids);
+        assertEq(voting.batchQuorumThreshold(batchKey), 0);
     }
 
-    function test_cycleQuorumThreshold_matchesSnapshotAfterVote() public {
-        _create10SignalsNoOutcomes();
+    function test_batchQuorumThreshold_matchesSnapshotAfterVote() public {
+        uint256[] memory pids = _create10SignalsNoOutcomes();
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, 1000e6, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, pids, 1000e6, TOTAL_NOTIONAL_10, false);
 
+        bytes32 batchKey = _batchKey(pids);
         // 3 validators snapshotted, threshold = ceil(3*2/3) = 2
-        assertEq(voting.cycleQuorumThreshold(genius, idiot, 0), 2);
+        assertEq(voting.batchQuorumThreshold(batchKey), 2);
     }
 
-    // ─── settleByVote requires isAuditReady ────────────────
+    // ─── settleByVote with < 10 purchases reverts (BatchTooSmall) ────
 
-    function test_settleByVote_revertsWhenNotAuditReady() public {
-        // Only create 5 signals (not 10), so isAuditReady returns false
-        _createNSignals(5);
+    function test_settleByVote_revertsWhenBatchTooSmall() public {
+        // Only create 5 signals (not 10), so batch is too small for settleByVote
+        uint256[] memory pids = _createNSignals(5);
 
-        // No early exit requested — so quorum routes to settleByVote
+        // Non-early-exit quorum routes to settleByVote which reverts BatchTooSmall
         int256 score = 1000e6;
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_5, false);
 
-        // Second vote reaches quorum → triggers settleByVote → reverts NotAuditReady
+        // Second vote reaches quorum: triggers settleByVote with 5 < MIN_BATCH_SIZE
         vm.prank(validator2);
         vm.expectRevert();
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_5, false);
 
         // Not finalized because settlement reverted
-        assertFalse(voting.isCycleFinalized(genius, idiot, 0));
+        bytes32 batchKey = _batchKey(pids);
+        assertFalse(voting.isBatchFinalized(batchKey));
     }
 
-    function test_earlyExitByVote_worksWhenNotAuditReady() public {
-        // Only 5 signals — early exit path should work
-        _createNSignals(5);
+    function test_earlyExitByVote_worksWithSmallBatch() public {
+        // Only 5 signals; early exit path should work
+        uint256[] memory pids = _createNSignals(5);
 
         // Request early exit
         vm.prank(idiot);
-        voting.requestEarlyExit(genius, idiot);
+        voting.requestEarlyExit(genius, idiot, pids);
 
         int256 score = -1000e6;
 
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_5, true);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_5);
+        voting.submitVote(genius, idiot, pids, score, TOTAL_NOTIONAL_5, true);
 
         // Early exit should succeed even with fewer than 10 signals
-        assertTrue(voting.isCycleFinalized(genius, idiot, 0));
+        bytes32 batchKey = _batchKey(pids);
+        assertTrue(voting.isBatchFinalized(batchKey));
         AuditResult memory result = audit.getAuditResult(genius, idiot, 0);
         assertEq(result.qualityScore, score);
         assertGt(result.protocolFee, 0, "Early exit: protocol fee charged");
@@ -815,26 +822,26 @@ contract OutcomeVotingTest is Test {
         assertEq(totalSignalLock, lockPerPurchase * 2, "Both locks accumulated");
 
         // Fill 10 signals for genius-idiot pair to make it audit-ready
-        // (purchase 1 already counts as signal 1, need 9 more)
+        // (purchase 0 already counts as signal 1, need 9 more)
+        uint256[] memory allPids = new uint256[](10);
+        allPids[0] = 0; // first purchase
+        // Record outcome for first purchase
+        account.recordOutcome(genius, idiot, 0, Outcome.Favorable);
         for (uint256 i = 2; i <= 10; i++) {
-            _createAndPurchaseSignal(i);
+            uint256 pid = _createAndPurchaseSignal(i);
+            account.recordOutcome(genius, idiot, pid, Outcome.Favorable);
+            allPids[i - 1] = pid;
         }
 
         // Vote to settle genius-idiot pair with a positive score (no damages)
         int256 score = 1000e6;
         vm.prank(validator1);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, allPids, score, TOTAL_NOTIONAL_10, false);
         vm.prank(validator2);
-        voting.submitVote(genius, idiot, score, TOTAL_NOTIONAL_10);
+        voting.submitVote(genius, idiot, allPids, score, TOTAL_NOTIONAL_10, false);
 
-        // After settling idiot's cycle, only idiot's portion of signal 1 lock should be released
+        // After settling idiot's batch, only idiot's portion of signal 1 lock should be released
         uint256 remainingLock = collateral.getSignalLock(genius, 1);
         assertEq(remainingLock, lockPerPurchase, "Idiot2's lock on signal 1 should remain");
-    }
-
-    // ─── Internal Helpers ────────────────────────────────────
-
-    function _cycleKey(uint256 cycle) internal view returns (bytes32) {
-        return keccak256(abi.encode(genius, idiot, cycle));
     }
 }

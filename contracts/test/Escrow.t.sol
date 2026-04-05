@@ -213,9 +213,7 @@ contract EscrowIntegrationTest is Test {
         Signal memory sig = signalCommitment.getSignal(SIGNAL_ID);
         assertEq(uint8(sig.status), uint8(SignalStatus.Active), "Signal should remain Active");
 
-        // Verify fee pool
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        assertEq(escrow.feePool(genius, idiot, cycle), expectedFee, "Fee pool not tracked");
+        // v2: feePool is no longer written to during purchase. Fees are computed at settlement time.
 
         // Verify account recorded the purchase
         assertEq(account.getSignalCount(genius, idiot), 1, "Account signal count wrong");
@@ -255,9 +253,7 @@ contract EscrowIntegrationTest is Test {
         // Escrow balance should be zero (all USDC used)
         assertEq(escrow.getBalance(idiot), 0, "Idiot escrow balance should be zero");
 
-        // Fee pool only tracks USDC, not credits
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        assertEq(escrow.feePool(genius, idiot, cycle), expectedUsdcPaid, "Fee pool should only have USDC paid");
+        // v2: feePool is no longer written to during purchase. Fees are computed at settlement time.
     }
 
     function test_purchase_fully_covered_by_credits() public {
@@ -283,9 +279,7 @@ contract EscrowIntegrationTest is Test {
         // Leftover credits remain
         assertEq(creditLedger.balanceOf(idiot), 10e6, "Remaining credits should be untouched");
 
-        // Fee pool should be zero since no USDC was paid
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        assertEq(escrow.feePool(genius, idiot, cycle), 0, "Fee pool should be zero when paid entirely by credits");
+        // v2: feePool is no longer written to during purchase. Fees are computed at settlement time.
     }
 
     // ─── Purchase Reverts
@@ -1047,22 +1041,27 @@ contract EscrowIntegrationTest is Test {
 }
 
 /// @title MockAuditForClaims
-/// @notice Minimal mock that implements the auditResults view for fee claim tests
+/// @notice Minimal mock that implements the auditResults view for fee claim tests.
+///         In v2, also records claimable fees in Escrow via recordBatchClaimable.
 contract MockAuditForClaims {
     mapping(address => mapping(address => mapping(uint256 => uint256))) public settledTimestamps;
 
-    function markSettled(address genius, address idiot, uint256 cycle) external {
-        settledTimestamps[genius][idiot][cycle] = block.timestamp;
+    function markSettled(address genius, address idiot, uint256 batchId) external {
+        settledTimestamps[genius][idiot][batchId] = block.timestamp;
     }
 
-    function auditResults(address genius, address idiot, uint256 cycle)
+    function auditResults(address genius, address idiot, uint256 batchId)
         external
         view
         returns (int256, uint256, uint256, uint256, uint256)
     {
-        return (0, 0, 0, 0, settledTimestamps[genius][idiot][cycle]);
+        return (0, 0, 0, 0, settledTimestamps[genius][idiot][batchId]);
     }
 
+    /// @dev Record claimable fees in Escrow (v2 flow). Must be called after markSettled.
+    function recordClaimable(address escrowAddr, address genius, address idiot, uint256 batchId, uint256 amount) external {
+        Escrow(escrowAddr).recordBatchClaimable(genius, idiot, batchId, amount);
+    }
 }
 
 /// @title EscrowFeeClaimTest
@@ -1158,29 +1157,30 @@ contract EscrowFeeClaimTest is Test {
 
     function test_claimFees_success() public {
         uint256 expectedFee = _createSignalAndPurchase();
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        uint256 batchId = 0;
 
-        // Mark cycle as settled in mock audit
-        mockAudit.markSettled(genius, idiot, cycle);
+        // Mark batch as settled and record claimable amount (v2 flow)
+        mockAudit.markSettled(genius, idiot, batchId);
+        mockAudit.recordClaimable(address(escrow), genius, idiot, batchId, expectedFee);
         vm.warp(block.timestamp + 48 hours + 1);
 
         uint256 geniusBalBefore = usdc.balanceOf(genius);
 
         vm.prank(genius);
-        escrow.claimFees(idiot, cycle);
+        escrow.claimFees(idiot, batchId);
 
         assertEq(usdc.balanceOf(genius), geniusBalBefore + expectedFee, "Genius should receive fees");
-        assertEq(escrow.feePool(genius, idiot, cycle), 0, "Fee pool should be zero after claim");
+        assertEq(escrow.batchClaimable(genius, idiot, batchId), 0, "Batch claimable should be zero after claim");
     }
 
-    function test_claimFees_revertCycleNotSettled() public {
+    function test_claimFees_revertBatchNotSettled() public {
         _createSignalAndPurchase();
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        uint256 batchId = 0;
 
-        // Do NOT mark cycle as settled
-        vm.expectRevert(abi.encodeWithSelector(Escrow.CycleNotSettled.selector, genius, idiot, cycle));
+        // Do NOT mark batch as settled
+        vm.expectRevert(abi.encodeWithSelector(Escrow.CycleNotSettled.selector, genius, idiot, batchId));
         vm.prank(genius);
-        escrow.claimFees(idiot, cycle);
+        escrow.claimFees(idiot, batchId);
     }
 
     function test_claimFees_revertNoFees() public {
@@ -1195,30 +1195,32 @@ contract EscrowFeeClaimTest is Test {
 
     function test_claimFees_revertDoubleClaim() public {
         uint256 expectedFee = _createSignalAndPurchase();
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        mockAudit.markSettled(genius, idiot, cycle);
+        uint256 batchId = 0;
+        mockAudit.markSettled(genius, idiot, batchId);
+        mockAudit.recordClaimable(address(escrow), genius, idiot, batchId, expectedFee);
         vm.warp(block.timestamp + 48 hours + 1);
 
         vm.prank(genius);
-        escrow.claimFees(idiot, cycle);
+        escrow.claimFees(idiot, batchId);
 
-        // Second claim should revert — pool is empty
-        vm.expectRevert(abi.encodeWithSelector(Escrow.NoFeesToClaim.selector, genius, idiot, cycle));
+        // Second claim should revert: claimable is zero
+        vm.expectRevert(abi.encodeWithSelector(Escrow.NoFeesToClaim.selector, genius, idiot, batchId));
         vm.prank(genius);
-        escrow.claimFees(idiot, cycle);
+        escrow.claimFees(idiot, batchId);
     }
 
     function test_claimFees_onlyGeniusCaller() public {
         _createSignalAndPurchase();
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        mockAudit.markSettled(genius, idiot, cycle);
+        uint256 batchId = 0;
+        mockAudit.markSettled(genius, idiot, batchId);
+        mockAudit.recordClaimable(address(escrow), genius, idiot, batchId, 50e6);
         vm.warp(block.timestamp + 48 hours + 1);
 
-        // Idiot tries to claim genius's fees — should get CycleNotSettled
+        // Idiot tries to claim genius's fees: should get CycleNotSettled
         // because auditResults is keyed by msg.sender (idiot), not genius
-        vm.expectRevert(abi.encodeWithSelector(Escrow.CycleNotSettled.selector, idiot, idiot, cycle));
+        vm.expectRevert(abi.encodeWithSelector(Escrow.CycleNotSettled.selector, idiot, idiot, batchId));
         vm.prank(idiot);
-        escrow.claimFees(idiot, cycle);
+        escrow.claimFees(idiot, batchId);
     }
 
     function test_claimFeesBatch_success() public {
@@ -1227,7 +1229,7 @@ contract EscrowFeeClaimTest is Test {
 
         // First purchase with idiot
         uint256 expectedFee1 = _createSignalAndPurchase();
-        uint256 cycle1 = account.getCurrentCycle(genius, idiot);
+        uint256 batchId1 = 0;
 
         // Second purchase with idiot2
         uint256 sigId2 = 2;
@@ -1265,11 +1267,13 @@ contract EscrowFeeClaimTest is Test {
         escrow.purchase(sigId2, NOTIONAL, ODDS);
         vm.stopPrank();
 
-        uint256 cycle2 = account.getCurrentCycle(genius, idiot2);
+        uint256 batchId2 = 0;
 
-        // Mark both cycles as settled
-        mockAudit.markSettled(genius, idiot, cycle1);
-        mockAudit.markSettled(genius, idiot2, cycle2);
+        // Mark both batches as settled and record claimable
+        mockAudit.markSettled(genius, idiot, batchId1);
+        mockAudit.recordClaimable(address(escrow), genius, idiot, batchId1, expectedFee1);
+        mockAudit.markSettled(genius, idiot2, batchId2);
+        mockAudit.recordClaimable(address(escrow), genius, idiot2, batchId2, expectedFee2);
         vm.warp(block.timestamp + 48 hours + 1);
 
         uint256 geniusBalBefore = usdc.balanceOf(genius);
@@ -1277,12 +1281,12 @@ contract EscrowFeeClaimTest is Test {
         address[] memory idiots = new address[](2);
         idiots[0] = idiot;
         idiots[1] = idiot2;
-        uint256[] memory cycles = new uint256[](2);
-        cycles[0] = cycle1;
-        cycles[1] = cycle2;
+        uint256[] memory batchIds = new uint256[](2);
+        batchIds[0] = batchId1;
+        batchIds[1] = batchId2;
 
         vm.prank(genius);
-        escrow.claimFeesBatch(idiots, cycles);
+        escrow.claimFeesBatch(idiots, batchIds);
 
         assertEq(usdc.balanceOf(genius), geniusBalBefore + expectedFee1 + expectedFee2, "Genius should receive both fees");
     }
@@ -1303,96 +1307,102 @@ contract EscrowFeeClaimTest is Test {
 
     function test_claimFees_emitsEvent() public {
         uint256 expectedFee = _createSignalAndPurchase();
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        mockAudit.markSettled(genius, idiot, cycle);
+        uint256 batchId = 0;
+        mockAudit.markSettled(genius, idiot, batchId);
+        mockAudit.recordClaimable(address(escrow), genius, idiot, batchId, expectedFee);
         vm.warp(block.timestamp + 48 hours + 1);
 
         vm.expectEmit(true, true, false, true);
-        emit Escrow.FeesClaimed(genius, idiot, cycle, expectedFee);
+        emit Escrow.FeesClaimed(genius, idiot, batchId, expectedFee);
 
         vm.prank(genius);
-        escrow.claimFees(idiot, cycle);
+        escrow.claimFees(idiot, batchId);
     }
 
     // ─── Dispute Window Tests ──────────────────────────────────────────
 
     function test_claimFees_reverts_before_dispute_window() public {
-        _createSignalAndPurchase();
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        uint256 expectedFee = _createSignalAndPurchase();
+        uint256 batchId = 0;
         uint256 settledAt = block.timestamp;
-        mockAudit.markSettled(genius, idiot, cycle);
+        mockAudit.markSettled(genius, idiot, batchId);
+        mockAudit.recordClaimable(address(escrow), genius, idiot, batchId, expectedFee);
 
         // Warp 1 second after settlement (within 48h window)
         vm.warp(settledAt + 1);
 
         uint256 claimableAt = settledAt + 48 hours;
         vm.expectRevert(
-            abi.encodeWithSelector(Escrow.ClaimTooEarly.selector, genius, idiot, cycle, claimableAt)
+            abi.encodeWithSelector(Escrow.ClaimTooEarly.selector, genius, idiot, batchId, claimableAt)
         );
         vm.prank(genius);
-        escrow.claimFees(idiot, cycle);
+        escrow.claimFees(idiot, batchId);
     }
 
     function test_claimFees_succeeds_after_dispute_window() public {
         uint256 expectedFee = _createSignalAndPurchase();
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        mockAudit.markSettled(genius, idiot, cycle);
+        uint256 batchId = 0;
+        mockAudit.markSettled(genius, idiot, batchId);
+        mockAudit.recordClaimable(address(escrow), genius, idiot, batchId, expectedFee);
 
         vm.warp(block.timestamp + 48 hours + 1);
 
         uint256 geniusBalBefore = usdc.balanceOf(genius);
         vm.prank(genius);
-        escrow.claimFees(idiot, cycle);
+        escrow.claimFees(idiot, batchId);
 
         assertEq(usdc.balanceOf(genius), geniusBalBefore + expectedFee, "Genius should receive fees");
-        assertEq(escrow.feePool(genius, idiot, cycle), 0, "Fee pool should be zero");
+        assertEq(escrow.batchClaimable(genius, idiot, batchId), 0, "Batch claimable should be zero");
     }
 
     function test_claimFeesBatch_reverts_before_dispute_window() public {
-        _createSignalAndPurchase();
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        uint256 expectedFee = _createSignalAndPurchase();
+        uint256 batchId = 0;
         uint256 settledAt = block.timestamp;
-        mockAudit.markSettled(genius, idiot, cycle);
+        mockAudit.markSettled(genius, idiot, batchId);
+        mockAudit.recordClaimable(address(escrow), genius, idiot, batchId, expectedFee);
 
         vm.warp(settledAt + 1);
 
         address[] memory idiots_ = new address[](1);
         idiots_[0] = idiot;
-        uint256[] memory cycles_ = new uint256[](1);
-        cycles_[0] = cycle;
+        uint256[] memory batchIds_ = new uint256[](1);
+        batchIds_[0] = batchId;
 
         uint256 claimableAt = settledAt + 48 hours;
         vm.expectRevert(
-            abi.encodeWithSelector(Escrow.ClaimTooEarly.selector, genius, idiot, cycle, claimableAt)
+            abi.encodeWithSelector(Escrow.ClaimTooEarly.selector, genius, idiot, batchId, claimableAt)
         );
         vm.prank(genius);
-        escrow.claimFeesBatch(idiots_, cycles_);
+        escrow.claimFeesBatch(idiots_, batchIds_);
     }
 
     function test_claimFeesBatch_succeeds_after_dispute_window() public {
         uint256 expectedFee = _createSignalAndPurchase();
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
-        mockAudit.markSettled(genius, idiot, cycle);
+        uint256 batchId = 0;
+        mockAudit.markSettled(genius, idiot, batchId);
+        mockAudit.recordClaimable(address(escrow), genius, idiot, batchId, expectedFee);
 
         vm.warp(block.timestamp + 48 hours + 1);
 
         address[] memory idiots_ = new address[](1);
         idiots_[0] = idiot;
-        uint256[] memory cycles_ = new uint256[](1);
-        cycles_[0] = cycle;
+        uint256[] memory batchIds_ = new uint256[](1);
+        batchIds_[0] = batchId;
 
         uint256 geniusBalBefore = usdc.balanceOf(genius);
         vm.prank(genius);
-        escrow.claimFeesBatch(idiots_, cycles_);
+        escrow.claimFeesBatch(idiots_, batchIds_);
 
         assertEq(usdc.balanceOf(genius), geniusBalBefore + expectedFee, "Genius should receive batched fees");
     }
 
     function test_claimFees_at_exact_boundary_succeeds() public {
         uint256 expectedFee = _createSignalAndPurchase();
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        uint256 batchId = 0;
         uint256 settledAt = block.timestamp;
-        mockAudit.markSettled(genius, idiot, cycle);
+        mockAudit.markSettled(genius, idiot, batchId);
+        mockAudit.recordClaimable(address(escrow), genius, idiot, batchId, expectedFee);
 
         // At exact boundary: block.timestamp == settledAt + 48h
         // The check is `block.timestamp < claimableAt`, so this should SUCCEED
@@ -1400,24 +1410,25 @@ contract EscrowFeeClaimTest is Test {
 
         uint256 geniusBalBefore = usdc.balanceOf(genius);
         vm.prank(genius);
-        escrow.claimFees(idiot, cycle);
+        escrow.claimFees(idiot, batchId);
 
         assertTrue(usdc.balanceOf(genius) > geniusBalBefore, "Claim at exact boundary should succeed");
     }
 
     function test_claimFees_one_second_before_boundary_reverts() public {
-        _createSignalAndPurchase();
-        uint256 cycle = account.getCurrentCycle(genius, idiot);
+        uint256 expectedFee = _createSignalAndPurchase();
+        uint256 batchId = 0;
         uint256 settledAt = block.timestamp;
-        mockAudit.markSettled(genius, idiot, cycle);
+        mockAudit.markSettled(genius, idiot, batchId);
+        mockAudit.recordClaimable(address(escrow), genius, idiot, batchId, expectedFee);
 
         vm.warp(settledAt + 48 hours - 1);
 
         uint256 claimableAt = settledAt + 48 hours;
         vm.expectRevert(
-            abi.encodeWithSelector(Escrow.ClaimTooEarly.selector, genius, idiot, cycle, claimableAt)
+            abi.encodeWithSelector(Escrow.ClaimTooEarly.selector, genius, idiot, batchId, claimableAt)
         );
         vm.prank(genius);
-        escrow.claimFees(idiot, cycle);
+        escrow.claimFees(idiot, batchId);
     }
 }

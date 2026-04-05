@@ -509,7 +509,7 @@ def create_app(
                     timeout=60.0,
                 )
             else:
-                # No peer assigned: use our own local sidecar as notary.
+                # No peer assigned: use local sidecar directly.
                 _local_notary_port = int(os.getenv("NOTARY_PORT", "8091"))
                 try:
                     result = await asyncio.wait_for(
@@ -517,16 +517,15 @@ def create_app(
                             request.url,
                             notary_host="127.0.0.1",
                             notary_port=_local_notary_port,
-                            timeout=60.0,
+                            timeout=90.0,
                         ),
-                        timeout=75.0,
+                        timeout=100.0,
                     )
                 except (TimeoutError, asyncio.TimeoutError):
                     result = tlsn_module.TLSNProofResult(success=False, error=f"local notary timeout ({_local_notary_port})")
 
             # If the first attempt failed (peer timeout or sidecar error),
-            # fall back to the local sidecar. Avoid spawning ephemeral notaries
-            # which leak processes and eat CPU when not properly cleaned up.
+            # fall back to the local sidecar with a longer timeout.
             if not result.success and _using_peer:
                 _local_notary_port = int(os.getenv("NOTARY_PORT", "8091"))
                 log.info(
@@ -541,9 +540,9 @@ def create_app(
                             request.url,
                             notary_host="127.0.0.1",
                             notary_port=_local_notary_port,
-                            timeout=60.0,
+                            timeout=90.0,
                         ),
-                        timeout=75.0,
+                        timeout=100.0,
                     )
                 except (TimeoutError, asyncio.TimeoutError):
                     result = tlsn_module.TLSNProofResult(success=False, error="local sidecar fallback timeout")
