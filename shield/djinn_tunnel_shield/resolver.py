@@ -65,6 +65,27 @@ class ShieldResolver:
 
     # -- Data ingestion --
 
+    @staticmethod
+    def _is_safe_tunnel_url(url: str) -> bool:
+        """Validate tunnel URL to prevent SSRF via miner-controlled data."""
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return False
+        if parsed.scheme not in ("https",):
+            return False
+        host = parsed.hostname or ""
+        # Block private/loopback IPs and metadata endpoints
+        if not host or host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+            return False
+        # Block common cloud metadata IPs
+        for prefix in ("169.254.", "10.", "172.16.", "172.17.", "172.18.",
+                       "172.19.", "172.2", "172.30.", "172.31.", "192.168."):
+            if host.startswith(prefix):
+                return False
+        return True
+
     def cache_from_health(self, uid: int, health_data: dict) -> None:
         """Cache a tunnel URL from a miner's health response.
 
@@ -73,6 +94,8 @@ class ShieldResolver:
         url = health_data.get("tunnel_url")
         if not url or not isinstance(url, str):
             return
+        if not self._is_safe_tunnel_url(url):
+            return
         entry = self._entry(uid)
         if entry.tunnel_source != "commitment":
             entry.tunnel_url = url
@@ -80,6 +103,8 @@ class ShieldResolver:
 
     def cache_from_commitment(self, uid: int, tunnel_url: str) -> None:
         """Cache a tunnel URL from an on-chain commitment (higher trust)."""
+        if not self._is_safe_tunnel_url(tunnel_url):
+            return
         entry = self._entry(uid)
         entry.tunnel_url = tunnel_url
         entry.tunnel_source = "commitment"
