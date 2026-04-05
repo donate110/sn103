@@ -113,15 +113,17 @@ export function handleCollateralWithdrawn(event: Withdrawn): void {
     event.params.genius,
     event.block.timestamp
   );
-  position.deposited = position.deposited.minus(event.params.amount);
+  position.deposited = position.deposited.gt(event.params.amount)
+    ? position.deposited.minus(event.params.amount)
+    : BigInt.zero();
   updateAvailable(position);
   position.lastUpdatedAt = event.block.timestamp;
   position.save();
 
   let genius = getOrCreateGenius(event.params.genius, event.block.timestamp);
-  genius.collateralDeposited = genius.collateralDeposited.minus(
-    event.params.amount
-  );
+  genius.collateralDeposited = genius.collateralDeposited.gt(event.params.amount)
+    ? genius.collateralDeposited.minus(event.params.amount)
+    : BigInt.zero();
   genius.save();
 }
 
@@ -168,7 +170,9 @@ export function handleCollateralSlashed(event: Slashed): void {
     event.params.genius,
     event.block.timestamp
   );
-  position.deposited = position.deposited.minus(event.params.amount);
+  position.deposited = position.deposited.gt(event.params.amount)
+    ? position.deposited.minus(event.params.amount)
+    : BigInt.zero();
   position.totalSlashed = position.totalSlashed.plus(event.params.amount);
   // Cap locked at deposited after slash (mirrors contract logic)
   if (position.locked.gt(position.deposited)) {
@@ -179,9 +183,9 @@ export function handleCollateralSlashed(event: Slashed): void {
   position.save();
 
   let genius = getOrCreateGenius(event.params.genius, event.block.timestamp);
-  genius.collateralDeposited = genius.collateralDeposited.minus(
-    event.params.amount
-  );
+  genius.collateralDeposited = genius.collateralDeposited.gt(event.params.amount)
+    ? genius.collateralDeposited.minus(event.params.amount)
+    : BigInt.zero();
   genius.totalSlashed = genius.totalSlashed.plus(event.params.amount);
   if (genius.collateralLocked.gt(genius.collateralDeposited)) {
     genius.collateralLocked = genius.collateralDeposited;
