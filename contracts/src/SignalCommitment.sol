@@ -257,10 +257,12 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
         }
 
         // Collateral gate: genius must have enough free collateral to cover
-        // the worst-case SLA payout for this signal's full notional capacity.
-        // Skipped when collateral is not set (pre-upgrade backwards compat).
+        // the worst-case SLA payout + protocol fee for this signal's full
+        // notional capacity. The protocol fee (0.5%) is locked at purchase
+        // time, so we include it here to prevent commit-time under-estimation.
         if (collateral != address(0) && p.maxNotional > 0) {
-            uint256 requiredLock = (p.maxNotional * p.slaMultiplierBps) / 10_000;
+            uint256 protocolFeeLock = (p.maxNotional * 50) / 10_000; // 0.5%
+            uint256 requiredLock = (p.maxNotional * p.slaMultiplierBps) / 10_000 + protocolFeeLock;
             uint256 available;
             // Use low-level call to avoid import dependency on Collateral
             (bool ok, bytes memory ret) = collateral.staticcall(

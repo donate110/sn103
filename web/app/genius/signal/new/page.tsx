@@ -324,7 +324,7 @@ export default function CreateSignal() {
     // Collateral gate: block signal creation without sufficient collateral
     const mn = parseFloat(maxNotional) || 0;
     const sla = parseFloat(slaMultiplier) || 100;
-    const requiredCollateral = BigInt(Math.round(mn * (sla / 100) * 1e6));
+    const requiredCollateral = BigInt(Math.round(mn * (sla / 100 + 0.005) * 1e6));
     if (collateralAvailable < requiredCollateral) {
       const shortfall = Number(requiredCollateral - collateralAvailable) / 1e6;
       setStepError(`Insufficient collateral. Deposit $${shortfall.toLocaleString("en-US")} more before creating this signal.`);
@@ -1499,7 +1499,7 @@ export default function CreateSignal() {
             const mn = parseFloat(maxNotional);
             const sla = parseFloat(slaMultiplier);
             if (!isNaN(mn) && mn > 0 && !isNaN(sla) && sla > 0) {
-              const maxLock = mn * sla / 100;
+              const maxLock = mn * (sla / 100 + 0.005); // SLA + 0.5% protocol fee
               return (
                 <p className="text-xs text-slate-500 mt-1">
                   At max notional, <span className="font-semibold text-genius-700">${maxLock.toLocaleString()}</span> of your collateral would be locked.
@@ -1633,7 +1633,7 @@ export default function CreateSignal() {
         {(() => {
           const maxNotionalUsdc = parseFloat(maxNotional) || 0;
           const slaPct = parseFloat(slaMultiplier) || 100;
-          const requiredCollateral = BigInt(Math.round(maxNotionalUsdc * (slaPct / 100) * 1e6));
+          const requiredCollateral = BigInt(Math.round(maxNotionalUsdc * (slaPct / 100 + 0.005) * 1e6));
           const hasEnough = collateralAvailable >= requiredCollateral;
 
           if (!hasEnough) {
@@ -1647,7 +1647,7 @@ export default function CreateSignal() {
                   Deposit ${needed.toLocaleString("en-US")} more to create this signal
                 </p>
                 <p className="text-xs text-amber-600 mb-3">
-                  This signal locks ${(Number(requiredCollateral) / 1e6).toLocaleString()} of collateral (${maxNotionalUsdc.toLocaleString()} notional &times; {slaPct}% SLA).
+                  This signal locks ${(Number(requiredCollateral) / 1e6).toLocaleString()} of collateral (${maxNotionalUsdc.toLocaleString()} notional &times; {slaPct}% SLA + 0.5% protocol fee).
                   {" "}You have ${(Number(collateralAvailable) / 1e6).toLocaleString()} unlocked but need ${(Number(requiredCollateral) / 1e6).toLocaleString()}.
                   {walletHasUsdc ? ` Deposit from your $${(Number(walletUsdc) / 1e6).toLocaleString()} wallet balance below.` : ""}
                 </p>
@@ -1732,7 +1732,7 @@ export default function CreateSignal() {
                 || isNaN(hrs) || hrs < 1 || hrs > 168
                 || isNaN(mn) || mn < 1) return true;
               // Block submission if collateral is insufficient
-              const requiredCollateral = BigInt(Math.round(mn * (sla / 100) * 1e6));
+              const requiredCollateral = BigInt(Math.round(mn * (sla / 100 + 0.005) * 1e6));
               if (collateralAvailable < requiredCollateral) return true;
               return false;
             })()}

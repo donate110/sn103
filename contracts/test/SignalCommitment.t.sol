@@ -764,8 +764,8 @@ contract SignalCommitmentTest is Test {
         // Deploy a mock collateral that returns enough available
         MockCollateral mock = new MockCollateral();
         // Default params: maxNotional=10_000e6, slaMultiplierBps=15_000
-        // Required: 10_000e6 * 15_000 / 10_000 = 15_000e6
-        mock.setAvailable(genius, 15_000e6);
+        // Required: 10_000e6 * 15_000 / 10_000 + 10_000e6 * 50 / 10_000 = 15_050e6
+        mock.setAvailable(genius, 15_050e6);
         sc.setCollateral(address(mock));
 
         _commitDefault(7002);
@@ -774,7 +774,7 @@ contract SignalCommitmentTest is Test {
 
     function test_commit_withCollateralInsufficientReverts() public {
         MockCollateral mock = new MockCollateral();
-        // Set available below required (15_000e6)
+        // Set available below required (15_050e6 with protocol fee)
         mock.setAvailable(genius, 10_000e6);
         sc.setCollateral(address(mock));
 
@@ -784,7 +784,7 @@ contract SignalCommitmentTest is Test {
                 SignalCommitment.InsufficientCollateral.selector,
                 genius,
                 10_000e6,
-                15_000e6
+                15_050e6
             )
         );
         sc.commit(_defaultParams(7003));
