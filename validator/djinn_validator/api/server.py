@@ -3080,34 +3080,164 @@ def create_app(
     async def check_odds(signal_id: str, req: CheckOddsRequest) -> CheckOddsResponse:
         """Fetch current odds for BPA/WPA pricing at purchase time.
 
-        TODO: Fan out to miners to fetch live odds. For now, returns
-        stored line prices as placeholders.
+        Fans out to miners via /v1/check, filters results by the buyer's
+        sportsbooks, and computes BPA (best price available) and WPA
+        (worst price available) per line. Falls back to stored line
+        prices when no miners are reachable.
         """
+        import json as _json
+        import random as _random
+        import time as _time
+        from djinn_validator.api.middleware import create_signed_headers
+
         _validate_signal_id_path(signal_id)
 
-        # Get stored signal metadata
         signal_meta = outcome_attestor.get_signal(signal_id)
         if signal_meta is None:
             raise HTTPException(status_code=404, detail="Signal not registered on this validator")
 
-        # Build odds array from stored lines
+        # Convert stored ParsedPick lines to CandidateLine dicts for the miner
+        candidate_lines: list[dict] = []
+        for i, pick in enumerate(signal_meta.lines):
+            candidate_lines.append({
+                "index": i + 1,
+                "sport": signal_meta.sport,
+                "event_id": signal_meta.event_id,
+                "home_team": signal_meta.home_team,
+                "away_team": signal_meta.away_team,
+                "market": pick.market,
+                "line": pick.line,
+                "side": pick.team if pick.market in ("spreads", "h2h") else pick.side,
+            })
+
+        # Fan out to miners (same pattern as /v1/check)
+        MAX_CHECK_MINERS = 10
+        miner_data: list[dict] = []
+        miner_source = "stored"
+
+        if neuron:
+            miner_uids = neuron.get_miner_uids()
+            if miner_uids:
+                _random.shuffle(miner_uids)
+                targets: list[tuple[int, str]] = []
+                for uid in miner_uids:
+                    axon = neuron.get_axon_info(uid)
+                    ip = axon.get("ip", "")
+                    port = axon.get("port", 0)
+                    if not ip or not port or ip in ("0.0.0.0", "127.0.0.1"):
+                        continue
+                    targets.append((uid, f"http://{ip}:{port}/v1/check"))
+                    if len(targets) >= MAX_CHECK_MINERS:
+                        break
+
+                if targets:
+                    body = _json.dumps({"lines": candidate_lines}).encode()
+                    auth_headers: dict[str, str] = {}
+                    if neuron.wallet:
+                        auth_headers = create_signed_headers("/v1/check", body, neuron.wallet)
+
+                    async def _query(uid: int, url: str) -> tuple[int, dict | None]:
+                        try:
+                            async with httpx.AsyncClient() as client:
+                                resp = await client.post(
+                                    url,
+                                    content=body,
+                                    headers={"Content-Type": "application/json", **auth_headers},
+                                    timeout=10.0,
+                                )
+                            if resp.status_code != 200:
+                                return (uid, None)
+                            data = resp.json()
+                            if data.get("api_error") and not data.get("available_indices"):
+                                return (uid, None)
+                            return (uid, data)
+                        except Exception as e:
+                            log.warning("check_odds_miner_failed", miner_uid=uid, error=str(e)[:100])
+                            return (uid, None)
+
+                    results = await asyncio.gather(*[_query(uid, url) for uid, url in targets])
+                    for _uid, data in results:
+                        if data and data.get("results"):
+                            miner_data.append(data)
+
+        # Merge miner results: union of bookmaker data per line index
+        merged_by_index: dict[int, list[dict]] = {}
+        if miner_data:
+            miner_source = "miner"
+            for data in miner_data:
+                for lr in data.get("results", []):
+                    idx = lr.get("index")
+                    if idx is None:
+                        continue
+                    if idx not in merged_by_index:
+                        merged_by_index[idx] = []
+                    for bm in lr.get("bookmakers", []):
+                        merged_by_index[idx].append(bm)
+
+        # Normalize buyer_books to lowercase for matching
+        buyer_books_lower = {b.lower() for b in req.buyer_books}
+
+        # Build odds response per line
         odds_list: list[LineOdds] = []
-        for i, line in enumerate(signal_meta.lines):
-            # TODO: fetch live odds from miner, filter by buyer_books
-            # For now, use stored odds as placeholder
-            price = line.odds or 0
-            odds_list.append(LineOdds(
-                index=i + 1,
-                bpa=float(price) if price else 0,
-                wpa=float(price) if price else 0,
-                executable=price is not None and price != 0,
-            ))
+        for i, pick in enumerate(signal_meta.lines):
+            idx = i + 1
+            bm_results = merged_by_index.get(idx, [])
+
+            # Filter to buyer's books
+            filtered = [
+                bm for bm in bm_results
+                if bm.get("bookmaker", "").lower() in buyer_books_lower
+            ]
+
+            if filtered:
+                prices = [bm["odds"] for bm in filtered if bm.get("odds")]
+                if prices:
+                    bpa = max(prices)
+                    wpa = min(prices)
+                    odds_list.append(LineOdds(
+                        index=idx, bpa=bpa, wpa=wpa, executable=True,
+                    ))
+                    continue
+
+            # Fallback: use stored price if no miner data for this line
+            stored_price = pick.odds or 0
+            # Convert American odds to decimal for consistency
+            if stored_price and stored_price != 0:
+                if stored_price > 0:
+                    dec = 1.0 + stored_price / 100.0
+                else:
+                    dec = 1.0 + 100.0 / abs(stored_price)
+                odds_list.append(LineOdds(
+                    index=idx, bpa=dec, wpa=dec,
+                    executable=miner_source == "stored",
+                ))
+            else:
+                odds_list.append(LineOdds(
+                    index=idx, bpa=0, wpa=0, executable=False,
+                ))
+
+        if miner_source == "stored":
+            log.warning(
+                "check_odds_fallback",
+                signal_id=signal_id,
+                msg="No miners reachable, using stored line prices",
+            )
+
+        # Read bpa_mode from on-chain signal if chain client available
+        bpa_mode = False
+        if chain_client:
+            try:
+                on_chain = await chain_client.get_signal(int(signal_id))
+                bpa_mode = bool(on_chain.get("bpaMode", False))
+            except Exception:
+                pass
 
         return CheckOddsResponse(
             signal_id=signal_id,
             line_count=len(signal_meta.lines),
             odds=odds_list,
-            bpa_mode=False,  # TODO: read from on-chain signal
+            bpa_mode=bpa_mode,
+            source=miner_source,
         )
 
     # ------------------------------------------------------------------

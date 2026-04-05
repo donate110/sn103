@@ -521,9 +521,6 @@ export default function PurchaseSignal() {
           return;
         }
 
-        // Store full check results so we can find best bookmaker after decryption
-        checkResultRef.current = checkResult;
-        setAvailableIndices(checkResult.available_indices);
         console.log("[purchase] available_indices:", checkResult.available_indices,
           "total_lines:", candidateLines.length,
           "source:", (checkResult as unknown as Record<string, unknown>).source || "miner",
@@ -545,11 +542,75 @@ export default function PurchaseSignal() {
           }
         }
       } else {
-        console.log("[purchase] v2 signal: skipping client-side line check, validators handle it");
+        // v2 signal: fetch live odds through validator's check-odds endpoint
+        setStep("checking_lines");
+        console.log("[purchase] v2 signal, fetching odds through validator");
+        try {
+          const validators = await discoverValidatorClients();
+          const savedBooks = localStorage.getItem(`djinn:books:${buyerAddress.toLowerCase()}`);
+          const buyerBooks: string[] = savedBooks ? JSON.parse(savedBooks) : ["draftkings", "fanduel", "betmgm"];
+
+          const oddsResult = await Promise.any(
+            validators.map(async (v) => {
+              const resp = await fetch(`${v.baseUrl}/v1/signal/${signalId}/check-odds`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  buyer_address: buyerAddress,
+                  buyer_books: buyerBooks,
+                }),
+                signal: AbortSignal.timeout(15_000),
+              });
+              if (!resp.ok) throw new Error(`${resp.status}`);
+              return resp.json();
+            }),
+          );
+
+          const executableIndices = (oddsResult.odds || [])
+            .filter((o: { executable: boolean }) => o.executable)
+            .map((o: { index: number }) => o.index);
+
+          if (executableIndices.length === 0) {
+            setStepError("No lines currently executable at your sportsbooks.");
+            setStep("idle");
+            purchaseInFlight.current = false;
+            return;
+          }
+
+          checkResult = {
+            results: (oddsResult.odds || []).map((o: { index: number; executable: boolean; bpa?: number }) => ({
+              index: o.index,
+              available: o.executable,
+              bookmakers: o.bpa ? [{ bookmaker: "aggregated", odds: o.bpa }] : [],
+            })),
+            available_indices: executableIndices,
+            response_time_ms: 0,
+          };
+
+          for (const o of oddsResult.odds || []) {
+            if (o.executable && o.bpa > bestOdds) bestOdds = o.bpa;
+          }
+        } catch (e) {
+          console.warn("[purchase] v2 odds check failed, using fallback:", e);
+          const lineCount = signal.lineCount || 10;
+          checkResult = {
+            results: Array.from({ length: lineCount }, (_, i) => ({
+              index: i + 1, available: true, bookmakers: [],
+            })),
+            available_indices: Array.from({ length: lineCount }, (_, i) => i + 1),
+            response_time_ms: 0,
+          };
+        }
+      }
+
+      // Store check results for post-purchase bookmaker lookup
+      if (checkResult) {
+        checkResultRef.current = checkResult;
+        setAvailableIndices(checkResult.available_indices);
       }
       setMarketOdds(bestOdds);
 
-      // Step 2: Verify availability with validators (MPC check — before payment)
+      // Step 2: Verify availability with validators (MPC check -- before payment)
       console.log(`[purchase] Step 1 (line check) took ${((performance.now() - t0) / 1000).toFixed(1)}s`);
       setStep("purchasing_validator");
 
