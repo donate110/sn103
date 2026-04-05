@@ -5,6 +5,7 @@ import {
   SignalPurchased,
   OutcomeUpdated,
   FeesClaimed,
+  Refunded,
 } from "../generated/Escrow/Escrow";
 import {
   Purchase,
@@ -85,6 +86,7 @@ function getOrCreateProtocolStats(): ProtocolStats {
     stats.totalProtocolFees = BigInt.zero();
     stats.totalCollateralDeposited = BigInt.zero();
     stats.totalCollateralSlashed = BigInt.zero();
+    stats.totalRefunds = BigInt.zero();
     stats.uniqueGeniuses = BigInt.zero();
     stats.uniqueIdiots = BigInt.zero();
   }
@@ -212,4 +214,14 @@ export function handleFeesClaimed(event: FeesClaimed): void {
     genius.totalFeesClaimed = genius.totalFeesClaimed.plus(event.params.amount);
     genius.save();
   }
+}
+
+export function handleRefunded(event: Refunded): void {
+  let idiot = getOrCreateIdiot(event.params.idiot, event.block.timestamp);
+  idiot.escrowBalance = idiot.escrowBalance.plus(event.params.amount);
+  idiot.save();
+
+  let stats = getOrCreateProtocolStats();
+  stats.totalRefunds = stats.totalRefunds.plus(event.params.amount);
+  stats.save();
 }
