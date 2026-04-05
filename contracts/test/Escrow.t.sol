@@ -90,7 +90,10 @@ contract EscrowIntegrationTest is Test {
                 minNotional: 0,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: _buildDecoyLines(),
-                availableSportsbooks: _buildSportsbooks()
+                availableSportsbooks: _buildSportsbooks(),
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
     }
@@ -396,7 +399,10 @@ contract EscrowIntegrationTest is Test {
                 minNotional: 0,
                     expiresAt: block.timestamp + 1 days,
                     decoyLines: _buildDecoyLines(),
-                    availableSportsbooks: _buildSportsbooks()
+                    availableSportsbooks: _buildSportsbooks(),
+                    linesHash: bytes32(0),
+                    lineCount: 0,
+                    bpaMode: false
                 })
             );
 
@@ -452,7 +458,10 @@ contract EscrowIntegrationTest is Test {
                 minNotional: 0,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: _buildDecoyLines(),
-                availableSportsbooks: _buildSportsbooks()
+                availableSportsbooks: _buildSportsbooks(),
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
     }
@@ -616,7 +625,10 @@ contract EscrowIntegrationTest is Test {
                 minNotional: 0,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: _buildDecoyLines(),
-                availableSportsbooks: _buildSportsbooks()
+                availableSportsbooks: _buildSportsbooks(),
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
 
@@ -695,7 +707,10 @@ contract EscrowIntegrationTest is Test {
                 minNotional: 0,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: _buildDecoyLines(),
-                availableSportsbooks: _buildSportsbooks()
+                availableSportsbooks: _buildSportsbooks(),
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
 
@@ -968,7 +983,10 @@ contract EscrowIntegrationTest is Test {
                 minNotional: 100e6, // min 100 USDC
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: _buildDecoyLines(),
-                availableSportsbooks: _buildSportsbooks()
+                availableSportsbooks: _buildSportsbooks(),
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
 
@@ -998,7 +1016,10 @@ contract EscrowIntegrationTest is Test {
                 minNotional: 100e6,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: _buildDecoyLines(),
-                availableSportsbooks: _buildSportsbooks()
+                availableSportsbooks: _buildSportsbooks(),
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
 
@@ -1030,7 +1051,10 @@ contract EscrowIntegrationTest is Test {
                 minNotional: 500e6,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: _buildDecoyLines(),
-                availableSportsbooks: _buildSportsbooks()
+                availableSportsbooks: _buildSportsbooks(),
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
 
@@ -1135,7 +1159,10 @@ contract EscrowFeeClaimTest is Test {
                 minNotional: 0,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: _buildDecoyLines(),
-                availableSportsbooks: _buildSportsbooks()
+                availableSportsbooks: _buildSportsbooks(),
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
 
@@ -1246,7 +1273,10 @@ contract EscrowFeeClaimTest is Test {
                 minNotional: 0,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: _buildDecoyLines(),
-                availableSportsbooks: _buildSportsbooks()
+                availableSportsbooks: _buildSportsbooks(),
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
 

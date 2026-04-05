@@ -168,8 +168,9 @@ def _validator_code_changed(repo: Path, old_sha: str) -> bool:
         if r.returncode != 0:
             return True  # assume changed if diff fails
         changed = r.stdout.strip().splitlines()
-        # Only restart for validator/, miner/, or root config changes
-        relevant_prefixes = ("validator/", "miner/", "contracts/", "pyproject.toml", "uv.lock")
+        # Only restart for validator/ or shared config changes.
+        # Miner changes don't require a validator restart.
+        relevant_prefixes = ("validator/", "shield/", "pyproject.toml", "uv.lock")
         return any(f.startswith(relevant_prefixes) for f in changed)
     except Exception:
         return True  # restart on error to be safe

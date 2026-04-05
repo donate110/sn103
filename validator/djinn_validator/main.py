@@ -245,7 +245,7 @@ async def epoch_loop(
 
             responded = sum(
                 1 for uid in miner_uids
-                if (m := scorer.get(uid)) is not None and m.health_checks_responded > 0
+                if (m := scorer.get(uid)) is not None and m.ema_uptime > 0.001
             ) if miner_uids else 0
             failed_uids = [
                 uid for uid in miner_uids

@@ -29,7 +29,14 @@ export {
 
 export {
   encryptSignal,
+  computeLinesHash,
   type EncryptedSignal,
   type SignalConfig,
   type ValidatorInfo,
 } from "./signal";
+
+export {
+  jiggerLineOdds,
+  computeOddsDelta,
+  type JiggerConfig,
+} from "./jigger";

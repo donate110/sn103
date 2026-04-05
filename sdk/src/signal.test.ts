@@ -131,15 +131,15 @@ describe("encryptSignal", () => {
     expect(result.blob).not.toContain("evt_123");
   });
 
-  it("throws for wrong number of decoys", async () => {
+  it("throws for zero decoys", async () => {
     await expect(
       encryptSignal({
         pick: mockPick,
-        decoys: mockDecoys.slice(0, 5),
+        decoys: [],
         validators: mockValidators,
         shamirK: 2,
       }),
-    ).rejects.toThrow("Expected 9 decoys");
+    ).rejects.toThrow("Need at least 1 decoy");
   });
 
   it("randomizes the real pick position", async () => {

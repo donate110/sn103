@@ -833,12 +833,13 @@ class TestRegisterSignal:
         assert resp.status_code == 422
 
     def test_register_wrong_line_count(self, client: TestClient) -> None:
+        # Only 1 line is below the minimum of 2
         resp = client.post("/v1/signal/sig-002/register", json={
             "sport": "basketball_nba",
             "event_id": "event-001",
             "home_team": "A",
             "away_team": "B",
-            "lines": ["Lakers -3.5 (-110)", "Celtics +3.5 (-110)"],
+            "lines": ["Lakers -3.5 (-110)"],
         })
         assert resp.status_code == 422
 

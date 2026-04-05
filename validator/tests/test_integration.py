@@ -750,8 +750,8 @@ class TestMultiEpochScoring:
         assert m.queries_correct == 0
         assert m.latencies == []
         assert m.proofs_submitted == 0
-        assert m.health_checks_total == 0
-        assert m.health_checks_responded == 0
+        assert m.health_checks_total == 1      # lifetime counter, not reset
+        assert m.health_checks_responded == 1  # lifetime counter, not reset
         assert m.consecutive_epochs == 11  # Incremented because miner participated
 
     def test_reset_epoch_resets_inactive_miner(self, scorer: MinerScorer) -> None:

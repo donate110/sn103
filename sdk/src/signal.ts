@@ -18,6 +18,7 @@ import {
   toHex,
   type ShamirShare,
 } from "./crypto";
+import { keccak256, AbiCoder } from "ethers";
 
 export interface ValidatorInfo {
   uid: number;
@@ -36,13 +37,19 @@ export interface SignalConfig {
 }
 
 export interface EncryptedSignal {
-  /** Hex-encoded encrypted blob containing all 10 lines */
+  /** Hex-encoded encrypted blob containing all lines */
   blob: string;
   /** Hex-encoded IV for AES-GCM */
   iv: string;
   /** Keccak256 hash of the blob (for on-chain commitment) */
   hash: string;
-  /** The real pick's index within the 10 lines (1-indexed, for Shamir) */
+  /** Keccak256 hash of the serialized lines array (for on-chain tamper seal) */
+  linesHash: string;
+  /** Total number of lines (1 real + N decoys) */
+  lineCount: number;
+  /** JSON-serialized lines for validator distribution */
+  serializedLines: string[];
+  /** The real pick's index within the lines (1-indexed, for Shamir) */
   realIndex: number;
   /** Per-validator shares: key share and index share */
   shares: {
@@ -66,17 +73,17 @@ export interface EncryptedSignal {
 export async function encryptSignal(config: SignalConfig): Promise<EncryptedSignal> {
   const { pick, decoys, validators, shamirK } = config;
 
-  if (decoys.length !== 9) {
-    throw new Error(`Expected 9 decoys, got ${decoys.length}`);
+  if (decoys.length < 1) {
+    throw new Error("Need at least 1 decoy");
   }
 
-  // Place the real pick at a random position among the 10 lines
-  const realIndex = Math.floor(Math.random() * 10); // 0-indexed
+  // Place the real pick at a random position among all lines
   const lines: Record<string, unknown>[] = [...decoys];
+  const realIndex = Math.floor(Math.random() * (lines.length + 1)); // 0-indexed, any position including end
   lines.splice(realIndex, 0, pick);
 
-  if (lines.length !== 10) {
-    throw new Error(`Expected 10 lines after insertion, got ${lines.length}`);
+  if (lines.length < 2) {
+    throw new Error(`Expected at least 2 lines after insertion, got ${lines.length}`);
   }
 
   // Encrypt the 10 lines as JSON
@@ -106,14 +113,30 @@ export async function encryptSignal(config: SignalConfig): Promise<EncryptedSign
     shareX: keyShares[i].x,
   }));
 
+  // Compute lines hash for on-chain tamper seal
+  const serializedLines = lines.map((l) => JSON.stringify(l));
+  const linesHash = computeLinesHash(serializedLines);
+
   return {
     blob: ciphertext,
     iv,
     hash,
+    linesHash,
+    lineCount: lines.length,
+    serializedLines,
     realIndex: realIndex + 1, // 1-indexed
     shares,
     localKey: aesKey,
   };
+}
+
+/**
+ * Compute keccak256 hash of a string array (abi-encoded).
+ * Used as on-chain tamper seal for the line set.
+ */
+export function computeLinesHash(lines: string[]): string {
+  const encoded = AbiCoder.defaultAbiCoder().encode(["string[]"], [lines]);
+  return keccak256(encoded);
 }
 
 function hexToBytes(hex: string): Uint8Array {

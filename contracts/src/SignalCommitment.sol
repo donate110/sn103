@@ -7,9 +7,10 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {Signal, SignalStatus} from "./interfaces/IDjinn.sol";
 
-/// @title SignalCommitment
+/// @title SignalCommitment (v2)
 /// @notice Stores encrypted signal commitments for the Djinn Protocol.
-///         A Genius commits an encrypted signal with 10 decoy lines (9 decoys + 1 real).
+///         v1: A Genius commits an encrypted signal with 10 decoy lines (9 decoys + 1 real).
+///         v2: Decoy lines move off-chain; only a keccak256 hash and line count are stored.
 ///         The real signal content remains hidden inside the AES-256-GCM encrypted blob.
 /// @dev Signal IDs are externally generated and must be globally unique.
 ///
@@ -38,6 +39,10 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
         uint256 expiresAt;
         string[] decoyLines;
         string[] availableSportsbooks;
+        // v2 fields
+        bytes32 linesHash;
+        uint16 lineCount;
+        bool bpaMode;
     }
 
     // ─── Storage
@@ -99,8 +104,14 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
     /// @notice Signal ID does not exist
     error SignalNotFound(uint256 signalId);
 
-    /// @notice decoyLines must contain exactly 10 entries
+    /// @notice decoyLines must contain exactly 10 entries (v1 only)
     error InvalidDecoyLinesLength(uint256 provided);
+
+    /// @notice v2: linesHash must not be zero when using off-chain decoys
+    error ZeroLinesHash();
+
+    /// @notice v2: lineCount must be between MIN_LINE_COUNT and MAX_LINE_COUNT
+    error InvalidLineCount(uint16 provided);
 
     /// @notice slaMultiplierBps must be >= 10000 (100%)
     error SlaMultiplierTooLow(uint256 provided);
@@ -166,6 +177,12 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
     /// @notice Maximum length per sportsbook name (256 bytes)
     uint256 public constant MAX_SPORTSBOOK_LENGTH = 256;
 
+    /// @notice v2: Minimum number of lines (1 real + 1 decoy)
+    uint16 public constant MIN_LINE_COUNT = 2;
+
+    /// @notice v2: Maximum number of lines
+    uint16 public constant MAX_LINE_COUNT = 2000;
+
     // ─── Modifiers
     // ──────────────────────────────────────────────────────
 
@@ -204,8 +221,10 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
 
     /// @notice Commit a new encrypted signal on-chain
     /// @dev The encrypted blob contains the real signal encrypted with AES-256-GCM.
-    ///      The 10 decoy lines obscure which line is the real signal.
-    ///      Uses a struct parameter to avoid stack-too-deep with 9 inputs.
+    ///      v1: 10 decoy lines stored on-chain (linesHash == 0, decoyLines populated).
+    ///      v2: Decoy lines off-chain, only linesHash + lineCount stored (linesHash != 0).
+    ///      Auto-detects v1 vs v2 based on p.linesHash.
+    ///      Uses a struct parameter to avoid stack-too-deep with 9+ inputs.
     /// @param p CommitParams struct containing all signal data
     function commit(CommitParams calldata p) external whenNotPaused {
         if (_exists[p.signalId]) revert SignalAlreadyExists(p.signalId);
@@ -213,7 +232,6 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
         if (p.encryptedBlob.length > MAX_BLOB_SIZE) revert BlobTooLarge(p.encryptedBlob.length, MAX_BLOB_SIZE);
         if (p.availableSportsbooks.length > MAX_SPORTSBOOKS) revert TooManySportsbooks(p.availableSportsbooks.length, MAX_SPORTSBOOKS);
         if (p.commitHash == bytes32(0)) revert ZeroCommitHash();
-        if (p.decoyLines.length != 10) revert InvalidDecoyLinesLength(p.decoyLines.length);
         if (bytes(p.sport).length > MAX_SPORT_LENGTH) revert StringTooLong("sport", bytes(p.sport).length, MAX_SPORT_LENGTH);
         if (p.slaMultiplierBps < 10_000) revert SlaMultiplierTooLow(p.slaMultiplierBps);
         if (p.slaMultiplierBps > 30_000) revert SlaMultiplierTooHigh(p.slaMultiplierBps);
@@ -226,11 +244,25 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
             revert InvalidNotionalRange(p.minNotional, p.maxNotional);
         }
 
+        // v1/v2 decoy validation: auto-detect based on linesHash
+        bool isV2 = p.linesHash != bytes32(0);
+        if (isV2) {
+            // v2: validate lineCount, skip decoyLines loop
+            if (p.lineCount < MIN_LINE_COUNT || p.lineCount > MAX_LINE_COUNT) {
+                revert InvalidLineCount(p.lineCount);
+            }
+        } else {
+            // v1: exactly 10 on-chain decoy lines required
+            if (p.decoyLines.length != 10) revert InvalidDecoyLinesLength(p.decoyLines.length);
+        }
+
         // Collateral gate: genius must have enough free collateral to cover
-        // the worst-case SLA payout for this signal's full notional capacity.
-        // Skipped when collateral is not set (pre-upgrade backwards compat).
+        // the worst-case SLA payout + protocol fee for this signal's full
+        // notional capacity. The protocol fee (0.5%) is locked at purchase
+        // time, so we include it here to prevent commit-time under-estimation.
         if (collateral != address(0) && p.maxNotional > 0) {
-            uint256 requiredLock = (p.maxNotional * p.slaMultiplierBps) / 10_000;
+            uint256 protocolFeeLock = (p.maxNotional * 50) / 10_000; // 0.5%
+            uint256 requiredLock = (p.maxNotional * p.slaMultiplierBps) / 10_000 + protocolFeeLock;
             uint256 available;
             // Use low-level call to avoid import dependency on Collateral
             (bool ok, bytes memory ret) = collateral.staticcall(
@@ -259,15 +291,23 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
         s.status = SignalStatus.Active;
         s.createdAt = block.timestamp;
 
-        uint256 len = p.decoyLines.length;
-        for (uint256 i; i < len; ++i) {
-            if (bytes(p.decoyLines[i]).length > MAX_DECOY_LINE_LENGTH) {
-                revert StringTooLong("decoyLine", bytes(p.decoyLines[i]).length, MAX_DECOY_LINE_LENGTH);
+        if (isV2) {
+            // v2: store hash and count, skip decoyLines
+            s.linesHash = p.linesHash;
+            s.lineCount = p.lineCount;
+            s.bpaMode = p.bpaMode;
+        } else {
+            // v1: store decoy lines on-chain
+            uint256 len = p.decoyLines.length;
+            for (uint256 i; i < len; ++i) {
+                if (bytes(p.decoyLines[i]).length > MAX_DECOY_LINE_LENGTH) {
+                    revert StringTooLong("decoyLine", bytes(p.decoyLines[i]).length, MAX_DECOY_LINE_LENGTH);
+                }
+                s.decoyLines.push(p.decoyLines[i]);
             }
-            s.decoyLines.push(p.decoyLines[i]);
         }
 
-        len = p.availableSportsbooks.length;
+        uint256 len = p.availableSportsbooks.length;
         for (uint256 i; i < len; ++i) {
             if (bytes(p.availableSportsbooks[i]).length > MAX_SPORTSBOOK_LENGTH) {
                 revert StringTooLong("sportsbook", bytes(p.availableSportsbooks[i]).length, MAX_SPORTSBOOK_LENGTH);
@@ -381,6 +421,14 @@ contract SignalCommitment is Initializable, OwnableUpgradeable, PausableUpgradea
     /// @return True if a signal with this ID has been committed
     function signalExists(uint256 signalId) external view returns (bool) {
         return _exists[signalId];
+    }
+
+    /// @notice Check whether a signal uses v2 off-chain decoy lines
+    /// @param signalId The signal to check
+    /// @return True if the signal has a non-zero linesHash (v2)
+    function isV2Signal(uint256 signalId) external view returns (bool) {
+        if (!_exists[signalId]) revert SignalNotFound(signalId);
+        return _signals[signalId].linesHash != bytes32(0);
     }
 
     // ─── Emergency pause

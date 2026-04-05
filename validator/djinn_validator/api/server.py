@@ -1,30 +1,35 @@
 """FastAPI server for the Djinn validator REST API.
 
 Endpoints from Appendix A of the whitepaper:
-- POST /v1/signal                    — Accept encrypted key shares from Genius
-- POST /v1/signal/{id}/purchase      — Handle buyer purchase (MPC + share release)
-- POST /v1/signal/{id}/register      — Register purchased signal for outcome tracking
-- POST /v1/signal/{id}/outcome       — Submit outcome attestation
-- POST /v1/signals/resolve           — Resolve all pending signal outcomes
-- POST /v1/attest                    — Web attestation: TLSNotary proof of any URL (§15)
-- POST /v1/notary/session            — Assign a notary miner for external provers (browser extensions)
-- POST /v1/analytics/attempt         — Fire-and-forget analytics
-- GET  /health                       — Health check
+- POST /v1/signal                    -- Accept encrypted key shares from Genius
+- POST /v1/signal/{id}/purchase      -- Handle buyer purchase (MPC + share release)
+- POST /v1/signal/{id}/register      -- Register purchased signal for outcome tracking
+- POST /v1/signal/{id}/check-odds    -- Fetch BPA/WPA odds for a signal at purchase time
+- POST /v1/signal/{id}/outcome       -- Submit outcome attestation
+- POST /v1/signals/resolve           -- Resolve all pending signal outcomes
+- PUT  /v1/preferences/{address}     -- Store buyer preferences (books, encrypted data)
+- GET  /v1/preferences/{address}     -- Retrieve buyer preferences
+- POST /v1/attest                    -- Web attestation: TLSNotary proof of any URL (S15)
+- POST /v1/notary/session            -- Assign a notary miner for external provers (browser extensions)
+- POST /v1/analytics/attempt         -- Fire-and-forget analytics
+- GET  /health                       -- Health check
 
 Inter-validator MPC endpoints:
-- POST /v1/mpc/init                  — Accept MPC session invitation
-- POST /v1/mpc/round1               — Submit Round 1 multiplication messages
-- POST /v1/mpc/result               — Accept coordinator's final result
-- GET  /v1/mpc/{session_id}/status   — Check MPC session status
+- POST /v1/mpc/init                  -- Accept MPC session invitation
+- POST /v1/mpc/round1               -- Submit Round 1 multiplication messages
+- POST /v1/mpc/result               -- Accept coordinator's final result
+- GET  /v1/mpc/{session_id}/status   -- Check MPC session status
 """
 
 from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import os
 import re
 import socket
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
@@ -62,6 +67,9 @@ from djinn_validator.api.models import (
     AnalyticsRequest,
     AttestRequest,
     AttestResponse,
+    CheckOddsRequest,
+    CheckOddsResponse,
+    LineOdds,
     NotarySessionResponse,
     AuditSetStatusResponse,
     HealthResponse,
@@ -91,12 +99,14 @@ from djinn_validator.api.models import (
     OTTransfersResponse,
     OutcomeRequest,
     OutcomeResponse,
+    PreferencesResponse,
     PurchaseRequest,
     PurchaseResponse,
     ReadinessResponse,
     RegisterSignalRequest,
     RegisterSignalResponse,
     ResolveResponse,
+    SetPreferencesRequest,
     ShareInfoResponse,
     StoreShareRequest,
     StoreShareResponse,
@@ -1961,7 +1971,7 @@ def create_app(
             miner_entry = {
                 "uid": uid,
                 "hotkey": m.hotkey,
-                "status": "ok" if m.health_checks_responded > 0 and m.uptime_score() > 0.5 else "offline",
+                "status": "ok" if m.ema_uptime > 0.001 and m.uptime_score() > 0.5 else "offline",
                 "version": m.reported_version,
                 "uptime": round(m.uptime_score(), 4),
                 "health_checks_total": m.health_checks_total,
@@ -2962,7 +2972,7 @@ def create_app(
                     m = scorer.get(uid) if scorer is not None else None
                     if m and m.attestations_valid > 0:
                         chosen_tier = "proven"
-                    elif m and m.health_checks_responded > 0:
+                    elif m and m.ema_uptime > 0.001:
                         chosen_tier = "unproven"
                     break
 
@@ -3062,6 +3072,215 @@ def create_app(
             "amount": cached.get("amount", 0),
             "block_ts": cached.get("block_ts", 0),
         }
+
+    # ------------------------------------------------------------------
+    # Check-Odds: buyer fetches live odds through the validator
+    # ------------------------------------------------------------------
+
+    @app.post("/v1/signal/{signal_id}/check-odds", response_model=CheckOddsResponse)
+    async def check_odds(signal_id: str, req: CheckOddsRequest) -> CheckOddsResponse:
+        """Fetch current odds for BPA/WPA pricing at purchase time.
+
+        Fans out to miners via /v1/check, filters results by the buyer's
+        sportsbooks, and computes BPA (best price available) and WPA
+        (worst price available) per line. Falls back to stored line
+        prices when no miners are reachable.
+        """
+        import json as _json
+        import random as _random
+        import time as _time
+        from djinn_validator.api.middleware import create_signed_headers
+
+        _validate_signal_id_path(signal_id)
+
+        signal_meta = outcome_attestor.get_signal(signal_id)
+        if signal_meta is None:
+            raise HTTPException(status_code=404, detail="Signal not registered on this validator")
+
+        # Convert stored ParsedPick lines to CandidateLine dicts for the miner
+        candidate_lines: list[dict] = []
+        for i, pick in enumerate(signal_meta.lines):
+            candidate_lines.append({
+                "index": i + 1,
+                "sport": signal_meta.sport,
+                "event_id": signal_meta.event_id,
+                "home_team": signal_meta.home_team,
+                "away_team": signal_meta.away_team,
+                "market": pick.market,
+                "line": pick.line,
+                "side": pick.team if pick.market in ("spreads", "h2h") else pick.side,
+            })
+
+        # Fan out to miners (same pattern as /v1/check)
+        MAX_CHECK_MINERS = 10
+        miner_data: list[dict] = []
+        miner_source = "stored"
+
+        if neuron:
+            miner_uids = neuron.get_miner_uids()
+            if miner_uids:
+                _random.shuffle(miner_uids)
+                targets: list[tuple[int, str]] = []
+                for uid in miner_uids:
+                    axon = neuron.get_axon_info(uid)
+                    ip = axon.get("ip", "")
+                    port = axon.get("port", 0)
+                    if not ip or not port or ip in ("0.0.0.0", "127.0.0.1"):
+                        continue
+                    targets.append((uid, f"http://{ip}:{port}/v1/check"))
+                    if len(targets) >= MAX_CHECK_MINERS:
+                        break
+
+                if targets:
+                    body = _json.dumps({"lines": candidate_lines}).encode()
+                    auth_headers: dict[str, str] = {}
+                    if neuron.wallet:
+                        auth_headers = create_signed_headers("/v1/check", body, neuron.wallet)
+
+                    async def _query(uid: int, url: str) -> tuple[int, dict | None]:
+                        try:
+                            async with httpx.AsyncClient() as client:
+                                resp = await client.post(
+                                    url,
+                                    content=body,
+                                    headers={"Content-Type": "application/json", **auth_headers},
+                                    timeout=10.0,
+                                )
+                            if resp.status_code != 200:
+                                return (uid, None)
+                            data = resp.json()
+                            if data.get("api_error") and not data.get("available_indices"):
+                                return (uid, None)
+                            return (uid, data)
+                        except Exception as e:
+                            log.warning("check_odds_miner_failed", miner_uid=uid, error=str(e)[:100])
+                            return (uid, None)
+
+                    results = await asyncio.gather(*[_query(uid, url) for uid, url in targets])
+                    for _uid, data in results:
+                        if data and data.get("results"):
+                            miner_data.append(data)
+
+        # Merge miner results: union of bookmaker data per line index
+        merged_by_index: dict[int, list[dict]] = {}
+        if miner_data:
+            miner_source = "miner"
+            for data in miner_data:
+                for lr in data.get("results", []):
+                    idx = lr.get("index")
+                    if idx is None:
+                        continue
+                    if idx not in merged_by_index:
+                        merged_by_index[idx] = []
+                    for bm in lr.get("bookmakers", []):
+                        merged_by_index[idx].append(bm)
+
+        # Normalize buyer_books to lowercase for matching
+        buyer_books_lower = {b.lower() for b in req.buyer_books}
+
+        # Build odds response per line
+        odds_list: list[LineOdds] = []
+        for i, pick in enumerate(signal_meta.lines):
+            idx = i + 1
+            bm_results = merged_by_index.get(idx, [])
+
+            # Filter to buyer's books
+            filtered = [
+                bm for bm in bm_results
+                if bm.get("bookmaker", "").lower() in buyer_books_lower
+            ]
+
+            if filtered:
+                prices = [bm["odds"] for bm in filtered if bm.get("odds")]
+                if prices:
+                    bpa = max(prices)
+                    wpa = min(prices)
+                    odds_list.append(LineOdds(
+                        index=idx, bpa=bpa, wpa=wpa, executable=True,
+                    ))
+                    continue
+
+            # Fallback: use stored price if no miner data for this line
+            stored_price = pick.odds or 0
+            # Convert American odds to decimal for consistency
+            if stored_price and stored_price != 0:
+                if stored_price > 0:
+                    dec = 1.0 + stored_price / 100.0
+                else:
+                    dec = 1.0 + 100.0 / abs(stored_price)
+                odds_list.append(LineOdds(
+                    index=idx, bpa=dec, wpa=dec,
+                    executable=miner_source == "stored",
+                ))
+            else:
+                odds_list.append(LineOdds(
+                    index=idx, bpa=0, wpa=0, executable=False,
+                ))
+
+        if miner_source == "stored":
+            log.warning(
+                "check_odds_fallback",
+                signal_id=signal_id,
+                msg="No miners reachable, using stored line prices",
+            )
+
+        # Read bpa_mode from on-chain signal if chain client available
+        bpa_mode = False
+        if chain_client:
+            try:
+                on_chain = await chain_client.get_signal(int(signal_id))
+                bpa_mode = bool(on_chain.get("bpaMode", False))
+            except Exception:
+                pass
+
+        return CheckOddsResponse(
+            signal_id=signal_id,
+            line_count=len(signal_meta.lines),
+            odds=odds_list,
+            bpa_mode=bpa_mode,
+            source=miner_source,
+        )
+
+    # ------------------------------------------------------------------
+    # Buyer Preferences
+    # ------------------------------------------------------------------
+
+    @app.put("/v1/preferences/{address}")
+    async def set_preferences(address: str, req: SetPreferencesRequest):
+        """Store buyer preferences (encrypted)."""
+        if not address.startswith("0x") or len(address) != 42:
+            raise HTTPException(status_code=400, detail="Invalid address format")
+
+        if outcome_attestor._db:
+            outcome_attestor._db.execute(
+                """INSERT OR REPLACE INTO buyer_preferences
+                   (address, books_json, encrypted_data, updated_at)
+                   VALUES (?, ?, ?, ?)""",
+                (address.lower(), json.dumps(req.books), req.encrypted_data, time.time()),
+            )
+            outcome_attestor._db.commit()
+
+        return {"address": address, "stored": True}
+
+    @app.get("/v1/preferences/{address}", response_model=PreferencesResponse)
+    async def get_preferences(address: str):
+        """Retrieve buyer preferences."""
+        if not address.startswith("0x") or len(address) != 42:
+            raise HTTPException(status_code=400, detail="Invalid address format")
+
+        if outcome_attestor._db:
+            row = outcome_attestor._db.execute(
+                "SELECT books_json, encrypted_data FROM buyer_preferences WHERE address = ?",
+                (address.lower(),),
+            ).fetchone()
+            if row:
+                return PreferencesResponse(
+                    address=address,
+                    books=json.loads(row[0]) if row[0] else [],
+                    encrypted_data=row[1] or "",
+                )
+
+        return PreferencesResponse(address=address)
 
     @app.get("/metrics")
     async def metrics() -> bytes:

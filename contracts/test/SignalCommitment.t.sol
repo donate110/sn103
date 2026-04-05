@@ -49,7 +49,10 @@ contract SignalCommitmentTest is Test {
                 minNotional: 0,
             expiresAt: block.timestamp + 1 hours,
             decoyLines: _makeDecoyLines(),
-            availableSportsbooks: _makeSportsbooks()
+            availableSportsbooks: _makeSportsbooks(),
+            linesHash: bytes32(0),
+            lineCount: 0,
+            bpaMode: false
         });
     }
 
@@ -761,8 +764,8 @@ contract SignalCommitmentTest is Test {
         // Deploy a mock collateral that returns enough available
         MockCollateral mock = new MockCollateral();
         // Default params: maxNotional=10_000e6, slaMultiplierBps=15_000
-        // Required: 10_000e6 * 15_000 / 10_000 = 15_000e6
-        mock.setAvailable(genius, 15_000e6);
+        // Required: 10_000e6 * 15_000 / 10_000 + 10_000e6 * 50 / 10_000 = 15_050e6
+        mock.setAvailable(genius, 15_050e6);
         sc.setCollateral(address(mock));
 
         _commitDefault(7002);
@@ -771,7 +774,7 @@ contract SignalCommitmentTest is Test {
 
     function test_commit_withCollateralInsufficientReverts() public {
         MockCollateral mock = new MockCollateral();
-        // Set available below required (15_000e6)
+        // Set available below required (15_050e6 with protocol fee)
         mock.setAvailable(genius, 10_000e6);
         sc.setCollateral(address(mock));
 
@@ -781,7 +784,7 @@ contract SignalCommitmentTest is Test {
                 SignalCommitment.InsufficientCollateral.selector,
                 genius,
                 10_000e6,
-                15_000e6
+                15_050e6
             )
         );
         sc.commit(_defaultParams(7003));
@@ -809,6 +812,86 @@ contract SignalCommitmentTest is Test {
         vm.prank(genius);
         sc.commit(p);
         assertTrue(sc.signalExists(7005));
+    }
+
+    // ─── v2 Off-Chain Decoy Tests
+    // ──────────────────────────────────
+
+    function test_commitV2_storesLinesHash() public {
+        bytes32 hash = keccak256("test-lines-array");
+        SignalCommitment.CommitParams memory p = _defaultParams(8000);
+        p.linesHash = hash;
+        p.lineCount = 1000;
+        p.bpaMode = false;
+        // v2 signals skip decoyLines validation, but we keep them in the struct (ignored)
+
+        vm.prank(genius);
+        sc.commit(p);
+
+        assertTrue(sc.signalExists(8000));
+        Signal memory sig = sc.getSignal(8000);
+        assertEq(sig.linesHash, hash, "linesHash should be stored");
+        assertEq(sig.lineCount, 1000, "lineCount should be stored");
+        assertFalse(sig.bpaMode, "bpaMode should be false");
+        // v2 signals should have empty decoyLines on-chain
+        assertEq(sig.decoyLines.length, 0, "v2 signals should not store decoyLines on-chain");
+    }
+
+    function test_commitV2_rejectTooFewLines() public {
+        SignalCommitment.CommitParams memory p = _defaultParams(8001);
+        p.linesHash = keccak256("some-hash");
+        p.lineCount = 1; // below MIN_LINE_COUNT (2)
+
+        vm.expectRevert(abi.encodeWithSelector(SignalCommitment.InvalidLineCount.selector, uint16(1)));
+        vm.prank(genius);
+        sc.commit(p);
+    }
+
+    function test_commitV2_rejectTooManyLines() public {
+        SignalCommitment.CommitParams memory p = _defaultParams(8002);
+        p.linesHash = keccak256("some-hash");
+        p.lineCount = 2001; // above MAX_LINE_COUNT (2000)
+
+        vm.expectRevert(abi.encodeWithSelector(SignalCommitment.InvalidLineCount.selector, uint16(2001)));
+        vm.prank(genius);
+        sc.commit(p);
+    }
+
+    function test_commitV2_bpaMode() public {
+        SignalCommitment.CommitParams memory p = _defaultParams(8003);
+        p.linesHash = keccak256("bpa-lines");
+        p.lineCount = 500;
+        p.bpaMode = true;
+
+        vm.prank(genius);
+        sc.commit(p);
+
+        Signal memory sig = sc.getSignal(8003);
+        assertTrue(sig.bpaMode, "bpaMode should be true");
+        assertEq(sig.lineCount, 500, "lineCount should be 500");
+    }
+
+    function test_v1Signal_isNotV2() public {
+        // Default params have linesHash=0, so this is a v1 signal
+        _commitDefault(8004);
+
+        assertFalse(sc.isV2Signal(8004), "v1 signal should return false for isV2Signal");
+    }
+
+    function test_v2Signal_isV2() public {
+        SignalCommitment.CommitParams memory p = _defaultParams(8005);
+        p.linesHash = keccak256("v2-lines");
+        p.lineCount = 100;
+
+        vm.prank(genius);
+        sc.commit(p);
+
+        assertTrue(sc.isV2Signal(8005), "v2 signal should return true for isV2Signal");
+    }
+
+    function test_isV2Signal_revertsForNonExistent() public {
+        vm.expectRevert(abi.encodeWithSelector(SignalCommitment.SignalNotFound.selector, 9999));
+        sc.isV2Signal(9999);
     }
 }
 

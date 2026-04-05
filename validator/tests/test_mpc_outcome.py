@@ -5,10 +5,11 @@ from __future__ import annotations
 import pytest
 
 from djinn_validator.core.mpc_outcome import (
-    NUM_LINES,
+    PARALLEL_THRESHOLD,
     PolyEvalParticipantState,
     _eval_polynomial,
     lagrange_interpolation_coefficients,
+    plan_parallel_powers,
     prototype_select_outcome,
     secure_select_outcome,
 )
@@ -30,7 +31,7 @@ def _make_shares(secret: int, n: int = 10, k: int = 7, prime: int = BN254_PRIME)
 
 class TestLagrangeCoefficients:
     def test_constant_polynomial(self) -> None:
-        """All outcomes same → constant polynomial."""
+        """All outcomes same -> constant polynomial."""
         outcomes = [2] * 10
         coeffs = lagrange_interpolation_coefficients(outcomes, SMALL_PRIME)
         for x in range(1, 11):
@@ -85,7 +86,7 @@ class TestPrototypeSelect:
 
     def test_wrong_outcome_count(self) -> None:
         shares = _make_shares(1)
-        assert prototype_select_outcome(shares, [1, 2, 3]) is None
+        assert prototype_select_outcome(shares, [1]) is None
 
     def test_all_same_outcome(self) -> None:
         shares = _make_shares(5)
@@ -128,7 +129,7 @@ class TestSecureSelect:
 
     def test_wrong_outcome_count(self) -> None:
         shares = _make_shares(1)
-        assert secure_select_outcome(shares, [1, 2]) is None
+        assert secure_select_outcome(shares, [1]) is None
 
     def test_matches_prototype(self) -> None:
         """Secure MPC and prototype must agree for all indices."""
@@ -146,6 +147,103 @@ class TestSecureSelect:
         assert secure_select_outcome(shares, outcomes) == 3
         shares = _make_shares(1)
         assert secure_select_outcome(shares, outcomes) == 0
+
+
+# ---------------------------------------------------------------------------
+# Variable Line Count
+# ---------------------------------------------------------------------------
+
+
+class TestVariableLineCount:
+    def test_2_lines(self) -> None:
+        """Minimum line count: 2 lines (1 real + 1 decoy)."""
+        outcomes = [1, 3]
+        for real_index in range(1, 3):
+            shares = _make_shares(real_index)
+            result = secure_select_outcome(shares, outcomes)
+            assert result == outcomes[real_index - 1], f"index={real_index}"
+
+    def test_3_lines(self) -> None:
+        """3 lines: degree-2 polynomial."""
+        outcomes = [0, 2, 1]
+        for real_index in range(1, 4):
+            shares = _make_shares(real_index)
+            result = secure_select_outcome(shares, outcomes)
+            assert result == outcomes[real_index - 1], f"index={real_index}"
+
+    def test_20_lines(self) -> None:
+        """20 lines: still under parallel threshold, uses sequential."""
+        outcomes = [i % 4 for i in range(20)]
+        for real_index in [1, 5, 10, 15, 20]:
+            shares = _make_shares(real_index)
+            result = secure_select_outcome(shares, outcomes)
+            assert result == outcomes[real_index - 1], f"index={real_index}"
+
+    def test_100_lines(self) -> None:
+        """100 lines: above parallel threshold, uses parallel power tree."""
+        outcomes = [i % 4 for i in range(100)]
+        # Test a few representative indices
+        for real_index in [1, 25, 50, 75, 100]:
+            shares = _make_shares(real_index)
+            result = secure_select_outcome(shares, outcomes)
+            assert result == outcomes[real_index - 1], f"index={real_index}"
+
+
+# ---------------------------------------------------------------------------
+# Parallel Powers Plan
+# ---------------------------------------------------------------------------
+
+
+class TestParallelPowers:
+    def test_plan_for_3(self) -> None:
+        """max_power=3: need s^2, s^3."""
+        rounds = plan_parallel_powers(3)
+        assert len(rounds) >= 1
+        # After all rounds, powers 2 and 3 must be achievable
+        known = {1}
+        for rnd in rounds:
+            for a, b in rnd:
+                assert a in known and b in known
+                known.add(a + b)
+        assert 2 in known
+        assert 3 in known
+
+    def test_plan_for_9(self) -> None:
+        """max_power=9: original 10-line case."""
+        rounds = plan_parallel_powers(9)
+        known = {1}
+        for rnd in rounds:
+            for a, b in rnd:
+                assert a in known and b in known
+                known.add(a + b)
+        for p in range(2, 10):
+            assert p in known
+
+    def test_plan_for_99(self) -> None:
+        """max_power=99: 100 lines."""
+        rounds = plan_parallel_powers(99)
+        known = {1}
+        for rnd in rounds:
+            for a, b in rnd:
+                assert a in known and b in known
+                known.add(a + b)
+        for p in range(2, 100):
+            assert p in known
+        # Should be O(log n) rounds, well under 99
+        assert len(rounds) < 20
+
+    def test_plan_for_999(self) -> None:
+        """max_power=999: 1000 lines."""
+        rounds = plan_parallel_powers(999)
+        known = {1}
+        for rnd in rounds:
+            for a, b in rnd:
+                assert a in known and b in known
+                known.add(a + b)
+        for p in range(2, 1000):
+            assert p in known
+        # O(log n) rounds, well under 999
+        assert len(rounds) < 30
 
 
 # ---------------------------------------------------------------------------

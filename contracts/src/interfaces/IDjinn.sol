@@ -31,6 +31,10 @@ struct Signal {
     string[] availableSportsbooks;
     SignalStatus status;
     uint256 createdAt;
+    // v2 fields (appended for UUPS storage compatibility)
+    bytes32 linesHash;
+    uint16 lineCount;
+    bool bpaMode;
 }
 
 /// @notice Data for a purchase of a signal
@@ -44,6 +48,8 @@ struct Purchase {
     uint256 odds;
     Outcome outcome;
     uint256 purchasedAt;
+    // v2 field
+    uint256 lockedOdds;
 }
 
 /// @notice State of a Genius-Idiot account pair (legacy, kept for UUPS storage compatibility)

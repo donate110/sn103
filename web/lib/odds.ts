@@ -221,6 +221,18 @@ export function decoyLineToCandidateLine(
 }
 
 // ---------------------------------------------------------------------------
+// Alternate lines API — per-event alternate spreads/totals
+// ---------------------------------------------------------------------------
+
+export async function fetchAltLines(eventId: string, sport: string): Promise<OddsEvent | null> {
+  try {
+    const res = await fetch(`/api/odds/alt?sport=${sport}&event_id=${eventId}`);
+    if (!res.ok) return null;
+    return res.json();
+  } catch { return null; }
+}
+
+// ---------------------------------------------------------------------------
 // Bet extraction — pull all possible bets from an event's bookmaker odds
 // ---------------------------------------------------------------------------
 

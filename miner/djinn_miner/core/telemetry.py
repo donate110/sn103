@@ -6,7 +6,7 @@ by time range, category, and limit.
 
 Usage:
     store = TelemetryStore("telemetry.db")
-    store.record("challenge_received", "Got /v1/check with 10 lines", sport="nfl")
+    store.record("challenge_received", "Got /v1/check with N lines", sport="nfl")
     events = store.query(limit=100, category="challenge_received")
 """
 

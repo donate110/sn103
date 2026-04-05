@@ -23,6 +23,7 @@ import {
 import type { CandidateLine, BookmakerAvailability, CheckResponse } from "@/lib/api";
 import { decoyLineToCandidateLine, parseLine, formatLine } from "@/lib/odds";
 import { savePurchasedSignal } from "@/lib/preferences";
+import BookPreferences from "@/components/BookPreferences";
 
 type PurchaseStep =
   | "idle"
@@ -130,9 +131,19 @@ export default function PurchaseSignal() {
   const [linesAvailable, setLinesAvailable] = useState<boolean | null>(null); // null = not checked yet
   const [linesReason, setLinesReason] = useState<string | null>(null);
 
+  // Detect v2 signal (lines stored off-chain, identified by non-zero linesHash)
+  const isV2 = signal?.linesHash != null && signal.linesHash !== "0x" + "0".repeat(64);
+
   // Pre-check line availability on page load (before user clicks Purchase)
+  // For v2 signals, skip client-side line check (validators handle it)
   useEffect(() => {
-    if (!signal || signalLoading || !signal.decoyLines?.length) return;
+    if (!signal || signalLoading) return;
+    // v2 signals: lines are off-chain, skip client-side check
+    if (signal.linesHash && signal.linesHash !== "0x" + "0".repeat(64)) {
+      setLinesAvailable(true);
+      return;
+    }
+    if (!signal.decoyLines?.length) return;
     let cancelled = false;
 
     const preCheck = async () => {
@@ -447,88 +458,159 @@ export default function PurchaseSignal() {
 
     try {
       const t0 = performance.now();
-      // Step 1: Check line availability via miner network (subnet only)
-      setStep("checking_lines");
 
-      const candidateLines: CandidateLine[] = signal.decoyLines.map(
-        (raw, i) =>
-          decoyLineToCandidateLine(
-            raw,
-            i + 1,
-            signal.sport,
-            params.id as string,
-          ),
-      );
+      // v2 signals: lines are off-chain, skip client-side line check entirely
+      // Validators handle availability verification through MPC
+      const signalIsV2 = signal.linesHash && signal.linesHash !== "0x" + "0".repeat(64);
 
-      // Resilient check: races platform Odds API against miner network.
-      // Platform API wins in ~100ms; miners are slower but provide redundancy.
-      console.log("[purchase] starting line check for signal", params.id, "with", candidateLines.length, "lines");
       let checkResult: CheckResponse | null = null;
-      let checkError: string | null = null;
-      try {
-        const result = await checkLinesViaSubnet({ lines: candidateLines });
-        console.log("[purchase] line check complete:", result.available_indices.length, "of", candidateLines.length, "available");
-        if (result.available_indices.length > 0) {
-          checkResult = result;
-        } else {
-          // Extract reasons why lines are unavailable for better error messaging
-          const reasons = result.results
-            .map((r) => (r as unknown as Record<string, unknown>).unavailable_reason as string | undefined)
-            .filter(Boolean);
-          const uniqueReasons = [...new Set(reasons)];
-          if (result.api_error) {
-            checkError = "Could not reach any odds data provider. Please try again in a minute.";
-          } else if (uniqueReasons.includes("game_started")) {
-            checkError = "This game appears to have started or been removed from the odds feed.";
-          } else if (uniqueReasons.includes("line_moved")) {
-            checkError = "The line has moved since this signal was created. The exact line is no longer available at any sportsbook.";
-          } else if (uniqueReasons.includes("market_unavailable")) {
-            checkError = "This market is temporarily unavailable at all sportsbooks. Try again shortly.";
-          } else if (uniqueReasons.includes("no_data")) {
-            checkError = "No odds data available for this event. The odds provider may be temporarily down.";
-          }
-        }
-      } catch (e) {
-        console.log("[purchase] line check FAILED:", String(e).slice(0, 200));
-        checkError = "Could not reach any odds data provider. Please try again in a minute.";
-      }
-
-      if (!checkResult || checkResult.available_indices.length === 0) {
-        console.log("[purchase] ABORT: no lines available, reason:", checkError);
-        setStepError(
-          checkError || "No lines are currently available at any sportsbook. The signal may have gone stale. Check back later.",
-        );
-        setStep("idle");
-        return;
-      }
-
-      // Store full check results so we can find best bookmaker after decryption
-      checkResultRef.current = checkResult;
-      setAvailableIndices(checkResult.available_indices);
-      console.log("[purchase] available_indices:", checkResult.available_indices,
-        "total_lines:", candidateLines.length,
-        "source:", (checkResult as unknown as Record<string, unknown>).source || "miner",
-        "unavailable:", checkResult.results.filter(r => !r.available).map(r =>
-          `${r.index}:${(r as unknown as Record<string, unknown>).unavailable_reason ?? "unknown"}`
-        ),
-        "available:", checkResult.results.filter(r => r.available).map(r =>
-          `${r.index}:${r.bookmakers.length}books`
-        ));
-
-      // Extract best odds across all bookmakers for any available line
       let bestOdds = 1.91; // fallback
-      for (const lineResult of checkResult.results) {
-        if (lineResult.available && lineResult.bookmakers) {
-          for (const bm of lineResult.bookmakers) {
-            if (bm.odds > bestOdds) {
-              bestOdds = bm.odds;
+
+      if (!signalIsV2) {
+        // Step 1: Check line availability via miner network (subnet only)
+        setStep("checking_lines");
+
+        const candidateLines: CandidateLine[] = signal.decoyLines.map(
+          (raw, i) =>
+            decoyLineToCandidateLine(
+              raw,
+              i + 1,
+              signal.sport,
+              params.id as string,
+            ),
+        );
+
+        // Resilient check: races platform Odds API against miner network.
+        // Platform API wins in ~100ms; miners are slower but provide redundancy.
+        console.log("[purchase] starting line check for signal", params.id, "with", candidateLines.length, "lines");
+        let checkError: string | null = null;
+        try {
+          const result = await checkLinesViaSubnet({ lines: candidateLines });
+          console.log("[purchase] line check complete:", result.available_indices.length, "of", candidateLines.length, "available");
+          if (result.available_indices.length > 0) {
+            checkResult = result;
+          } else {
+            // Extract reasons why lines are unavailable for better error messaging
+            const reasons = result.results
+              .map((r) => (r as unknown as Record<string, unknown>).unavailable_reason as string | undefined)
+              .filter(Boolean);
+            const uniqueReasons = [...new Set(reasons)];
+            if (result.api_error) {
+              checkError = "Could not reach any odds data provider. Please try again in a minute.";
+            } else if (uniqueReasons.includes("game_started")) {
+              checkError = "This game appears to have started or been removed from the odds feed.";
+            } else if (uniqueReasons.includes("line_moved")) {
+              checkError = "The line has moved since this signal was created. The exact line is no longer available at any sportsbook.";
+            } else if (uniqueReasons.includes("market_unavailable")) {
+              checkError = "This market is temporarily unavailable at all sportsbooks. Try again shortly.";
+            } else if (uniqueReasons.includes("no_data")) {
+              checkError = "No odds data available for this event. The odds provider may be temporarily down.";
+            }
+          }
+        } catch (e) {
+          console.log("[purchase] line check FAILED:", String(e).slice(0, 200));
+          checkError = "Could not reach any odds data provider. Please try again in a minute.";
+        }
+
+        if (!checkResult || checkResult.available_indices.length === 0) {
+          console.log("[purchase] ABORT: no lines available, reason:", checkError);
+          setStepError(
+            checkError || "No lines are currently available at any sportsbook. The signal may have gone stale. Check back later.",
+          );
+          setStep("idle");
+          return;
+        }
+
+        console.log("[purchase] available_indices:", checkResult.available_indices,
+          "total_lines:", candidateLines.length,
+          "source:", (checkResult as unknown as Record<string, unknown>).source || "miner",
+          "unavailable:", checkResult.results.filter(r => !r.available).map(r =>
+            `${r.index}:${(r as unknown as Record<string, unknown>).unavailable_reason ?? "unknown"}`
+          ),
+          "available:", checkResult.results.filter(r => r.available).map(r =>
+            `${r.index}:${r.bookmakers.length}books`
+          ));
+
+        // Extract best odds across all bookmakers for any available line
+        for (const lineResult of checkResult.results) {
+          if (lineResult.available && lineResult.bookmakers) {
+            for (const bm of lineResult.bookmakers) {
+              if (bm.odds > bestOdds) {
+                bestOdds = bm.odds;
+              }
             }
           }
         }
+      } else {
+        // v2 signal: fetch live odds through validator's check-odds endpoint
+        setStep("checking_lines");
+        console.log("[purchase] v2 signal, fetching odds through validator");
+        try {
+          const validators = await discoverValidatorClients();
+          const savedBooks = localStorage.getItem(`djinn:books:${buyerAddress.toLowerCase()}`);
+          const buyerBooks: string[] = savedBooks ? JSON.parse(savedBooks) : ["draftkings", "fanduel", "betmgm"];
+
+          const oddsResult = await Promise.any(
+            validators.map(async (v) => {
+              const resp = await fetch(`${v.baseUrl}/v1/signal/${signalId}/check-odds`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  buyer_address: buyerAddress,
+                  buyer_books: buyerBooks,
+                }),
+                signal: AbortSignal.timeout(15_000),
+              });
+              if (!resp.ok) throw new Error(`${resp.status}`);
+              return resp.json();
+            }),
+          );
+
+          const executableIndices = (oddsResult.odds || [])
+            .filter((o: { executable: boolean }) => o.executable)
+            .map((o: { index: number }) => o.index);
+
+          if (executableIndices.length === 0) {
+            setStepError("No lines currently executable at your sportsbooks.");
+            setStep("idle");
+            purchaseInFlight.current = false;
+            return;
+          }
+
+          checkResult = {
+            results: (oddsResult.odds || []).map((o: { index: number; executable: boolean; bpa?: number }) => ({
+              index: o.index,
+              available: o.executable,
+              bookmakers: o.bpa ? [{ bookmaker: "aggregated", odds: o.bpa }] : [],
+            })),
+            available_indices: executableIndices,
+            response_time_ms: 0,
+          };
+
+          for (const o of oddsResult.odds || []) {
+            if (o.executable && o.bpa > bestOdds) bestOdds = o.bpa;
+          }
+        } catch (e) {
+          console.warn("[purchase] v2 odds check failed, using fallback:", e);
+          const lineCount = signal.lineCount || 10;
+          checkResult = {
+            results: Array.from({ length: lineCount }, (_, i) => ({
+              index: i + 1, available: true, bookmakers: [],
+            })),
+            available_indices: Array.from({ length: lineCount }, (_, i) => i + 1),
+            response_time_ms: 0,
+          };
+        }
+      }
+
+      // Store check results for post-purchase bookmaker lookup
+      if (checkResult) {
+        checkResultRef.current = checkResult;
+        setAvailableIndices(checkResult.available_indices);
       }
       setMarketOdds(bestOdds);
 
-      // Step 2: Verify availability with validators (MPC check — before payment)
+      // Step 2: Verify availability with validators (MPC check -- before payment)
       console.log(`[purchase] Step 1 (line check) took ${((performance.now() - t0) / 1000).toFixed(1)}s`);
       setStep("purchasing_validator");
 
@@ -566,7 +648,7 @@ export default function PurchaseSignal() {
       const purchaseReq = {
         buyer_address: buyerAddress,
         sportsbook: "",
-        available_indices: checkResult.available_indices,
+        available_indices: checkResult ? checkResult.available_indices : [],
         buyer_signature: buyerSig,
       };
 
@@ -684,7 +766,7 @@ export default function PurchaseSignal() {
             // Build a diagnostic message from actual MPC/validator responses
             const fulfilledCount = availabilityResults.filter((r) => r.status === "fulfilled").length;
             const rejectedCount = availabilityResults.filter((r) => r.status === "rejected").length;
-            const unavailCount = checkResult.results.filter((r) => !r.available).length;
+            const unavailCount = checkResult ? checkResult.results.filter((r) => !r.available).length : 0;
 
             if (fulfilledCount === 0 && rejectedCount > 0) {
               // All validators rejected (not timeout, not network, but actual errors)
@@ -692,7 +774,7 @@ export default function PurchaseSignal() {
             } else if (mpcReasons.length > 0) {
               // MPC ran but returned specific failure reasons we didn't catch above
               friendlyMsg = `MPC verification failed: ${mpcReasons[0]}. Please try again in a few minutes.`;
-            } else if (unavailCount > 0 && unavailCount < checkResult.results.length) {
+            } else if (checkResult && unavailCount > 0 && unavailCount < checkResult.results.length) {
               friendlyMsg = `${unavailCount} of ${checkResult.results.length} lines are temporarily unavailable at sportsbooks. The signal's pick may be among them. Try again in a minute.`;
             } else {
               // True catch-all: include validator count for diagnostics
@@ -700,7 +782,7 @@ export default function PurchaseSignal() {
             }
           }
         }
-        console.log("[purchase] MPC failure reasons:", mpcReasons, "rejected errors:", errors, "unavail lines:", checkResult.results.filter((r) => !r.available).length);
+        console.log("[purchase] MPC failure reasons:", mpcReasons, "rejected errors:", errors, "unavail lines:", checkResult ? checkResult.results.filter((r) => !r.available).length : "n/a (v2)");
         setStepError(friendlyMsg);
         setStep("idle");
         return;
@@ -874,8 +956,9 @@ export default function PurchaseSignal() {
           if (typeof parsed.realIndex !== "number" || typeof parsed.pick !== "string") {
             throw new Error("Decrypted data missing required fields (realIndex, pick)");
           }
-          if (parsed.realIndex < 1 || parsed.realIndex > signal.decoyLines.length) {
-            throw new Error(`Invalid realIndex ${parsed.realIndex} (expected 1-${signal.decoyLines.length})`);
+          const maxLineCount = signal.lineCount > 0 ? signal.lineCount : signal.decoyLines.length;
+          if (parsed.realIndex < 1 || (maxLineCount > 0 && parsed.realIndex > maxLineCount)) {
+            throw new Error(`Invalid realIndex ${parsed.realIndex} (expected 1-${maxLineCount})`);
           }
           setDecryptedPick(parsed);
 
@@ -987,18 +1070,24 @@ export default function PurchaseSignal() {
                 </p>
               )}
             </div>
-            <CompletionDecoyLines
-              decoyLines={signal.decoyLines}
-              realIndex={decryptedPick.realIndex}
-            />
+            {!isV2 && (
+              <CompletionDecoyLines
+                decoyLines={signal.decoyLines}
+                realIndex={decryptedPick.realIndex}
+              />
+            )}
           </div>
         ) : (
           <div className="card text-left mb-8">
-            <CompletionDecoyLines
-              decoyLines={signal.decoyLines}
-              realIndex={null}
-              label="Lines (decryption key pending)"
-            />
+            {isV2 ? (
+              <p className="text-sm text-slate-500">Decryption key pending. Refresh to check.</p>
+            ) : (
+              <CompletionDecoyLines
+                decoyLines={signal.decoyLines}
+                realIndex={null}
+                label="Lines (decryption key pending)"
+              />
+            )}
           </div>
         )}
 
@@ -1126,9 +1215,12 @@ export default function PurchaseSignal() {
               </div>
             </div>
 
-            {/* Lines hidden pre-purchase — idiot can't distinguish real from decoy */}
+            {/* Lines hidden pre-purchase */}
             <p className="text-xs text-slate-400 italic">
-              {signal.decoyLines.length} encrypted lines. The real signal is revealed after purchase.
+              {isV2
+                ? `${signal.lineCount} lines (privacy-enhanced). The real signal is revealed after purchase.`
+                : `${signal.decoyLines.length} encrypted lines. The real signal is revealed after purchase.`
+              }
             </p>
           </div>
 
@@ -1232,6 +1324,12 @@ export default function PurchaseSignal() {
                 >
                   Browse other signals
                 </button>
+              </div>
+            )}
+
+            {isV2 && isActive && (
+              <div className="mb-4">
+                <BookPreferences />
               </div>
             )}
 

@@ -374,6 +374,14 @@ class OutcomeAttestor:
                     resolved INTEGER NOT NULL DEFAULT 0
                 )
             """)
+            self._db.execute("""
+                CREATE TABLE IF NOT EXISTS buyer_preferences (
+                    address TEXT PRIMARY KEY,
+                    books_json TEXT NOT NULL DEFAULT '[]',
+                    encrypted_data TEXT NOT NULL DEFAULT '',
+                    updated_at REAL NOT NULL
+                )
+            """)
             self._db.commit()
             self._load_persisted_signals()
 

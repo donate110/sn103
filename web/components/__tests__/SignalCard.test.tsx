@@ -35,6 +35,9 @@ function createMockSignal(overrides: Partial<Signal> = {}): Signal {
     availableSportsbooks: ["DraftKings", "FanDuel"],
     status: SignalStatus.Active,
     createdAt: BigInt(Math.floor(Date.now() / 1000)),
+    linesHash: "0x" + "0".repeat(64),
+    lineCount: 0,
+    bpaMode: false,
     ...overrides,
   };
 }
@@ -93,7 +96,7 @@ describe("SignalCard", () => {
       expect(screen.getByText(expectedDate)).toBeInTheDocument();
     });
 
-    it("displays decoy lines when present", () => {
+    it("displays line count summary for v1 signals", () => {
       render(
         <SignalCard
           signalId="1"
@@ -102,19 +105,31 @@ describe("SignalCard", () => {
           })}
         />
       );
-      expect(screen.getByText(/Over 3\.5/)).toBeInTheDocument();
-      expect(screen.getByText(/Under 7/)).toBeInTheDocument();
-      expect(screen.getByText("Lines (2)")).toBeInTheDocument();
+      expect(screen.getByText("2 lines")).toBeInTheDocument();
     });
 
-    it("hides decoy lines section when array is empty", () => {
+    it("displays line count summary for v2 signals", () => {
       render(
         <SignalCard
           signalId="1"
-          signal={createMockSignal({ decoyLines: [] })}
+          signal={createMockSignal({
+            decoyLines: [],
+            lineCount: 1000,
+            linesHash: "0x" + "ab".repeat(32),
+          })}
         />
       );
-      expect(screen.queryByText(/Lines \(/)).not.toBeInTheDocument();
+      expect(screen.getByText("1000 lines (privacy-enhanced)")).toBeInTheDocument();
+    });
+
+    it("hides lines section when both decoyLines and lineCount are empty/zero", () => {
+      render(
+        <SignalCard
+          signalId="1"
+          signal={createMockSignal({ decoyLines: [], lineCount: 0 })}
+        />
+      );
+      expect(screen.queryByText(/lines/i)).not.toBeInTheDocument();
     });
 
     it("displays available sportsbooks when present", () => {

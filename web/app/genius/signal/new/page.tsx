@@ -111,6 +111,9 @@ export default function CreateSignal() {
     return prices.sort((a, b) => b.price - a.price);
   }, [selectedBet, realPick]);
 
+  // BPA mode (Best Price Available)
+  const [bpaMode, setBpaMode] = useState(false);
+
   // Step 3: Configure
   const [maxPriceBps, setMaxPriceBps] = useState("10");
   const [slaMultiplier, setSlaMultiplier] = useState("100");
@@ -229,33 +232,53 @@ export default function CreateSignal() {
   }, []);
 
 
-  const handleSelectBet = (bet: AvailableBet) => {
+  const handleSelectBet = async (bet: AvailableBet) => {
     setSelectedBet(bet);
     const pick = betToLine(bet);
     setRealPick(pick);
     setMarketOdds(bet.avgPrice);
     setEditOdds(decimalToAmerican(bet.avgPrice));
     setSelectedSportsbooks(bet.books);
-    const decoys = generateDecoys(pick, events, 9);
+
+    // Fetch alt lines for dynamic decoy generation
+    let allEventsForDecoys = events;
+    try {
+      const { fetchAltLines } = await import("@/lib/odds");
+      const altData = await fetchAltLines(bet.event.id, bet.event.sport_key);
+      if (altData) {
+        // Merge alt lines into existing events for richer decoy pool
+        allEventsForDecoys = [...events, altData];
+      }
+    } catch {
+      // Alt lines are a nice-to-have, not blocking
+    }
+
+    // Dynamic decoy count: fill from available data, up to 999
+    const targetDecoys = Math.min(999, Math.max(9, allEventsForDecoys.length * 10));
+    const decoys = generateDecoys(pick, allEventsForDecoys, targetDecoys);
     setDecoyLines(decoys);
-    const pos = cryptoRandomInt(10);
+    const totalLines = decoys.length + 1;
+    const pos = cryptoRandomInt(totalLines);
     setRealIndex(pos);
     setExpandedLine(pos);
-    setStep("review");
+    // Skip review step, go directly to configure
+    setStep("configure");
   };
 
   const handleRegenerateDecoys = () => {
     if (!realPick) return;
-    const decoys = generateDecoys(realPick, events, 9);
+    const targetDecoys = Math.min(999, Math.max(9, events.length * 10));
+    const decoys = generateDecoys(realPick, events, targetDecoys);
     setDecoyLines(decoys);
-    setRealIndex(cryptoRandomInt(10));
+    setRealIndex(cryptoRandomInt(decoys.length + 1));
   };
 
   const getAllLines = (): StructuredLine[] => {
     if (!realPick) return [];
+    const totalCount = decoyLines.length + 1;
     const lines: StructuredLine[] = [];
     let decoyIdx = 0;
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < totalCount; i++) {
       if (i === realIndex) {
         lines.push(realPick);
       } else {
@@ -302,7 +325,7 @@ export default function CreateSignal() {
     // Collateral gate: block signal creation without sufficient collateral
     const mn = parseFloat(maxNotional) || 0;
     const sla = parseFloat(slaMultiplier) || 100;
-    const requiredCollateral = BigInt(Math.round(mn * (sla / 100) * 1e6));
+    const requiredCollateral = BigInt(Math.round(mn * (sla / 100 + 0.005) * 1e6));
     if (collateralAvailable < requiredCollateral) {
       const shortfall = Number(requiredCollateral - collateralAvailable) / 1e6;
       setStepError(`Insufficient collateral. Deposit $${shortfall.toLocaleString("en-US")} more before creating this signal.`);
@@ -318,8 +341,8 @@ export default function CreateSignal() {
     }
 
     const allLines = getAllLines();
-    if (allLines.length !== 10) {
-      setStepError("Expected 10 lines");
+    if (allLines.length < 2) {
+      setStepError("Need at least 2 lines (1 real + 1 decoy)");
       return;
     }
 
@@ -385,16 +408,14 @@ export default function CreateSignal() {
       // healthyValidators (not all preflightValidators) are used for
       // distribution below, so shares only go to compatible validators.
 
-      // Pre-flight: miner executability check — ALL 10 lines must be available.
-      // Miners are blind to which line is real. If any line fails, the signal cannot be created.
-      // This prevents Geniuses from creating signals with fake/expired lines to game results.
-      const candidateLines = allLines.map((line, i) => toCandidateLine(line, i + 1));
+      // Pre-flight: verify real pick is available (just the real pick, not all decoys)
+      // With v2 off-chain decoys, we only verify the real pick at preflight.
+      // Decoy failures are tolerable since decoys are jiggered anyway.
+      const realLineIdx = realIndex + 1; // Protocol uses 1-indexed
+      const realCandidate = toCandidateLine(allLines[realIndex], realLineIdx);
       try {
-        // Verify lines through the decentralized miner network only.
-        // The platform Odds API is for browsing/decoys, never for verification.
-        const checkResult = await checkLinesViaSubnet({ lines: candidateLines });
+        const checkResult = await checkLinesViaSubnet({ lines: [realCandidate] });
 
-        // If the odds data source returned an error, surface it distinctly.
         if (checkResult.api_error) {
           setStepError(
             "The odds data source is experiencing errors and cannot verify your lines right now.\n" +
@@ -405,22 +426,8 @@ export default function CreateSignal() {
           return;
         }
 
-        // Check which lines failed
-        const failedLines: number[] = [];
-        const realLineIdx = realIndex + 1; // Protocol uses 1-indexed
-        let realLineFailed = false;
-
-        for (let i = 1; i <= 10; i++) {
-          const result = checkResult.results.find((r) => r.index === i);
-          if (!result || !result.available) {
-            failedLines.push(i);
-            if (i === realLineIdx) realLineFailed = true;
-          }
-        }
-
-        if (realLineFailed) {
-          // Real pick is unavailable — show specific reason if the miner provided one
-          const realResult = checkResult.results.find((r) => r.index === realLineIdx);
+        const realResult = checkResult.results.find((r) => r.index === realLineIdx);
+        if (!realResult || !realResult.available) {
           const reason = realResult?.unavailable_reason;
           const reasonMessages: Record<string, string> = {
             game_started: "This game has already started and betting lines are no longer available. Please select a different game.",
@@ -436,20 +443,6 @@ export default function CreateSignal() {
           setStep("browse");
           return;
         }
-
-        if (failedLines.length > 0) {
-          // Decoys are unavailable — send back to review so Genius can fix
-          const failedStr = failedLines.map((n) => `#${n}`).join(", ");
-          setStepError(
-            `${failedLines.length} decoy line${failedLines.length > 1 ? "s" : ""} (${failedStr}) ` +
-            `${failedLines.length > 1 ? "are" : "is"} not currently executable. ` +
-            "All 10 lines must be available at sportsbooks. " +
-            "Try regenerating decoys or editing the failed lines, then re-submit.",
-          );
-          setStep("review");
-          return;
-        }
-
       } catch (minerErr) {
         console.warn("Line verification failed:", minerErr);
         setStepError(
@@ -531,20 +524,44 @@ export default function CreateSignal() {
         Math.floor(Date.now() / 1000) + expiresInNum * 3600,
       );
 
-      const serializedLines = allLines.map(serializeLine);
+      // Jigger all lines for privacy (random perturbations to odds and spreads)
+      const jiggeredLines = allLines.map((line) => {
+        const jiggered = { ...line };
+        const rng = new Uint32Array(2);
+        crypto.getRandomValues(rng);
+        const oddsShift = ((rng[0] % 31) - 15) / 100; // -0.15 to +0.15 decimal
+        if (jiggered.price) {
+          jiggered.price = Math.max(1.01, jiggered.price + oddsShift);
+        }
+        if (jiggered.line !== null) {
+          const lineShift = ((rng[1] % 5) - 2) * 0.5; // -1.0 to +1.0
+          jiggered.line = jiggered.line + lineShift;
+        }
+        return jiggered;
+      });
+
+      const serializedLines = jiggeredLines.map(serializeLine);
+
+      // Compute linesHash: keccak256 of ABI-encoded string[]
+      const { AbiCoder, keccak256: ethersKeccak } = await import("ethers");
+      const encoded = AbiCoder.defaultAbiCoder().encode(["string[]"], [serializedLines]);
+      const linesHash = ethersKeccak(encoded);
 
       const hash = await commit({
         signalId,
         encryptedBlob: "0x" + toHex(encoder.encode(encryptedBlob)),
         commitHash,
-        sport: selectedSport.label,
+        sport: "multi",
         maxPriceBps: BigInt(Math.round(maxPriceNum * 100)),
         slaMultiplierBps: BigInt(Math.round(slaNum * 100)),
         maxNotional: BigInt(Math.round(maxNotionalNum * 1e6)),
         minNotional: minNotional ? BigInt(Math.round(parseFloat(minNotional) * 1e6)) : 0n,
         expiresAt,
-        decoyLines: serializedLines,
+        decoyLines: [], // v2: empty on-chain, lines stored off-chain
         availableSportsbooks: selectedSportsbooks,
+        linesHash,
+        lineCount: allLines.length,
+        bpaMode,
       });
       setTxHash(hash);
       setCommittedSignalId(signalId.toString());
@@ -1312,10 +1329,10 @@ export default function CreateSignal() {
     <div className="max-w-2xl mx-auto">
       <WizardStepper currentStep="configure" />
       <button
-        onClick={() => setStep("review")}
+        onClick={() => setStep("browse")}
         className="text-sm text-slate-500 hover:text-slate-900 mb-6 transition-colors"
       >
-        &larr; Back to Review
+        &larr; Back to Games
       </button>
 
       <h1 className="text-3xl font-bold text-slate-900 mb-2">Configure Signal</h1>
@@ -1334,7 +1351,7 @@ export default function CreateSignal() {
           <p className="text-xs text-genius-600 uppercase tracking-wide mb-1">Your Pick</p>
           <p className="text-sm font-bold text-genius-800">{formatLine(realPick)}</p>
           <p className="text-xs text-genius-600 mt-1">
-            + 9 decoy lines from {selectedSport.label}
+            + {decoyLines.length} decoy lines (privacy-enhanced)
             {selectedSportsbooks.length > 0 && (
               <> &middot; {selectedSportsbooks.length} sportsbook{selectedSportsbooks.length !== 1 ? "s" : ""}</>
             )}
@@ -1483,7 +1500,7 @@ export default function CreateSignal() {
             const mn = parseFloat(maxNotional);
             const sla = parseFloat(slaMultiplier);
             if (!isNaN(mn) && mn > 0 && !isNaN(sla) && sla > 0) {
-              const maxLock = mn * sla / 100;
+              const maxLock = mn * (sla / 100 + 0.005); // SLA + 0.5% protocol fee
               return (
                 <p className="text-xs text-slate-500 mt-1">
                   At max notional, <span className="font-semibold text-genius-700">${maxLock.toLocaleString()}</span> of your collateral would be locked.
@@ -1516,6 +1533,25 @@ export default function CreateSignal() {
             </label>
             <p className="text-xs text-slate-500 mt-0.5">
               Only one buyer can purchase this signal for the full notional amount.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-start gap-3">
+          <input
+            id="bpaMode"
+            type="checkbox"
+            checked={bpaMode}
+            onChange={(e) => setBpaMode(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-genius-600 focus:ring-genius-500"
+          />
+          <div>
+            <label htmlFor="bpaMode" className="text-sm font-medium text-slate-700 cursor-pointer">
+              Best Price Available (BPA)
+            </label>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Buyers get the best available odds at execution time rather than locked odds.
+              Better for buyers on fast-moving lines.
             </p>
           </div>
         </div>
@@ -1587,7 +1623,7 @@ export default function CreateSignal() {
           </div>
           <p className="text-xs text-slate-500">
             {step === "preflight"
-              ? "Your real pick is hidden among 9 decoys. Miners verify all 10 independently."
+              ? `Your real pick is hidden among ${decoyLines.length} decoys. Verifying availability.`
               : step === "committing"
               ? "AES-256 encryption, then on-chain commit. Takes 10-30s on mainnet."
               : "Shamir secret sharing splits the key so no single party can read your pick."}
@@ -1598,7 +1634,7 @@ export default function CreateSignal() {
         {(() => {
           const maxNotionalUsdc = parseFloat(maxNotional) || 0;
           const slaPct = parseFloat(slaMultiplier) || 100;
-          const requiredCollateral = BigInt(Math.round(maxNotionalUsdc * (slaPct / 100) * 1e6));
+          const requiredCollateral = BigInt(Math.round(maxNotionalUsdc * (slaPct / 100 + 0.005) * 1e6));
           const hasEnough = collateralAvailable >= requiredCollateral;
 
           if (!hasEnough) {
@@ -1612,7 +1648,7 @@ export default function CreateSignal() {
                   Deposit ${needed.toLocaleString("en-US")} more to create this signal
                 </p>
                 <p className="text-xs text-amber-600 mb-3">
-                  This signal locks ${(Number(requiredCollateral) / 1e6).toLocaleString()} of collateral (${maxNotionalUsdc.toLocaleString()} notional &times; {slaPct}% SLA).
+                  This signal locks ${(Number(requiredCollateral) / 1e6).toLocaleString()} of collateral (${maxNotionalUsdc.toLocaleString()} notional &times; {slaPct}% SLA + 0.5% protocol fee).
                   {" "}You have ${(Number(collateralAvailable) / 1e6).toLocaleString()} unlocked but need ${(Number(requiredCollateral) / 1e6).toLocaleString()}.
                   {walletHasUsdc ? ` Deposit from your $${(Number(walletUsdc) / 1e6).toLocaleString()} wallet balance below.` : ""}
                 </p>
@@ -1697,7 +1733,7 @@ export default function CreateSignal() {
                 || isNaN(hrs) || hrs < 1 || hrs > 168
                 || isNaN(mn) || mn < 1) return true;
               // Block submission if collateral is insufficient
-              const requiredCollateral = BigInt(Math.round(mn * (sla / 100) * 1e6));
+              const requiredCollateral = BigInt(Math.round(mn * (sla / 100 + 0.005) * 1e6));
               if (collateralAvailable < requiredCollateral) return true;
               return false;
             })()}

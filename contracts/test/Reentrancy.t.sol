@@ -125,7 +125,10 @@ contract ReentrancyTest is Test {
                 minNotional: 0,
                 expiresAt: block.timestamp + 1 days,
                 decoyLines: _buildDecoyLines(),
-                availableSportsbooks: _buildSportsbooks()
+                availableSportsbooks: _buildSportsbooks(),
+                linesHash: bytes32(0),
+                lineCount: 0,
+                bpaMode: false
             })
         );
     }

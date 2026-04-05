@@ -8,7 +8,6 @@ import {
   formatBps,
   truncateAddress,
 } from "@/lib/types";
-import { parseLine, formatLine } from "@/lib/odds";
 
 interface SignalCardProps {
   signalId: string;
@@ -94,25 +93,16 @@ export default function SignalCard({
         </div>
       </div>
 
-      {signal.decoyLines.length > 0 && (
+      {(signal.lineCount > 0 || signal.decoyLines.length > 0) && (
         <div className="mb-4">
-          <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">
-            Lines ({signal.decoyLines.length})
+          <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">
+            Lines
           </p>
-          <div className="space-y-1">
-            {signal.decoyLines.map((raw, i) => {
-              const structured = parseLine(raw);
-              const display = structured ? formatLine(structured) : raw;
-              return (
-                <p
-                  key={i}
-                  className="text-xs text-slate-500 font-mono bg-slate-50 rounded px-2 py-1"
-                >
-                  {i + 1}. {display}
-                </p>
-              );
-            })}
-          </div>
+          <p className="text-sm text-slate-600">
+            {signal.lineCount > 0
+              ? `${signal.lineCount} lines (privacy-enhanced)`
+              : `${signal.decoyLines.length} lines`}
+          </p>
         </div>
       )}
 

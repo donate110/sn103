@@ -59,11 +59,12 @@ if (_chainId === 84532 && ADDRESSES.usdc === "0x833589fCD6eDb6E08f4c7C32D4f71b54
 // Minimal ABIs — only the functions used by the client
 
 export const SIGNAL_COMMITMENT_ABI = [
-  "function commit((uint256 signalId, bytes encryptedBlob, bytes32 commitHash, string sport, uint256 maxPriceBps, uint256 slaMultiplierBps, uint256 maxNotional, uint256 minNotional, uint256 expiresAt, string[] decoyLines, string[] availableSportsbooks) p) external",
+  "function commit((uint256 signalId, bytes encryptedBlob, bytes32 commitHash, string sport, uint256 maxPriceBps, uint256 slaMultiplierBps, uint256 maxNotional, uint256 minNotional, uint256 expiresAt, string[] decoyLines, string[] availableSportsbooks, bytes32 linesHash, uint16 lineCount, bool bpaMode) p) external",
   "function cancelSignal(uint256 signalId) external",
-  "function getSignal(uint256 signalId) external view returns (tuple(address genius, bytes encryptedBlob, bytes32 commitHash, string sport, uint256 maxPriceBps, uint256 slaMultiplierBps, uint256 maxNotional, uint256 minNotional, uint256 expiresAt, string[] decoyLines, string[] availableSportsbooks, uint8 status, uint256 createdAt))",
+  "function getSignal(uint256 signalId) external view returns (tuple(address genius, bytes encryptedBlob, bytes32 commitHash, string sport, uint256 maxPriceBps, uint256 slaMultiplierBps, uint256 maxNotional, uint256 minNotional, uint256 expiresAt, string[] decoyLines, string[] availableSportsbooks, uint8 status, uint256 createdAt, bytes32 linesHash, uint16 lineCount, bool bpaMode))",
   "function isActive(uint256 signalId) external view returns (bool)",
   "function signalExists(uint256 signalId) external view returns (bool)",
+  "function isV2Signal(uint256 signalId) external view returns (bool)",
   "event SignalCommitted(uint256 indexed signalId, address indexed genius, string sport, uint256 maxPriceBps, uint256 slaMultiplierBps, uint256 maxNotional, uint256 expiresAt)",
   "event SignalCancelled(uint256 indexed signalId, address indexed genius)",
 ] as const;
@@ -73,7 +74,7 @@ export const ESCROW_ABI = [
   "function withdraw(uint256 amount) external",
   "function purchase(uint256 signalId, uint256 notional, uint256 odds) external returns (uint256 purchaseId)",
   "function getBalance(address user) external view returns (uint256)",
-  "function getPurchase(uint256 purchaseId) external view returns (tuple(address idiot, uint256 signalId, uint256 notional, uint256 feePaid, uint256 creditUsed, uint256 usdcPaid, uint256 odds, uint8 outcome, uint256 purchasedAt))",
+  "function getPurchase(uint256 purchaseId) external view returns (tuple(address idiot, uint256 signalId, uint256 notional, uint256 feePaid, uint256 creditUsed, uint256 usdcPaid, uint256 odds, uint8 outcome, uint256 purchasedAt, uint256 lockedOdds))",
   "function getPurchasesBySignal(uint256 signalId) external view returns (uint256[])",
   "function getSignalNotionalFilled(uint256 signalId) external view returns (uint256)",
   "function signalNotionalFilled(uint256 signalId) external view returns (uint256)",

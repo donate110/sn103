@@ -15,11 +15,6 @@ const SCAN_BLOCKS = 1_500_000; // ~8.5 days at 2 blocks/sec on Base Sepolia
 const CHUNK_SIZE = 9_999;
 const CONCURRENCY = 10;
 
-// Per-address in-memory cache
-const geniusCache = new Map<string, { signals: Record<string, unknown>[]; lastBlock: number; updatedAt: number }>();
-const CACHE_TTL_MS = 30_000; // 30 seconds
-const CACHE_HARD_TTL_MS = 300_000; // 5 minutes: full rescan to catch status changes
-
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const address = searchParams.get("address");
@@ -39,33 +34,16 @@ export async function GET(request: NextRequest) {
   }
 
   const checksumAddr = ethers.getAddress(address);
-  const cacheKey = checksumAddr.toLowerCase();
-  const bust = searchParams.has("bust"); // Client can force cache bypass after mutations
-
-  // Serve from cache if fresh (unless bust param present)
-  const cached = geniusCache.get(cacheKey);
-  if (!bust && cached && Date.now() - cached.updatedAt < CACHE_TTL_MS) {
-    const now = Math.floor(Date.now() / 1000);
-    const filtered = includeAll
-      ? cached.signals
-      : cached.signals.filter((s) => (s.expires_at_unix as number) >= now && s.status === "active");
-    const paged = filtered.slice(offset, offset + limit);
-    return NextResponse.json({ signals: paged, total: filtered.length, offset, limit }, {
-      headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60" },
-    });
-  }
 
   try {
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     const contract = new ethers.Contract(ADDRESSES.signalCommitment, SIGNAL_COMMITMENT_ABI, provider);
 
     // Query SignalCommitted events for this genius (chunked)
-    // Incremental scan if we have a recent cache, full scan otherwise
     const filter = contract.filters.SignalCommitted(null, checksumAddr);
     const currentBlock = await provider.getBlockNumber();
     const fullScanFrom = Math.max(0, currentBlock - SCAN_BLOCKS);
-    const cacheIsRecent = cached && (Date.now() - cached.updatedAt < CACHE_HARD_TTL_MS);
-    const fromBlock = cacheIsRecent ? cached.lastBlock + 1 : fullScanFrom;
+    const fromBlock = fullScanFrom;
     const chunkRanges: [number, number][] = [];
     for (let start = fromBlock; start <= currentBlock; start += CHUNK_SIZE) {
       chunkRanges.push([start, Math.min(start + CHUNK_SIZE - 1, currentBlock)]);
@@ -127,28 +105,10 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Merge with existing cache (incremental) or replace (full scan)
-    if (cacheIsRecent && cached) {
-      const newIds = new Set(signals.map((s) => s.signal_id as string));
-      const kept = cached.signals.filter((s) => !newIds.has(s.signal_id as string));
-      geniusCache.set(cacheKey, { signals: [...kept, ...signals], lastBlock: currentBlock, updatedAt: Date.now() });
-    } else {
-      geniusCache.set(cacheKey, { signals: [...signals], lastBlock: currentBlock, updatedAt: Date.now() });
-    }
-    const allSignals = geniusCache.get(cacheKey)!.signals;
-
-    // Evict stale cache entries (prevent memory leak)
-    if (geniusCache.size > 100) {
-      const cutoff = Date.now() - CACHE_TTL_MS * 10;
-      for (const [key, val] of geniusCache) {
-        if (val.updatedAt < cutoff) geniusCache.delete(key);
-      }
-    }
-
     // Filter for response
     const filtered = includeAll
-      ? allSignals
-      : allSignals.filter((s) => s.status === "active");
+      ? signals
+      : signals.filter((s) => s.status === "active");
 
     const paged = filtered.slice(offset, offset + limit);
 

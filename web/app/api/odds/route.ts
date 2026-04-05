@@ -39,7 +39,7 @@ let cachedData: Map<string, { data: unknown; expiresAt: number }> = new Map();
 
 // Simple sliding-window rate limiter per IP
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
-const RATE_LIMIT_MAX_REQUESTS = 30; // 30 requests per minute per IP
+const RATE_LIMIT_MAX_REQUESTS = 120; // 120 requests per minute per IP (v2 signal creation fetches alt lines per game)
 const rateLimitMap: Map<string, number[]> = new Map();
 
 function getRateLimitKey(request: NextRequest): string {

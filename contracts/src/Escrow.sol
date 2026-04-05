@@ -375,7 +375,8 @@ contract Escrow is Initializable, OwnableUpgradeable, PausableUpgradeable, Reent
             usdcPaid: usdcPaid,
             odds: odds,
             outcome: Outcome(0), // Pending
-            purchasedAt: block.timestamp
+            purchasedAt: block.timestamp,
+            lockedOdds: odds
         });
 
         _purchasesBySignal[signalId].push(purchaseId);

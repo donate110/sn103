@@ -65,7 +65,7 @@ class TestStoreShareRequest:
             StoreShareRequest(
                 signal_id="sig-1",
                 genius_address="0xGenius",
-                share_x=11,
+                share_x=2001,
                 share_y="0xabcdef",
                 encrypted_key_share="deadbeef",
                 shamir_threshold=7,
@@ -112,7 +112,7 @@ class TestStoreShareRequest:
                 share_x=1,
                 share_y="0xabcdef",
                 encrypted_key_share="deadbeef",
-                shamir_threshold=11,
+                shamir_threshold=2001,
             )
 
 
@@ -138,11 +138,11 @@ class TestPurchaseRequest:
             PurchaseRequest(
                 buyer_address=VALID_ETH_ADDR,
                 sportsbook="draftkings",
-                available_indices=list(range(1, 12)),  # 11 items
+                available_indices=list(range(1, 2002)),  # 2001 items
             )
 
     def test_index_out_of_range_zero(self) -> None:
-        with pytest.raises(ValidationError, match="1-10"):
+        with pytest.raises(ValidationError, match="1-2000"):
             PurchaseRequest(
                 buyer_address=VALID_ETH_ADDR,
                 sportsbook="draftkings",
@@ -150,20 +150,20 @@ class TestPurchaseRequest:
             )
 
     def test_index_out_of_range_high(self) -> None:
-        with pytest.raises(ValidationError, match="1-10"):
+        with pytest.raises(ValidationError, match="1-2000"):
             PurchaseRequest(
                 buyer_address=VALID_ETH_ADDR,
                 sportsbook="draftkings",
-                available_indices=[11],
+                available_indices=[2001],
             )
 
     def test_index_boundary_values(self) -> None:
         req = PurchaseRequest(
             buyer_address=VALID_ETH_ADDR,
             sportsbook="draftkings",
-            available_indices=[1, 10],
+            available_indices=[1, 2000],
         )
-        assert req.available_indices == [1, 10]
+        assert req.available_indices == [1, 2000]
 
     def test_duplicate_indices_rejected(self) -> None:
         with pytest.raises(ValidationError, match="duplicates"):
@@ -358,7 +358,7 @@ class TestStringLengthLimits:
                 event_id="ev-1",
                 home_team="A",
                 away_team="B",
-                lines=["Lakers -3.5 (-110)", "Celtics +3.5 (-110)"],
+                lines=["Lakers -3.5 (-110)"],
             )
 
     def test_mpc_d_value_too_long(self) -> None:
@@ -470,7 +470,7 @@ class TestMPCBoundsValidation:
             MPCInitRequest(
                 session_id="s-1",
                 signal_id="sig-1",
-                available_indices=[11],  # 11 is out of range
+                available_indices=[2001],  # 2001 is out of range
                 coordinator_x=1,
                 participant_xs=[1, 2],
             )
