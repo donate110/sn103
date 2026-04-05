@@ -525,8 +525,8 @@ def create_app(
                     result = tlsn_module.TLSNProofResult(success=False, error=f"local notary timeout ({_local_notary_port})")
 
             # If the first attempt failed (peer timeout or sidecar error),
-            # fall back to the local sidecar with a longer timeout.
-            if not result.success and _using_peer:
+            # restart the sidecar (clears stale MPC state) and retry.
+            if not result.success:
                 _local_notary_port = int(os.getenv("NOTARY_PORT", "8091"))
                 log.info(
                     "attest_fallback_to_local_sidecar",
@@ -534,6 +534,12 @@ def create_app(
                     prior_error=result.error[:200] if result.error else "",
                     port=_local_notary_port,
                 )
+                # Restart sidecar to clear stale MPC state that causes
+                # "connection is closed" errors after multiple sessions.
+                if notary_sidecar and notary_sidecar.enabled:
+                    await notary_sidecar.stop()
+                    await notary_sidecar.start()
+                    await asyncio.sleep(1)  # Let sidecar stabilize
                 try:
                     result = await asyncio.wait_for(
                         tlsn_module.generate_proof(
