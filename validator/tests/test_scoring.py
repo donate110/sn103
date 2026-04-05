@@ -718,3 +718,34 @@ class TestScorerPersistence:
         assert len(m2.attestation_latencies) == 50
         # Should be the last 50 (saved from persist_all: [-50:])
         assert m2.attestation_latencies == list(range(50, 100))
+
+    def test_ema_uptime_persisted(self, tmp_path) -> None:
+        db = str(tmp_path / "scores.db")
+        scorer = MinerScorer(db_path=db)
+        m = scorer.get_or_create(1, "hk1")
+        for _ in range(100):
+            m.record_health_check(responded=True)
+        ema_before = m.ema_uptime
+        assert ema_before > 0.1  # should be meaningful after 100 checks
+        scorer.persist_all()
+
+        scorer2 = MinerScorer(db_path=db)
+        m2 = scorer2.get(1)
+        assert m2 is not None
+        assert m2.ema_uptime == pytest.approx(ema_before)
+
+    def test_ema_uptime_missing_defaults_to_zero(self, tmp_path) -> None:
+        """Old persisted data without ema_uptime field loads safely."""
+        import json, sqlite3
+        db = str(tmp_path / "scores.db")
+        conn = sqlite3.connect(db)
+        conn.execute("CREATE TABLE IF NOT EXISTS miner_scores (uid INTEGER PRIMARY KEY, hotkey TEXT, data TEXT, updated_at REAL)")
+        data = json.dumps({"queries_total": 5})  # no ema_uptime key
+        conn.execute("INSERT INTO miner_scores VALUES (?, ?, ?, ?)", (1, "hk1", data, 0.0))
+        conn.commit()
+        conn.close()
+
+        scorer = MinerScorer(db_path=db)
+        m = scorer.get(1)
+        assert m is not None
+        assert m.ema_uptime == 0.0

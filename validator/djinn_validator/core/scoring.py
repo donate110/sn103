@@ -357,7 +357,8 @@ class MinerScorer:
                     m.attestations_valid = d.get("attestations_valid", 0)
                     m.health_checks_total = d.get("health_checks_total", 0)
                     m.health_checks_responded = d.get("health_checks_responded", 0)
-                    m.ema_uptime = d.get("ema_uptime", 0.0)
+                    _ema = d.get("ema_uptime", 0.0)
+                    m.ema_uptime = max(0.0, min(1.0, _ema)) if isinstance(_ema, (int, float)) and math.isfinite(_ema) else 0.0
                     m.consecutive_epochs = d.get("consecutive_epochs", 0)
                     m.notary_duties_assigned = d.get("notary_duties_assigned", 0)
                     m.notary_duties_completed = d.get("notary_duties_completed", 0)
