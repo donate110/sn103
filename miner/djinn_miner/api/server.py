@@ -517,9 +517,9 @@ def create_app(
                             request.url,
                             notary_host="127.0.0.1",
                             notary_port=_local_notary_port,
-                            timeout=90.0,
+                            timeout=120.0,
                         ),
-                        timeout=100.0,
+                        timeout=130.0,
                     )
                 except (TimeoutError, asyncio.TimeoutError):
                     result = tlsn_module.TLSNProofResult(success=False, error=f"local notary timeout ({_local_notary_port})")
@@ -540,9 +540,9 @@ def create_app(
                             request.url,
                             notary_host="127.0.0.1",
                             notary_port=_local_notary_port,
-                            timeout=90.0,
+                            timeout=120.0,
                         ),
-                        timeout=100.0,
+                        timeout=130.0,
                     )
                 except (TimeoutError, asyncio.TimeoutError):
                     result = tlsn_module.TLSNProofResult(success=False, error="local sidecar fallback timeout")

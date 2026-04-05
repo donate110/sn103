@@ -1983,6 +1983,7 @@ def create_app(
                 "capabilities_reported": m.capabilities_reported,
                 "memory_total_mb": m.memory_total_mb,
                 "cpu_cores": m.cpu_cores,
+                "shield_installed": m.shield_installed,
             }
             miners_out.append(miner_entry)
 

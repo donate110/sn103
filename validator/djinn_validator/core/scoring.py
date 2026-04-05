@@ -76,6 +76,7 @@ class MinerMetrics:
     notary_duties_assigned: int = 0  # times assigned as notary for another miner
     notary_duties_completed: int = 0  # times the proof using this notary verified
     notary_capable: bool = False  # running a notary sidecar (discovered this epoch)
+    shield_installed: bool = False  # djinn-tunnel-shield DDoS protection installed
 
     # ── Capability advertisement (from health check) ──
     memory_total_mb: int = 0
