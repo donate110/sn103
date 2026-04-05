@@ -91,9 +91,14 @@ class MinerMetrics:
     reported_version: str = ""  # Miner's self-reported version from health check
 
     # ── Shared metrics ──
-    health_checks_total: int = 0
-    health_checks_responded: int = 0
+    health_checks_total: int = 0      # lifetime counter (display only)
+    health_checks_responded: int = 0  # lifetime counter (display only)
     consecutive_epochs: int = 0
+    # EMA uptime: smoothed uptime score that persists across epoch resets.
+    # Alpha = 0.00193 gives a half-life of exactly 1 Bittensor tempo (360 blocks).
+    # A 4-minute DDoS costs 3.8%. A 30-second restart costs 0.6%.
+    # A dead miner reaches 50% after 1 tempo, ~0% after 5 tempos (~6 hours).
+    ema_uptime: float = 0.0
 
     # ── Carry-forward metrics (preserved across epoch resets) ──
     # Challenges run every ~10 min but epochs reset every ~12s. Without
@@ -133,11 +138,26 @@ class MinerMetrics:
             return self.prev_coverage
         return self.proofs_verified / self.proofs_requested
 
+    # EMA uptime alpha: chosen so the half-life is exactly one Bittensor tempo
+    # (360 blocks = 360 health checks at 12s each = ~72 minutes).
+    # alpha = 1 - exp(ln(0.5) / 360) = 0.00193
+    # This means a miner must be offline for a full tempo to lose half its
+    # uptime score. Brief DDoS bursts (4 min) cost only ~4%. Restarts cost <1%.
+    _EMA_ALPHA = 0.00193
+
+    def record_health_check(self, responded: bool) -> None:
+        """Update EMA uptime and lifetime counters."""
+        self.health_checks_total += 1
+        if responded:
+            self.health_checks_responded += 1
+        self.ema_uptime = (
+            self._EMA_ALPHA * (1.0 if responded else 0.0)
+            + (1.0 - self._EMA_ALPHA) * self.ema_uptime
+        )
+
     def uptime_score(self) -> float:
-        """Fraction of health checks responded to."""
-        if self.health_checks_total == 0:
-            return 0.0
-        return self.health_checks_responded / self.health_checks_total
+        """EMA-smoothed uptime score. Survives epoch resets and restarts."""
+        return self.ema_uptime
 
     def attestation_validity_score(self) -> float:
         """Fraction of recent attestation challenges with valid TLSNotary proof.
@@ -186,12 +206,6 @@ class MinerMetrics:
         self.latencies.append(latency)
         if proof_submitted:
             self.proofs_submitted += 1
-
-    def record_health_check(self, responded: bool) -> None:
-        """Record a health check result."""
-        self.health_checks_total += 1
-        if responded:
-            self.health_checks_responded += 1
 
     def record_attestation(
         self, latency: float, proof_valid: bool, *, validator_timeout: bool = False,
@@ -343,6 +357,7 @@ class MinerScorer:
                     m.attestations_valid = d.get("attestations_valid", 0)
                     m.health_checks_total = d.get("health_checks_total", 0)
                     m.health_checks_responded = d.get("health_checks_responded", 0)
+                    m.ema_uptime = d.get("ema_uptime", 0.0)
                     m.consecutive_epochs = d.get("consecutive_epochs", 0)
                     m.notary_duties_assigned = d.get("notary_duties_assigned", 0)
                     m.notary_duties_completed = d.get("notary_duties_completed", 0)
@@ -395,6 +410,7 @@ class MinerScorer:
             "attestations_valid": m.attestations_valid,
             "health_checks_total": m.health_checks_total,
             "health_checks_responded": m.health_checks_responded,
+            "ema_uptime": m.ema_uptime,
             "consecutive_epochs": m.consecutive_epochs,
             "notary_duties_assigned": m.notary_duties_assigned,
             "notary_duties_completed": m.notary_duties_completed,
@@ -447,6 +463,7 @@ class MinerScorer:
                         "attestations_valid": m.attestations_valid,
                         "health_checks_total": m.health_checks_total,
                         "health_checks_responded": m.health_checks_responded,
+                        "ema_uptime": m.ema_uptime,
                         "consecutive_epochs": m.consecutive_epochs,
                         "notary_duties_assigned": m.notary_duties_assigned,
                         "notary_duties_completed": m.notary_duties_completed,
@@ -743,7 +760,7 @@ class MinerScorer:
             # credit. Without this, new miners get 0% on 50% of their weight, making
             # it nearly impossible to earn emissions in their first epochs.
             participated = (
-                m.health_checks_responded > 0
+                m.ema_uptime > 0.001
                 or m.queries_total > 0
                 or m.attestations_total > 0
                 or m.notary_duties_assigned > 0
@@ -882,7 +899,7 @@ class MinerScorer:
             elif m.attestations_total > 0:
                 # Tier 3: challenged but never succeeded — track for redemption
                 excluded.append(uid)
-            elif m.health_checks_responded > 0:
+            elif m.ema_uptime > 0.001:
                 # Tier 2: responsive but never challenged for attestation
                 unproven.append(uid)
             else:
@@ -994,7 +1011,7 @@ class MinerScorer:
         for m in self._miners.values():
             participated = (
                 m.queries_total > 0
-                or m.health_checks_responded > 0
+                or m.ema_uptime > 0.001
                 or m.attestations_total > 0
                 or m.notary_duties_assigned > 0
             )
@@ -1031,6 +1048,4 @@ class MinerScorer:
             m.notary_duties_assigned = 0
             m.notary_duties_completed = 0
             m.notary_capable = False
-            # Reset health checks
-            m.health_checks_total = 0
-            m.health_checks_responded = 0
+            # ema_uptime is NOT reset: it decays naturally via EMA (half-life=1 tempo).

@@ -32,10 +32,13 @@ class TestMinerMetrics:
 
     def test_uptime_score(self) -> None:
         m = MinerMetrics(uid=1, hotkey="h1")
-        m.record_health_check(responded=True)
-        m.record_health_check(responded=True)
-        m.record_health_check(responded=False)
-        assert m.uptime_score() == pytest.approx(2 / 3)
+        # EMA with alpha=0.00193: each check blends into running average
+        m.record_health_check(responded=True)   # 0.00193
+        m.record_health_check(responded=True)   # ~0.00386
+        m.record_health_check(responded=False)  # ~0.00385 (decays slightly)
+        assert m.uptime_score() == pytest.approx(0.003849, abs=1e-4)
+        # Uptime stays positive (not zeroed) after a missed check
+        assert m.uptime_score() > 0
 
     def test_empty_metrics(self) -> None:
         m = MinerMetrics(uid=1, hotkey="h1")
@@ -116,7 +119,7 @@ class TestMinerScorer:
 
         scorer.reset_epoch()
         assert m.queries_total == 0
-        assert m.health_checks_total == 0
+        assert m.health_checks_total == 1  # lifetime counter, not reset
         assert m.proofs_requested == 0  # Reset each epoch
         assert m.consecutive_epochs == 6  # Incremented (miner participated)
 
@@ -491,7 +494,8 @@ class TestComputeWeightsDetailed:
         bd = breakdowns[0]
         assert bd["accuracy"] == pytest.approx(0.5)
         assert bd["coverage"] == pytest.approx(0.5)
-        assert bd["uptime"] == pytest.approx(0.5)
+        # EMA uptime after 1 True + 1 False with alpha=0.00193 ≈ 0.00193
+        assert bd["uptime"] == pytest.approx(m.uptime_score())
         assert bd["queries_total"] == 2
         assert bd["queries_correct"] == 1
         assert bd["health_checks_total"] == 2
@@ -520,7 +524,8 @@ class TestComputeWeightsDetailed:
 
         weights, breakdowns = scorer.compute_weights_detailed(is_active_epoch=False)
         bd = breakdowns[0]
-        assert bd["uptime"] == pytest.approx(1.0)
+        # EMA uptime after 1 True check with alpha=0.00193 ≈ 0.00193
+        assert bd["uptime"] == pytest.approx(m.uptime_score())
         assert bd["consecutive_epochs"] == 5
         assert "history" in bd
         assert bd["sports_score"] == 0.0

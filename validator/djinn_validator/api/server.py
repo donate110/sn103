@@ -1971,7 +1971,7 @@ def create_app(
             miner_entry = {
                 "uid": uid,
                 "hotkey": m.hotkey,
-                "status": "ok" if m.health_checks_responded > 0 and m.uptime_score() > 0.5 else "offline",
+                "status": "ok" if m.ema_uptime > 0.001 and m.uptime_score() > 0.5 else "offline",
                 "version": m.reported_version,
                 "uptime": round(m.uptime_score(), 4),
                 "health_checks_total": m.health_checks_total,
@@ -2971,7 +2971,7 @@ def create_app(
                     m = scorer.get(uid) if scorer is not None else None
                     if m and m.attestations_valid > 0:
                         chosen_tier = "proven"
-                    elif m and m.health_checks_responded > 0:
+                    elif m and m.ema_uptime > 0.001:
                         chosen_tier = "unproven"
                     break
 
