@@ -10,6 +10,7 @@ Provides:
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import threading
 import time
@@ -323,14 +324,16 @@ async def validate_signed_request(
     timestamp_str = request.headers.get("X-Timestamp")
     nonce = request.headers.get("X-Nonce")
 
-    # Reject unauthenticated requests when a hotkey allowlist is active (production).
-    # In dev/test mode (no neuron, no allowlist), skip auth gracefully.
+    # Reject unauthenticated requests. Even when the metagraph is unavailable
+    # (allowed_hotkeys=None), we still require valid signatures to prevent
+    # unauthenticated access to MPC endpoints during connectivity outages.
     if not hotkey and not signature:
-        if allowed_hotkeys:
+        if allowed_hotkeys is not None or os.getenv("BT_NETWORK", "test") != "test":
             raise HTTPException(
                 status_code=401,
                 detail="Authentication required (missing X-Hotkey header)",
             )
+        # Only skip auth in explicit test mode with no metagraph
         return None
 
     if not all([hotkey, signature, timestamp_str, nonce]):
