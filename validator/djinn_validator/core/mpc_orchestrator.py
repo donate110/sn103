@@ -566,13 +566,12 @@ class MPCOrchestrator:
             # the secret, as doing so defeats the purpose of MPC. Until the
             # Genius creates authenticated shares during signal commitment,
             # the authenticated mode is not available.
-            log.error(
-                "authenticated_mpc_not_supported",
-                signal_id=signal_id,
-                reason="mac_alpha removed from session state; pre-authenticated shares required",
-            )
             self._mark_session_failed(session)
-            return None
+            raise RuntimeError(
+                "Authenticated MPC disabled: global MAC key not configured. "
+                "mac_alpha was removed from session state (C-6 audit finding); "
+                "pre-authenticated shares from signal commitment are required."
+            )
 
         # Build our own participant state
         if is_auth:

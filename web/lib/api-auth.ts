@@ -21,11 +21,11 @@ function toHex(buf: ArrayBuffer): string {
     .join("");
 }
 
+const _secret = process.env.API_SESSION_SECRET || process.env.ADMIN_PASSWORD;
+if (!_secret) throw new Error("API_SESSION_SECRET or ADMIN_PASSWORD must be set");
+const secret: string = _secret;
+
 function getSecret(): string {
-  const secret = process.env.API_SESSION_SECRET || process.env.ADMIN_PASSWORD || "";
-  if (!secret) {
-    throw new Error("API_SESSION_SECRET or ADMIN_PASSWORD must be set");
-  }
   return secret;
 }
 

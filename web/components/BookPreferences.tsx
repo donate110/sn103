@@ -39,6 +39,8 @@ export function useBookPreferences(): [string[], (books: string[]) => void] {
       try {
         setBooks(JSON.parse(saved));
       } catch {
+        // Corrupted localStorage entry; clear it and fall back to empty
+        localStorage.removeItem(getStorageKey(address));
         setBooks([]);
       }
     }

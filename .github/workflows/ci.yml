@@ -81,6 +81,26 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm vitest run --coverage
 
+  sdk:
+    name: SDK Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: sdk/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+
   web-e2e:
     name: Web E2E Tests
     runs-on: ubuntu-latest
@@ -171,20 +191,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      # TODO: Remove continue-on-error before mainnet. Security scans must hard-fail in production.
       - name: Scan validator dependencies
-        continue-on-error: true
         run: |
           pip install pip-audit
           pip install -e validator/.[dev]
           pip-audit --strict --desc
       - name: Scan miner dependencies
-        continue-on-error: true
         run: |
           pip install -e miner/.[dev]
           pip-audit --strict --desc
       - name: Scan web dependencies
-        continue-on-error: true
         working-directory: web
         run: |
           pnpm install --frozen-lockfile

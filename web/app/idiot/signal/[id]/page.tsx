@@ -68,7 +68,11 @@ function loadPendingPurchase(): PendingPurchase | null {
       return null;
     }
     return parsed;
-  } catch { return null; }
+  } catch {
+    // Corrupted localStorage entry; clear it and return default
+    try { localStorage.removeItem(PURCHASE_STATE_KEY); } catch { /* SSR */ }
+    return null;
+  }
 }
 
 function clearPendingPurchase() {

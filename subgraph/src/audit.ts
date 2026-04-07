@@ -96,6 +96,31 @@ function ensureIdiot(address: Bytes, timestamp: BigInt): Idiot {
   return idiot;
 }
 
+function getOrCreateAccount(
+  geniusAddr: Bytes,
+  idiotAddr: Bytes,
+  timestamp: BigInt
+): Account {
+  let id = accountId(geniusAddr, idiotAddr);
+  let acct = Account.load(id);
+  if (acct == null) {
+    acct = new Account(id);
+    acct.genius = geniusAddr.toHexString();
+    acct.idiot = idiotAddr.toHexString();
+    acct.currentCycle = BigInt.zero();
+    acct.signalCount = BigInt.zero();
+    acct.qualityScore = BigInt.zero();
+    acct.settled = false;
+    acct.createdAt = timestamp;
+
+    let genius = ensureGenius(geniusAddr, timestamp);
+    genius.save();
+    let idiot = ensureIdiot(idiotAddr, timestamp);
+    idiot.save();
+  }
+  return acct;
+}
+
 export function handleAuditSettled(event: AuditSettled): void {
   let id = auditResultId(
     event.params.genius,
@@ -130,14 +155,15 @@ export function handleAuditSettled(event: AuditSettled): void {
   let idiot = ensureIdiot(event.params.idiot, event.block.timestamp);
   idiot.save();
 
-  // Update Account entity
-  let acctId = accountId(event.params.genius, event.params.idiot);
-  let account = Account.load(acctId);
-  if (account != null) {
-    account.qualityScore = event.params.qualityScore;
-    account.settled = true;
-    account.save();
-  }
+  // Update Account entity (create if missing, e.g. if purchase event was missed)
+  let account = getOrCreateAccount(
+    event.params.genius,
+    event.params.idiot,
+    event.block.timestamp
+  );
+  account.qualityScore = event.params.qualityScore;
+  account.settled = true;
+  account.save();
 
   // Update protocol stats
   let stats = getOrCreateProtocolStats();
@@ -182,14 +208,15 @@ export function handleEarlyExitSettled(event: EarlyExitSettled): void {
   let idiot = ensureIdiot(event.params.idiot, event.block.timestamp);
   idiot.save();
 
-  // Update Account entity
-  let acctId = accountId(event.params.genius, event.params.idiot);
-  let account = Account.load(acctId);
-  if (account != null) {
-    account.qualityScore = event.params.qualityScore;
-    account.settled = true;
-    account.save();
-  }
+  // Update Account entity (create if missing, e.g. if purchase event was missed)
+  let account = getOrCreateAccount(
+    event.params.genius,
+    event.params.idiot,
+    event.block.timestamp
+  );
+  account.qualityScore = event.params.qualityScore;
+  account.settled = true;
+  account.save();
 
   // Update protocol stats
   let stats = getOrCreateProtocolStats();

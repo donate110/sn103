@@ -674,7 +674,7 @@ export default function CreateSignal() {
       setStep("success");
       triggerOnboardingRefresh();
       // Flag so the genius dashboard does a cache-busting refresh on mount
-      try { sessionStorage.setItem("djinn_signal_just_created", "1"); } catch {}
+      try { sessionStorage.setItem("djinn_signal_just_created", "1"); } catch { /* sessionStorage unavailable in private browsing */ }
     } catch (err) {
       const { humanizeError } = await import("@/lib/hooks");
       const msg = humanizeError(err, "Signal creation failed");

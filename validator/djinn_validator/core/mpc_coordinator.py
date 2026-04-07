@@ -105,6 +105,23 @@ class MPCCoordinator:
         # threading.Lock is safe to use from both sync and async callers.
         self._lock = threading.Lock()
 
+    def _sweep_expired(self) -> int:
+        """Remove all sessions older than SESSION_TTL. Must be called with _lock held.
+
+        Returns the number of sessions evicted.
+        """
+        now = time.monotonic()
+        expired = [
+            sid for sid, s in self._sessions.items()
+            if now - s.created_at > self.SESSION_TTL
+        ]
+        for sid in expired:
+            self._sessions[sid].status = SessionStatus.EXPIRED
+            del self._sessions[sid]
+        if expired:
+            log.info("mpc_sessions_swept", count=len(expired))
+        return len(expired)
+
     def create_session(
         self,
         signal_id: str,
@@ -222,6 +239,7 @@ class MPCCoordinator:
         )
 
         with self._lock:
+            self._sweep_expired()
             if len(self._sessions) >= self.MAX_SESSIONS:
                 self._evict_one_locked()
             self._sessions[session_id] = session

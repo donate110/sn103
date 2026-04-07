@@ -6,12 +6,18 @@
 
 /** Convert American odds to decimal */
 function americanToDecimal(american: number): number {
+  if (american === 0) {
+    throw new Error("American odds of 0 are invalid");
+  }
   if (american > 0) return american / 100 + 1;
   return 100 / Math.abs(american) + 1;
 }
 
 /** Convert decimal odds to American */
 function decimalToAmerican(decimal: number): number {
+  if (decimal === 1.0) {
+    throw new Error("Decimal odds of 1.0 are invalid (implies zero profit)");
+  }
   if (decimal >= 2.0) return Math.round((decimal - 1) * 100);
   return Math.round(-100 / (decimal - 1));
 }

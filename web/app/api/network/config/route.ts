@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ADDRESSES } from "@/lib/contracts";
+import { discoverMetagraph, isPublicIp } from "@/lib/bt-metagraph";
 
 /**
  * GET /api/network/config
@@ -11,19 +12,48 @@ import { ADDRESSES } from "@/lib/contracts";
  * No authentication required.
  */
 
-// Known Djinn validators on Bittensor Subnet 103
-const VALIDATORS = [
-  { uid: 2, name: "Yuma", endpoint: "http://34.58.165.14:8421" },
-  { uid: 41, name: "Djinn", endpoint: "http://37.60.251.252:8421" },
-  { uid: 189, name: "Kooltek68", endpoint: "http://161.97.150.248:8421" },
-  { uid: 213, name: "TAO.com", endpoint: "http://3.150.72.96:8421" },
+// Fallback validators when metagraph discovery is unavailable.
+// Override via VALIDATOR_ENDPOINTS env var (comma-separated "uid:name:endpoint").
+const DEFAULT_VALIDATOR_ENDPOINTS = [
+  "2:Yuma:http://34.58.165.14:8421",
+  "41:Djinn:http://37.60.251.252:8421",
+  "189:Kooltek68:http://161.97.150.248:8421",
+  "213:TAO.com:http://3.150.72.96:8421",
 ];
+
+function parseFallbackValidators(): { uid: number; name: string; endpoint: string }[] {
+  const raw = process.env.VALIDATOR_ENDPOINTS;
+  const entries = raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : DEFAULT_VALIDATOR_ENDPOINTS;
+  return entries.map((entry) => {
+    const [uid, name, ...rest] = entry.split(":");
+    return { uid: parseInt(uid, 10), name, endpoint: rest.join(":") };
+  });
+}
+
+async function discoverValidators(): Promise<{ uid: number; name: string; endpoint: string }[]> {
+  try {
+    const { nodes } = await discoverMetagraph();
+    const validators = nodes
+      .filter((n) => n.isValidator && n.port > 0 && isPublicIp(n.ip))
+      .sort((a, b) => (b.totalStake > a.totalStake ? 1 : b.totalStake < a.totalStake ? -1 : 0));
+    if (validators.length > 0) {
+      return validators.map((v) => ({
+        uid: v.uid,
+        name: `UID ${v.uid}`,
+        endpoint: `http://${v.ip}:${v.port}`,
+      }));
+    }
+  } catch (err) {
+    console.warn("[network/config] Metagraph discovery failed, using fallback:", err);
+  }
+  return parseFallbackValidators();
+}
 
 // Cache for 5 minutes
 let cachedConfig: { data: unknown; expiresAt: number } | null = null;
 const CACHE_TTL = 5 * 60 * 1000;
 
-async function fetchValidatorIdentity(v: (typeof VALIDATORS)[number]) {
+async function fetchValidatorIdentity(v: { uid: number; name: string; endpoint: string }) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -51,8 +81,11 @@ export async function GET() {
     });
   }
 
+  // Discover validators from metagraph (falls back to env/hardcoded list)
+  const validators = await discoverValidators();
+
   // Fetch validator identities in parallel
-  const results = await Promise.all(VALIDATORS.map(fetchValidatorIdentity));
+  const results = await Promise.all(validators.map(fetchValidatorIdentity));
 
   const config = {
     validators: results

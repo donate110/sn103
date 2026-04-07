@@ -70,11 +70,11 @@ export default function IdiotDashboard() {
       .then((blob) => {
         const state = blob ? "prompting" : "none";
         setRecoveryState(state);
-        try { sessionStorage.setItem(cacheKey, state); } catch {}
+        try { sessionStorage.setItem(cacheKey, state); } catch { /* sessionStorage unavailable in private browsing */ }
       })
       .catch(() => {
         setRecoveryState("none");
-        try { sessionStorage.setItem(cacheKey, "none"); } catch {}
+        try { sessionStorage.setItem(cacheKey, "none"); } catch { /* sessionStorage unavailable in private browsing */ }
       });
   }, [address, purchasesLoading, localPurchaseCount, recoveryState]);
 

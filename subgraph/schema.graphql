@@ -185,7 +185,11 @@ type Account @entity {
   currentCycle: BigInt!
   "Number of signals in the current cycle"
   signalCount: BigInt!
-  "Quality score for the current cycle (from Account contract)"
+  """
+  Quality score for the current cycle.
+  Maps to the contract's outcomeBalance struct field (renamed in DEV-026),
+  but uses the event parameter name qualityScore for ABI compatibility.
+  """
   qualityScore: BigInt!
   "Whether the current cycle has been settled"
   settled: Boolean!
@@ -210,7 +214,11 @@ type AuditResult @entity {
   account: Account!
   "Audit cycle number"
   cycle: BigInt!
-  "Quality Score computed for this cycle"
+  """
+  Quality Score computed for this cycle.
+  Maps to the contract's outcomeBalance struct field (renamed in DEV-026),
+  but uses the event parameter name qualityScore for ABI compatibility.
+  """
   qualityScore: BigInt!
   "Tranche A: USDC refunded to Idiot"
   trancheA: BigInt!

@@ -77,6 +77,10 @@ export async function encryptSignal(config: SignalConfig): Promise<EncryptedSign
     throw new Error("Need at least 1 decoy");
   }
 
+  if (shamirK > validators.length) {
+    throw new Error(`shamirK (${shamirK}) exceeds validator count (${validators.length})`);
+  }
+
   // Place the real pick at a random position among all lines
   const lines: Record<string, unknown>[] = [...decoys];
   const realIndex = Math.floor(Math.random() * (lines.length + 1)); // 0-indexed, any position including end

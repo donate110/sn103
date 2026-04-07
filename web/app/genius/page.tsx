@@ -31,7 +31,7 @@ export default function GeniusDashboard() {
         sessionStorage.removeItem("djinn_signal_just_created");
         forceRefreshSignals();
       }
-    } catch {}
+    } catch { /* sessionStorage unavailable in private browsing */ }
   }, [forceRefreshSignals]);
   const { data: walletClient } = useWalletClient();
 
