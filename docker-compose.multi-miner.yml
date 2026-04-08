@@ -1,0 +1,342 @@
+# Multi-Miner Setup with Shared Odds Cache
+#
+# Architecture:
+#   - Redis: shared cache for odds data
+#   - Broadcaster: single process fetching from The Odds API every 15s
+#   - Miners: 20 instances with unique ports consuming from Redis (zero API calls)
+#
+# API Usage: ~4 calls/minute (1 per sport every 15s) vs ~80 calls/minute without sharing
+#
+# Usage:
+#   docker compose -f docker-compose.multi-miner.yml up -d
+#   docker compose -f docker-compose.multi-miner.yml logs -f broadcaster
+#   docker compose -f docker-compose.multi-miner.yml up -d miner01 miner02  # Start specific miners
+
+x-miner-common: &miner-common
+  build:
+    context: ./miner
+    dockerfile: Dockerfile
+  env_file:
+    - ./miner/.env
+  environment: &miner-env
+    BT_NETUID: 103
+    BT_NETWORK: finney
+    BT_WALLET_NAME: ${BT_WALLET_NAME:-sn78_21}
+    API_HOST: 0.0.0.0
+    SPORTS_DATA_PROVIDER: djinn_miner.data.redis_provider.RedisOddsProvider
+    REDIS_URL: redis://redis:6379
+    ODDS_L1_TTL: 5
+    ODDS_FALLBACK_API: "false"
+    LOG_FORMAT: json
+    CORS_ORIGINS: "https://app.djinn.com,https://staging.djinn.com"
+  volumes:
+    # Mount wallet directory (bittensor needs write access)
+    - /home/ubuntu/.bittensor:/root/.bittensor
+  user: root  # Required for bittensor to access mounted wallet
+  depends_on:
+    redis:
+      condition: service_healthy
+    broadcaster:
+      condition: service_started
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8422/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 15s
+  restart: unless-stopped
+  networks:
+    - miner-net
+  deploy:
+    resources:
+      limits:
+        memory: 2G
+        cpus: "1.0"
+
+services:
+  redis:
+    image: redis:7-alpine
+    # No host port needed - miners access via docker network (redis://redis:6379)
+    # Uncomment below if you need external access for debugging:
+    # ports:
+    #   - "127.0.0.1:6380:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - miner-net
+
+  broadcaster:
+    build:
+      context: ./miner
+      dockerfile: Dockerfile
+    command: python -m djinn_miner.data.odds_broadcaster
+    env_file:
+      - ./miner/.env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - BROADCAST_INTERVAL=15
+      - ACTIVE_SPORTS=basketball_nba,football_nfl,baseball_mlb,hockey_nhl
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - miner-net
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Miners 01-20 — each with unique host ports (API: 15601-15620, Notary: 7041-7060)
+  # ─────────────────────────────────────────────────────────────────────────
+
+  miner01:
+    <<: *miner-common
+    ports:
+      - "15601:8422"
+      - "7041:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h01
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15601
+
+  miner02:
+    <<: *miner-common
+    ports:
+      - "15602:8422"
+      - "7042:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h02
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15602
+
+  miner03:
+    <<: *miner-common
+    ports:
+      - "15603:8422"
+      - "7043:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h03
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15603
+
+  miner04:
+    <<: *miner-common
+    ports:
+      - "15604:8422"
+      - "7044:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h04
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15604
+
+  miner05:
+    <<: *miner-common
+    ports:
+      - "15605:8422"
+      - "7045:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h05
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15605
+
+  miner06:
+    <<: *miner-common
+    ports:
+      - "15606:8422"
+      - "7046:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h06
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15606
+
+  miner07:
+    <<: *miner-common
+    ports:
+      - "15607:8422"
+      - "7047:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h07
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15607
+
+  miner08:
+    <<: *miner-common
+    ports:
+      - "15608:8422"
+      - "7048:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h08
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15608
+
+  miner09:
+    <<: *miner-common
+    ports:
+      - "15609:8422"
+      - "7049:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h09
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15609
+
+  miner10:
+    <<: *miner-common
+    ports:
+      - "15610:8422"
+      - "7050:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h10
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15610
+
+  miner11:
+    <<: *miner-common
+    ports:
+      - "15611:8422"
+      - "7051:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h11
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15611
+
+  miner12:
+    <<: *miner-common
+    ports:
+      - "15612:8422"
+      - "7052:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h12
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15612
+
+  miner13:
+    <<: *miner-common
+    ports:
+      - "15613:8422"
+      - "7053:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h13
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15613
+
+  miner14:
+    <<: *miner-common
+    ports:
+      - "15614:8422"
+      - "7054:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h14
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15614
+
+  miner15:
+    <<: *miner-common
+    ports:
+      - "15615:8422"
+      - "7055:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h15
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15615
+
+  miner16:
+    <<: *miner-common
+    ports:
+      - "15616:8422"
+      - "7056:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h16
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15616
+
+  miner17:
+    <<: *miner-common
+    ports:
+      - "15617:8422"
+      - "7057:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h17
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15617
+
+  miner18:
+    <<: *miner-common
+    ports:
+      - "15618:8422"
+      - "7058:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h18
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15618
+
+  miner19:
+    <<: *miner-common
+    ports:
+      - "15619:8422"
+      - "7059:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h19
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15619
+
+  miner20:
+    <<: *miner-common
+    ports:
+      - "15620:8422"
+      - "7060:7047"
+    environment:
+      <<: *miner-env
+      BT_WALLET_HOTKEY: h20
+      API_PORT: 8422
+      NOTARY_PORT: 7047
+      EXTERNAL_PORT: 15620
+
+networks:
+  miner-net:
+    driver: bridge

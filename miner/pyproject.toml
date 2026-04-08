@@ -13,6 +13,7 @@ dependencies = [
     "structlog>=24.1,<26",
     "prometheus-client>=0.21.0,<1",
     "websockets>=13.0,<15",
+    "redis>=5.0.0,<6",
 ]
 
 [dependency-groups]

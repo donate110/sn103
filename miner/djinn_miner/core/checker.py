@@ -142,8 +142,9 @@ class LineChecker:
             else:
                 raise
 
-        # Filter out events where the game has already started.
-        # This prevents geniuses from creating signals with expired lines.
+        # Filter out events where the game completed long ago.
+        # In-progress games still have live odds, so we keep them.
+        # Only filter games that started more than 4 hours ago (likely completed).
         now = datetime.now(timezone.utc)
         filtered_events = []
         for ev in events:
@@ -151,8 +152,10 @@ class LineChecker:
             if ct:
                 try:
                     game_start = datetime.fromisoformat(ct.replace("Z", "+00:00"))
-                    if game_start <= now:
-                        continue  # Game already started — skip
+                    # Allow games that started within the last 4 hours (in-progress)
+                    hours_since_start = (now - game_start).total_seconds() / 3600
+                    if hours_since_start > 4:
+                        continue  # Game likely completed — skip
                 except (ValueError, TypeError):
                     pass
             filtered_events.append(ev)

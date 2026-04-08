@@ -7,11 +7,10 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc g++ curl && \
     rm -rf /var/lib/apt/lists/*
 
+# Copy source code and install
 COPY pyproject.toml .
+COPY djinn_miner/ ./djinn_miner/
 RUN pip install --no-cache-dir .
-
-COPY . .
-RUN pip install --no-cache-dir -e .
 
 # --- Runtime stage ---
 FROM python:3.12-slim
