@@ -34,8 +34,11 @@ const ALLOWED_SPORTS = new Set([
 ]);
 const ALLOWED_MARKETS = new Set(["spreads", "totals", "h2h"]);
 const CACHE_TTL_SECONDS = 60;
+const STALE_TTL_SECONDS = 300; // Serve stale data for up to 5 min while revalidating
 
-let cachedData: Map<string, { data: unknown; expiresAt: number }> = new Map();
+let cachedData: Map<string, { data: unknown; expiresAt: number; staleAt: number }> = new Map();
+// Track in-flight background revalidations to avoid duplicate fetches
+const revalidating: Set<string> = new Set();
 
 // Simple sliding-window rate limiter per IP
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
@@ -75,7 +78,7 @@ function isRateLimited(ip: string): boolean {
 function evictStale() {
   const now = Date.now();
   for (const [key, entry] of cachedData) {
-    if (entry.expiresAt <= now) cachedData.delete(key);
+    if (entry.staleAt <= now) cachedData.delete(key);
   }
   if (cachedData.size > 50) {
     const keys = [...cachedData.keys()];
@@ -125,44 +128,71 @@ export async function GET(request: NextRequest) {
   const cacheKey = `${sport}:${markets}`;
   evictStale();
   const cached = cachedData.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return NextResponse.json(cached.data);
-  }
+  const now = Date.now();
 
-  try {
-    const url = new URL(`/v4/sports/${sport}/odds`, ODDS_API_BASE);
-    url.searchParams.set("apiKey", apiKey);
-    url.searchParams.set("regions", "us");
-    url.searchParams.set("markets", markets);
-    url.searchParams.set("oddsFormat", "decimal");
-    // Only fetch upcoming games — live/started games can't be used for signals
-    // The Odds API rejects milliseconds in ISO dates (422), so strip them
-    url.searchParams.set("commenceTimeFrom", new Date().toISOString().replace(/\.\d{3}Z$/, "Z"));
-
-    const resp = await fetch(url.toString(), {
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => "");
-      console.error(`[odds-api] ${resp.status} ${resp.statusText}: ${body.slice(0, 200)}`);
-      return NextResponse.json(
-        { error: `Odds provider returned an error (${resp.status})` },
-        { status: 502 },
-      );
+  if (cached) {
+    if (cached.expiresAt > now) {
+      // Fresh cache hit
+      return NextResponse.json(cached.data);
     }
-
-    const data = await resp.json();
-    cachedData.set(cacheKey, {
-      data,
-      expiresAt: Date.now() + CACHE_TTL_SECONDS * 1000,
-    });
-
-    return NextResponse.json(data);
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to fetch odds from provider" },
-      { status: 502 },
-    );
+    if (cached.staleAt > now) {
+      // Stale but usable: serve immediately and revalidate in background.
+      // This prevents 502s when The Odds API is slow during hourly refreshes.
+      if (!revalidating.has(cacheKey)) {
+        revalidating.add(cacheKey);
+        fetchOdds(apiKey, sport, markets, cacheKey).finally(() =>
+          revalidating.delete(cacheKey),
+        );
+      }
+      return NextResponse.json(cached.data);
+    }
   }
+
+  // No cache or fully expired: fetch synchronously
+  try {
+    const data = await fetchOdds(apiKey, sport, markets, cacheKey);
+    return NextResponse.json(data);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Failed to fetch odds from provider";
+    return NextResponse.json({ error: msg }, { status: 502 });
+  }
+}
+
+async function fetchOdds(
+  apiKey: string,
+  sport: string,
+  markets: string,
+  cacheKey: string,
+): Promise<unknown> {
+  const url = new URL(`/v4/sports/${sport}/odds`, ODDS_API_BASE);
+  url.searchParams.set("apiKey", apiKey);
+  url.searchParams.set("regions", "us");
+  url.searchParams.set("markets", markets);
+  url.searchParams.set("oddsFormat", "decimal");
+  // Only fetch upcoming games; The Odds API rejects milliseconds (422)
+  url.searchParams.set(
+    "commenceTimeFrom",
+    new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+  );
+
+  const resp = await fetch(url.toString(), {
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    console.error(
+      `[odds-api] ${resp.status} ${resp.statusText}: ${body.slice(0, 200)}`,
+    );
+    throw new Error(`Odds provider returned an error (${resp.status})`);
+  }
+
+  const data = await resp.json();
+  const now = Date.now();
+  cachedData.set(cacheKey, {
+    data,
+    expiresAt: now + CACHE_TTL_SECONDS * 1000,
+    staleAt: now + STALE_TTL_SECONDS * 1000,
+  });
+  return data;
 }

@@ -102,8 +102,9 @@ async def epoch_loop(
 
     while True:
         try:
-            # Sync metagraph (with 30s timeout to prevent hanging)
-            neuron.sync_metagraph(timeout=30.0)
+            # Sync metagraph in a thread so the blocking future.result()
+            # call inside sync_metagraph doesn't stall in-flight attestations
+            await asyncio.to_thread(neuron.sync_metagraph, timeout=30.0)
 
             # Health-check all miners by pinging their axon /health endpoint
             miner_uids = neuron.get_miner_uids()
@@ -406,7 +407,9 @@ async def epoch_loop(
             if audit_set_store:
                 ready_sets = audit_set_store.get_ready_sets()
                 for audit_set in ready_sets:
-                    result = batch_settle_audit_set(audit_set, share_store, threshold=shares_threshold)
+                    result = await asyncio.to_thread(
+                        batch_settle_audit_set, audit_set, share_store, threshold=shares_threshold,
+                    )
                     if result is None:
                         continue
                     # Phase 3: Submit aggregate quality score vote on-chain
@@ -472,7 +475,7 @@ async def epoch_loop(
                 weights, breakdowns = scorer.compute_weights_detailed(is_active)
                 weights = neuron.apply_burn(weights or {}, burn_fraction)
                 n_miners = len(weights) - 1  # exclude UID 0 burn entry
-                success = neuron.set_weights(weights)
+                success = await asyncio.to_thread(neuron.set_weights, weights)
                 if success:
                     neuron.record_weight_set()
                     # All miners by weight (excluding UID 0 burn)
