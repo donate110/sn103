@@ -116,7 +116,7 @@ class ProactiveAttester:
 
         # Use the main sidecar directly (it supports concurrent sessions).
         # Ephemeral notaries are slow to spawn (~30s overhead).
-        notary_port = self._notary_port or int(os.getenv("NOTARY_PORT", "8091"))
+        notary_port = self._notary_port or int(os.getenv("NOTARY_PORT", "7047"))
         ephemeral_proc = None
 
         try:

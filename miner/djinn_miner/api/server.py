@@ -70,6 +70,10 @@ def create_app(
 
     app = FastAPI(title="Djinn Miner", version=__version__)
 
+    # Expose sidecar reference so proof.py can restart it on MPC failures.
+    import djinn_miner.api.server as _self_mod
+    _self_mod._notary_sidecar_ref = notary_sidecar
+
     _attest_sem = asyncio.Semaphore(_ATTEST_MAX_CONCURRENT)
 
     # Catch unhandled exceptions — never leak stack traces to clients
@@ -510,7 +514,7 @@ def create_app(
                 )
             else:
                 # No peer assigned: use local sidecar directly.
-                _local_notary_port = int(os.getenv("NOTARY_PORT", "8091"))
+                _local_notary_port = int(os.getenv("NOTARY_PORT", "7047"))
                 try:
                     result = await asyncio.wait_for(
                         tlsn_module.generate_proof(
@@ -527,7 +531,7 @@ def create_app(
             # If the first attempt failed (peer timeout or sidecar error),
             # restart the sidecar (clears stale MPC state) and retry.
             if not result.success:
-                _local_notary_port = int(os.getenv("NOTARY_PORT", "8091"))
+                _local_notary_port = int(os.getenv("NOTARY_PORT", "7047"))
                 log.info(
                     "attest_fallback_to_local_sidecar",
                     url=request.url,
