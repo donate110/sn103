@@ -78,10 +78,10 @@ class TestUpdateFirewall:
         mock_run.return_value = MagicMock(returncode=0)
         result = update_firewall({"1.1.1.1", "2.2.2.2"}, 8422)
         assert result is True
-        # Should have called ufw allow for each IP
+        # Should have called ufw allow for each IP on both API and notary ports
         allow_calls = [c for c in mock_run.call_args_list
                        if "allow" in str(c) and "from" in str(c)]
-        assert len(allow_calls) == 2
+        assert len(allow_calls) == 4  # 2 IPs x 2 ports (API + notary)
 
     @patch("djinn_miner.utils.firewall._run")
     @patch("djinn_miner.utils.firewall._get_current_allowed_ips", return_value={"1.1.1.1", "9.9.9.9"})

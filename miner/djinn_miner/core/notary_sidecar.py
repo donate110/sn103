@@ -147,7 +147,10 @@ class NotarySidecar:
         if key_dir:
             os.makedirs(key_dir, mode=0o700, exist_ok=True)
 
-        bind_host = os.getenv("NOTARY_HOST", "127.0.0.1")
+        # Bind to 0.0.0.0 so peer miners can reach us for notarization.
+        # The miner API itself is separately bound (typically 0.0.0.0:port
+        # behind a firewall). NOTARY_HOST overrides for special setups.
+        bind_host = os.getenv("NOTARY_HOST", "0.0.0.0")
         cmd = [
             binary,
             "--port", str(self._port),

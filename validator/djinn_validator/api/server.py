@@ -1183,8 +1183,18 @@ def create_app(
             payload: dict = {"url": req.url, "request_id": req.request_id}
             if assigned_notary:
                 payload["notary_host"] = assigned_notary.ip
-                payload["notary_port"] = assigned_notary.port
-                payload["notary_ws"] = True
+                payload["notary_port"] = assigned_notary.notary_port
+                payload["notary_ws_port"] = assigned_notary.port
+                if neuron and neuron.wallet:
+                    try:
+                        from djinn_validator.api.middleware import create_notary_ticket
+                        payload["notary_ticket"] = create_notary_ticket(
+                            prover_uid=axon["uid"],
+                            notary_uid=assigned_notary.uid,
+                            wallet=neuron.wallet,
+                        )
+                    except Exception as _ticket_err:
+                        log.warning("attest_notary_ticket_failed", error=str(_ticket_err))
 
             _body = _json.dumps(payload).encode()
             _auth_hdrs: dict[str, str] = {}

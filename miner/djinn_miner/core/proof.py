@@ -260,31 +260,54 @@ class ProofGenerator:
         )
 
         if not result.success:
-            # Peer notary failed. Try an ephemeral local notary before
-            # falling back to http_attestation (which validators reject).
+            # Peer notary failed. Restart the local sidecar to clear stale
+            # MPC state ("connection is closed" errors), then retry locally
+            # before spawning an ephemeral process.
             log.warning(
-                "tlsn_proof_failed_trying_ephemeral",
+                "tlsn_proof_failed_trying_sidecar_restart",
                 query_id=session.query_id,
                 error=result.error,
             )
-            spawned = await self._spawn_ephemeral_notary()
-            if spawned is not None:
-                eph_proc, eph_port = spawned
-                try:
+            try:
+                from djinn_miner.core.notary_sidecar import NotarySidecar
+                import djinn_miner.api.server as _srv_mod
+                _sidecar = getattr(_srv_mod, "_notary_sidecar_ref", None)
+                if _sidecar and _sidecar.enabled:
+                    await _sidecar.stop()
+                    await _sidecar.start()
+                    await asyncio.sleep(1)
+                    _local_port = _sidecar._port
                     result = await tlsn_module.generate_proof(
                         url,
                         notary_host="127.0.0.1",
-                        notary_port=eph_port,
+                        notary_port=_local_port,
                         timeout=150.0,
                     )
                     if result.success:
-                        log.info("tlsn_proof_ephemeral_succeeded", query_id=session.query_id)
-                finally:
-                    eph_proc.kill()
+                        log.info("tlsn_proof_sidecar_restart_succeeded", query_id=session.query_id)
+            except Exception as exc:
+                log.warning("tlsn_proof_sidecar_restart_failed", error=str(exc))
+
+            if not result.success:
+                # Sidecar restart didn't help. Last resort: ephemeral notary.
+                spawned = await self._spawn_ephemeral_notary()
+                if spawned is not None:
+                    eph_proc, eph_port = spawned
                     try:
-                        await eph_proc.wait()
-                    except Exception:
-                        pass
+                        result = await tlsn_module.generate_proof(
+                            url,
+                            notary_host="127.0.0.1",
+                            notary_port=eph_port,
+                            timeout=150.0,
+                        )
+                        if result.success:
+                            log.info("tlsn_proof_ephemeral_succeeded", query_id=session.query_id)
+                    finally:
+                        eph_proc.kill()
+                        try:
+                            await eph_proc.wait()
+                        except Exception:
+                            pass
 
             if not result.success:
                 return None

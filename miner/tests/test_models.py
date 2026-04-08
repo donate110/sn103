@@ -44,7 +44,7 @@ class TestCandidateLine:
     def test_index_too_high(self) -> None:
         with pytest.raises(ValidationError, match="index"):
             CandidateLine(
-                index=11,
+                index=2001,
                 sport="basketball_nba",
                 event_id="ev-1",
                 home_team="Lakers",
@@ -102,7 +102,7 @@ class TestCheckRequest:
             side="Lakers",
         )
         with pytest.raises(ValidationError, match="lines"):
-            CheckRequest(lines=[line] * 11)
+            CheckRequest(lines=[line] * 2001)
 
 
 class TestProofRequest:

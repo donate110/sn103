@@ -176,7 +176,7 @@ def update_firewall(validator_ips: set[str], api_port: int) -> bool:
     api_added, api_removed = _manage_port(validator_ips, api_port, UFW_TAG)
 
     # Manage notary sidecar port (peer miners connect here for notarization)
-    notary_port = int(os.getenv("NOTARY_PORT", "8091"))
+    notary_port = int(os.getenv("NOTARY_PORT", "7047"))
     notary_added, notary_removed = _manage_port(validator_ips, notary_port, "djinn-notary")
 
     # Enable (idempotent, --force skips interactive prompt)
