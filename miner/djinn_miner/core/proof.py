@@ -22,6 +22,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -34,6 +35,9 @@ from djinn_miner.api.models import ProofResponse
 from djinn_miner.core import tlsn as tlsn_module
 
 log = structlog.get_logger()
+
+# Redis session sharing key prefix (must match broadcaster)
+SESSION_PREFIX = "djinn:sessions:"
 
 
 @dataclass
@@ -118,16 +122,66 @@ class ProofGenerator:
     """Generates proofs from captured HTTP sessions.
 
     Tries TLSNotary first (Rust binary), falls back to HTTP attestation.
+    
+    In multi-miner mode with a broadcaster, sessions are stored in Redis.
+    The generator checks Redis when the local session cache misses.
     """
 
-    def __init__(self, session_capture: SessionCapture | None = None) -> None:
+    def __init__(
+        self,
+        session_capture: SessionCapture | None = None,
+        redis_url: str | None = None,
+    ) -> None:
         self._capture = session_capture or SessionCapture()
         self._generated_count = 0
         self._tlsn_available = tlsn_module.is_available()
+        self._redis_url = redis_url or os.getenv("REDIS_URL", "")
+        self._redis: Any = None  # Lazy init
         if self._tlsn_available:
             log.info("tlsn_prover_available")
         else:
             log.info("tlsn_prover_not_found_using_http_attestation")
+
+    async def _get_redis(self) -> Any:
+        """Lazily initialize Redis connection."""
+        if self._redis is None and self._redis_url:
+            import redis.asyncio as redis_lib
+            self._redis = redis_lib.from_url(self._redis_url, decode_responses=True)
+        return self._redis
+
+    async def _get_session_from_redis(self, query_id: str) -> CapturedSession | None:
+        """Fetch a session from Redis (stored by broadcaster).
+        
+        Returns None if Redis is not configured or session not found.
+        """
+        if not self._redis_url:
+            return None
+        try:
+            r = await self._get_redis()
+            if r is None:
+                return None
+            session_key = f"{SESSION_PREFIX}{query_id}"
+            raw = await r.get(session_key)
+            if not raw:
+                log.debug("redis_session_miss", query_id=query_id)
+                return None
+            data = json.loads(raw)
+            # Decode base64 response body
+            response_body = base64.b64decode(data.get("response_body_b64", ""))
+            session = CapturedSession(
+                query_id=data["query_id"],
+                request_url=data["request_url"],
+                request_params=data.get("request_params", {}),
+                response_status=data.get("response_status", 200),
+                response_body=response_body,
+                response_headers=data.get("response_headers", {}),
+                captured_at=data.get("captured_at", time.time()),
+            )
+            log.info("redis_session_hit", query_id=query_id, size=len(response_body))
+            return session
+        except Exception as e:
+            log.warning("redis_session_error", query_id=query_id, error=str(e))
+            return None
 
     @property
     def session_capture(self) -> SessionCapture:
@@ -161,8 +215,15 @@ class ProofGenerator:
         1. TLSNotary proof (if binary available, session exists, and notary assigned)
         2. HTTP attestation (if captured session exists)
         3. Basic hash proof (fallback)
+        
+        Sessions are checked in order: local cache -> Redis (broadcaster shared).
         """
+        # Check local cache first
         session = self._capture.get(query_id)
+        
+        # Fall back to Redis (broadcaster stores sessions there in multi-miner mode)
+        if session is None:
+            session = await self._get_session_from_redis(query_id)
 
         # Try TLSNotary first
         if self._tlsn_available and session is not None:

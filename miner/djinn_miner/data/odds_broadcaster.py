@@ -17,11 +17,13 @@ Environment:
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import signal
 import sys
 import time
+import uuid
 from typing import Any
 
 import httpx
@@ -37,8 +39,12 @@ log = structlog.get_logger()
 # Redis key prefixes
 CACHE_PREFIX = "djinn:odds:"
 HISTORICAL_PREFIX = "djinn:historical:"
+SESSION_PREFIX = "djinn:sessions:"  # Shared session capture for proofs
 PUBSUB_CHANNEL = "djinn:odds:updates"
 HEALTH_KEY = "djinn:odds:broadcaster:health"
+
+# Session TTL: 30 minutes (proof requests may come late in full-proof epochs)
+SESSION_TTL = 1800
 
 # Historical odds config
 HISTORICAL_LOOKBACK_HOURS = 36  # How far back to fetch historical data
@@ -98,7 +104,7 @@ class OddsBroadcaster:
         log.info("broadcaster_stopped", stats=self._stats)
 
     async def fetch_sport(self, sport: str) -> dict[str, Any] | None:
-        """Fetch odds for a single sport."""
+        """Fetch odds for a single sport and store session for proofs."""
         api_sport = SUPPORTED_SPORTS.get(sport, sport)
         url = f"{self._base_url}/v4/sports/{api_sport}/odds"
         params = {
@@ -124,11 +130,32 @@ class OddsBroadcaster:
                     api_remaining=remaining,
                     api_used=used,
                 )
+                
+                # Generate unique query_id matching OddsApiClient format
+                query_id = f"{api_sport}:spreads,totals,h2h:{uuid.uuid4().hex[:8]}"
+                
+                # Store session in Redis for proof generation
+                # Miners can retrieve this session when validator requests /v1/proof
+                session_data = {
+                    "query_id": query_id,
+                    "request_url": url,
+                    # Exclude apiKey from stored params
+                    "request_params": {k: v for k, v in params.items() if k != "apiKey"},
+                    "response_status": resp.status_code,
+                    # Base64 encode response body for JSON serialization
+                    "response_body_b64": base64.b64encode(resp.content).decode(),
+                    "response_headers": dict(resp.headers),
+                    "captured_at": time.time(),
+                }
+                session_key = f"{SESSION_PREFIX}{query_id}"
+                await self._redis.setex(session_key, SESSION_TTL, json.dumps(session_data))
+                log.debug("session_stored", query_id=query_id, key=session_key)
+                
                 return {
                     "sport": sport,
                     "events": data,
                     "fetched_at": time.time(),
-                    "query_id": f"{sport}:{int(time.time())}",
+                    "query_id": query_id,
                 }
             elif resp.status_code == 429:
                 log.warning("odds_api_rate_limited", sport=sport)

@@ -40,8 +40,8 @@ const COMMON_ENV = {
   ODDS_L1_TTL: '5',
   ODDS_FALLBACK_API: 'false',
   LOG_FORMAT: 'json',
-  // Limit concurrent attestations to prevent memory spikes
-  ATTEST_MAX_CONCURRENT: '2',
+  // Limit concurrent attestations - 5 is safe with 128GB RAM / 10 miners
+  ATTEST_MAX_CONCURRENT: '5',
   // CORS for production
   CORS_ORIGINS: 'https://app.djinn.com,https://staging.djinn.com',
 };
@@ -102,7 +102,7 @@ module.exports = {
         REDIS_URL: process.env.REDIS_URL || 'redis://localhost:6379',
         ODDS_API_KEY: process.env.ODDS_API_KEY,
         BROADCAST_INTERVAL: '30',  // 30s is sufficient; odds don't change faster
-        ACTIVE_SPORTS: 'basketball_nba,football_nfl,baseball_mlb,hockey_nhl',
+        ACTIVE_SPORTS: 'basketball_nba,americanfootball_nfl,baseball_mlb,icehockey_nhl',
         LOG_FORMAT: 'json',
       },
       instances: 1,
